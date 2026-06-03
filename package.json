@@ -1,0 +1,30 @@
+{
+  "name": "c8s-verify",
+  "version": "0.1.0",
+  "description": "Verify that a remote API is running in a C8s TEE-attested cluster, and establish a post-quantum over-encrypted channel to the attested Load Balancer.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "wasm",
+    "PROTOCOL.md",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "demo": "node demo/server.js",
+    "gen-fixtures": "bash demo/gen-fixtures.sh"
+  },
+  "dependencies": {
+    "mlkem-wasm": "^0.0.7"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

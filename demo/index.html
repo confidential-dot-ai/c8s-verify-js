@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>c8s-verify — attest the Load Balancer, then over-encrypt</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "mlkem-wasm": "/node_modules/mlkem-wasm/dist/mlkem.js"
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --bg: #0e1116; --panel: #171c24; --line: #262d38; --fg: #d8dee9;
+        --muted: #8b96a5; --ok: #3fb950; --bad: #f85149; --warn: #d29922;
+        --accent: #58a6ff; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--fg);
+        font: 15px/1.5 system-ui, sans-serif; padding: 32px 16px;
+      }
+      main { max-width: 860px; margin: 0 auto; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      p.lede { color: var(--muted); margin: 0 0 20px; }
+      .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+      button {
+        background: var(--accent); color: #06121f; border: 0; padding: 10px 18px;
+        border-radius: 7px; font-weight: 600; cursor: pointer; font-size: 15px;
+      }
+      button:disabled { opacity: .5; cursor: default; }
+      label.toggle { color: var(--muted); display: flex; gap: 6px; align-items: center; cursor: pointer; }
+      .step {
+        background: var(--panel); border: 1px solid var(--line); border-left-width: 4px;
+        border-radius: 8px; padding: 12px 14px; margin: 10px 0; transition: border-color .2s;
+      }
+      .step .row { display: flex; gap: 10px; align-items: baseline; }
+      .step .icon { font-size: 16px; width: 20px; text-align: center; }
+      .step .title { font-weight: 600; }
+      .step .detail { color: var(--muted); margin: 6px 0 0 30px; white-space: pre-wrap; font-family: var(--mono); font-size: 12.5px; }
+      .step.pending { border-left-color: var(--line); opacity: .55; }
+      .step.run { border-left-color: var(--accent); }
+      .step.ok { border-left-color: var(--ok); }
+      .step.bad { border-left-color: var(--bad); }
+      .step.warn { border-left-color: var(--warn); }
+      .badge { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+      code { color: var(--accent); }
+      footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>c8s-verify</h1>
+      <p class="lede">
+        Verify that this endpoint is a genuine TEE-attested C8s Load Balancer —
+        real AMD SEV-SNP evidence checked in your browser via WebAssembly — then
+        open a post-quantum (X25519 + ML-KEM-768) over-encrypted channel to its enclave.
+      </p>
+      <div class="controls">
+        <button id="run">Run verification</button>
+        <label class="toggle"><input type="checkbox" id="tamper" /> Tamper with evidence (expect failure)</label>
+      </div>
+      <div id="steps"></div>
+      <footer>
+        Mock LB serving recorded SNP evidence from <code>attestation-rs</code>.
+        See <a href="/PROTOCOL.md">PROTOCOL.md</a>. The signature, measurement, cert chain and
+        PQ channel are real; only the live <em>report_data</em> key-binding needs a real TEE LB.
+      </footer>
+    </main>
+    <script type="module" src="/demo/demo.js"></script>
+  </body>
+</html>
