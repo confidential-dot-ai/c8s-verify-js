@@ -14,13 +14,8 @@ import { generateNonce } from "./nonce.js";
 import { verifyAttestation } from "./verify.js";
 import { clientKeyAgreement } from "./keyagreement.js";
 import { Channel, requestAAD, responseAAD } from "./channel.js";
-import {
-  bytesToBase64Url,
-  bytesToBase64,
-  base64ToBytes,
-  bytesToUtf8,
-  utf8ToBytes,
-} from "./base64.js";
+import { cborEncode, cborDecode } from "./cbor.js";
+import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
 
 export { C8sVerifyError } from "./errors.js";
@@ -162,21 +157,21 @@ export class Session {
       method,
       path,
       headers: init.headers ?? {},
-      body_b64: bytesToBase64(bodyBytes),
+      body: bodyBytes,
     };
-    const reqRecord = await this.channel.seal(utf8ToBytes(JSON.stringify(envelope)), requestAAD());
+    const reqRecord = await this.channel.seal(cborEncode(envelope), requestAAD());
 
     const res = await this._fetch(`${this.baseUrl}${this.prefix}/tunnel`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-c8s-session": this.sessionId },
-      body: JSON.stringify(reqRecord),
+      headers: { "content-type": "application/cbor", "x-c8s-session": this.sessionId },
+      body: cborEncode(reqRecord),
     });
     if (!res.ok) {
       fail("channel_error", `over-encrypted request returned HTTP ${res.status}`);
     }
-    const respRecord = await res.json();
-    const respEnvelope = JSON.parse(bytesToUtf8(await this.channel.open(respRecord, responseAAD())));
-    const bytes = respEnvelope.body_b64 ? base64ToBytes(respEnvelope.body_b64) : new Uint8Array(0);
+    const respRecord = cborDecode(new Uint8Array(await res.arrayBuffer()));
+    const respEnvelope = cborDecode(await this.channel.open(respRecord, responseAAD()));
+    const bytes = respEnvelope.body ?? new Uint8Array(0);
     return {
       status: respEnvelope.status,
       headers: respEnvelope.headers ?? {},

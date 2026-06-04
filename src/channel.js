@@ -3,18 +3,14 @@
 // method+path so a record cannot be replayed against a different route.
 
 import { subtle, randomBytes } from "./crypto-env.js";
-import {
-  bytesToBase64Url,
-  base64UrlToBytes,
-  utf8ToBytes,
-  bytesToUtf8,
-} from "./base64.js";
+import { utf8ToBytes, bytesToUtf8 } from "./base64.js";
 import { C8sVerifyError } from "./errors.js";
 
 const IV_BYTES = 12;
 
 /**
- * @typedef {{ iv: string, ct: string }} WireRecord  // both base64url
+ * @typedef {{ iv: Uint8Array, ct: Uint8Array }} WireRecord
+ *   Raw AES-GCM record; the tunnel transport carries iv/ct as CBOR byte strings.
  */
 
 // The method and path are sealed inside the request envelope, so the record AAD
@@ -56,7 +52,7 @@ export class Channel {
       this.key,
       plaintext,
     );
-    return { iv: bytesToBase64Url(iv), ct: bytesToBase64Url(new Uint8Array(ct)) };
+    return { iv, ct: new Uint8Array(ct) };
   }
 
   /**
@@ -66,14 +62,10 @@ export class Channel {
    * @returns {Promise<Uint8Array>}
    */
   async open(record, aad) {
-    let iv, ct;
-    try {
-      iv = base64UrlToBytes(record.iv);
-      ct = base64UrlToBytes(record.ct);
-    } catch (e) {
-      throw new C8sVerifyError("channel_error", "malformed over-encryption record", {
-        cause: e,
-      });
+    const iv = record?.iv;
+    const ct = record?.ct;
+    if (!(iv instanceof Uint8Array) || !(ct instanceof Uint8Array)) {
+      throw new C8sVerifyError("channel_error", "malformed over-encryption record");
     }
     if (iv.length !== IV_BYTES) {
       throw new C8sVerifyError("channel_error", `record IV must be ${IV_BYTES} bytes`);

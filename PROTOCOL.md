@@ -140,20 +140,28 @@ Byte lengths (ML-KEM-768): encapsulation key 1184, ciphertext 1088, shared secre
 ## Over-encrypted application tunnel
 
 All application traffic flows through a single endpoint, **`POST /.well-known/c8s/tunnel`**,
-with header `X-C8s-Session: <session_id>`. The body is one AES-256-GCM record:
-`{ "iv": "<b64url 12B>", "ct": "<b64url>" }` (fresh random IV per record).
+with header `X-C8s-Session: <session_id>` and `Content-Type: application/cbor`. The body
+and the response are **CBOR** (RFC 8949), not JSON — so the body and the AES-GCM
+ciphertext ride as raw byte strings with no base64 inflation. The body is one
+AES-256-GCM record, a CBOR map with two byte-string fields (fresh random 12-byte IV per
+record):
+
+```cbor
+{ "iv": h'<12 bytes>', "ct": h'<ciphertext+tag>' }
+```
 
 The **entire request** is sealed — method, path, headers, and body — so a
 TLS-terminating proxy in front of the LB sees only ciphertext (not even the path or
-`Authorization` header). The sealed plaintext is a JSON envelope:
+`Authorization` header). The sealed plaintext is a CBOR envelope (`body` is a CBOR byte
+string; absent/empty when there is no body):
 
-```jsonc
+```cbor
 // request (AAD = "c8s-verify/v1/tunnel-request")
 { "method": "POST", "path": "/v1/chat", "headers": { "content-type": "application/json" },
-  "body_b64": "<std base64 of the body>" }
+  "body": h'<raw request body>' }
 
 // response (AAD = "c8s-verify/v1/tunnel-response")
-{ "status": 200, "headers": { ... }, "body_b64": "<std base64>" }
+{ "status": 200, "headers": { ... }, "body": h'<raw response body>' }
 ```
 
 **Termination + forwarding.** The LB (the `c8s cds-attest` sidecar) opens the record,

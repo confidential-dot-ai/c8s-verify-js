@@ -17,11 +17,10 @@ import {
   serverKeyAgreement,
 } from "../src/keyagreement.js";
 import { Channel, requestAAD, responseAAD } from "../src/channel.js";
+import { cborEncode, cborDecode } from "../src/cbor.js";
 import {
   bytesToBase64Url,
   base64UrlToBytes,
-  bytesToBase64,
-  base64ToBytes,
   utf8ToBytes,
   bytesToUtf8,
 } from "../src/base64.js";
@@ -61,10 +60,18 @@ function text(res, status, body, type = "text/plain") {
   res.writeHead(status, { "content-type": type });
   res.end(body);
 }
-async function readBody(req) {
+function cbor(res, status, obj) {
+  const body = Buffer.from(cborEncode(obj));
+  res.writeHead(status, { "content-type": "application/cbor", "content-length": body.length });
+  res.end(body);
+}
+async function readBodyBytes(req) {
   const chunks = [];
   for await (const c of req) chunks.push(c);
-  return Buffer.concat(chunks).toString("utf8");
+  return new Uint8Array(Buffer.concat(chunks));
+}
+async function readBody(req) {
+  return Buffer.from(await readBodyBytes(req)).toString("utf8");
 }
 
 const MIME = {
@@ -148,15 +155,20 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && p === "/.well-known/c8s/tunnel") {
       const channel = sessions.get(req.headers["x-c8s-session"]);
       if (!channel) return json(res, 401, { error: "channel_error", message: "no session" });
-      const record = JSON.parse(await readBody(req));
+      let record;
+      try {
+        record = cborDecode(await readBodyBytes(req));
+      } catch {
+        return json(res, 400, { error: "channel_error", message: "invalid record" });
+      }
       let plaintext;
       try {
         plaintext = await channel.open(record, requestAAD());
       } catch {
         return json(res, 400, { error: "channel_error", message: "decrypt failed" });
       }
-      const env = JSON.parse(bytesToUtf8(plaintext));
-      const body = env.body_b64 ? base64ToBytes(env.body_b64) : new Uint8Array(0);
+      const env = cborDecode(plaintext);
+      const body = env.body ?? new Uint8Array(0);
       const reply = utf8ToBytes(
         `LB enclave received ${body.length} bytes over the over-encrypted channel for ` +
           `${env.method} ${env.path}: ${JSON.stringify(bytesToUtf8(body))}`,
@@ -164,10 +176,10 @@ const server = createServer(async (req, res) => {
       const respEnv = {
         status: 200,
         headers: { "content-type": "text/plain; charset=utf-8" },
-        body_b64: bytesToBase64(reply),
+        body: reply,
       };
-      const out = await channel.seal(utf8ToBytes(JSON.stringify(respEnv)), responseAAD());
-      return json(res, 200, out);
+      const out = await channel.seal(cborEncode(respEnv), responseAAD());
+      return cbor(res, 200, out);
     }
 
     // Static demo assets (index.html, /src/*, /wasm/*, /node_modules/*).
