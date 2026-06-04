@@ -106,6 +106,26 @@ What is verified, and in what order: nonce echo → SEV-SNP signature + VCEK cha
 (freshness + key binding) → CDS cert chains to the pinned mesh CA. Any failure throws
 a typed `C8sVerifyError` and no channel is established (fail closed).
 
+### Lower-level: verifying bare evidence
+
+If you obtain SNP evidence through your own transport (e.g. a discovery document)
+rather than the `c8s-verify/v1` challenge-response bundle, use `verifyEvidence`.
+It runs the same hardware verification + measurement/platform checks, and — when
+you pass `expectedReportData` — the `report_data` binding, but requires no bundle,
+nonce, session key, or CDS certificate (do any cluster-identity / mesh-CA chaining
+yourself). The raw WASM entrypoint `verifySnp` is also exported for full control.
+
+```js
+import { verifyEvidence } from "c8s-verify";
+
+const r = await verifyEvidence(evidence /* { attestation_report, cert_chain:{ vcek } } */, {
+  generation: "genoa",                 // "milan" | "genoa" | "turin"
+  measurements: ["<expected hex SHA-384 launch digest>"],
+  expectedReportData,                  // optional Uint8Array; e.g. SHA-384(cert_spki ‖ challenge)
+});
+console.log(r.measurement, r.reportDataMatch, r.claims);
+```
+
 ## Demo
 
 A self-contained mock LB lets you run the whole flow offline:

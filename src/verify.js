@@ -177,3 +177,95 @@ export async function verifyAttestation(bundle, nonce, policy) {
     warnings,
   };
 }
+
+/**
+ * @typedef {{
+ *   generation: string,                 // "milan" | "genoa" | "turin"
+ *   measurements?: string[],            // accepted launch digests (hex sha-384); empty = warn only
+ *   expectedReportData?: Uint8Array,    // raw bytes report_data must equal (e.g. SHA-384(pubkey ‖ nonce));
+ *                                       //   when provided, a mismatch fails closed
+ *   platform?: string,                  // default "snp"
+ * }} VerifyEvidenceOptions
+ */
+
+/**
+ * Verify a bare SEV-SNP evidence object: the AMD hardware signature + VCEK chain
+ * (in WASM, bundled roots), the launch-measurement allowlist, the platform, and
+ * — when the caller supplies one — a `report_data` binding.
+ *
+ * Unlike {@link verifyAttestation}, this takes the raw `attestation-rs`
+ * `SnpEvidence` directly and needs no `c8s-verify/v1` bundle, client nonce,
+ * session key, or CDS certificate. Use it when you fetch evidence over your own
+ * transport and compute the `report_data` binding yourself (e.g. a discovery
+ * document binding `SHA-384(cert_spki ‖ challenge)`). Cluster identity
+ * (mesh-CA chaining) must then be checked separately. Fails closed with a typed
+ * {@link C8sVerifyError}.
+ *
+ * @param {object} evidence  attestation-rs SnpEvidence: { attestation_report, cert_chain: { vcek } }
+ * @param {VerifyEvidenceOptions} opts
+ * @returns {Promise<{ ok: true, platform: string, measurement: string,
+ *   reportVersion: number, reportDataMatch: boolean|null, claims: object, warnings: string[] }>}
+ */
+export async function verifyEvidence(evidence, opts) {
+  if (!evidence || typeof evidence !== "object") {
+    fail("invalid_request", "evidence object is required");
+  }
+  if (!opts || !opts.generation) {
+    fail("invalid_request", 'generation is required ("milan" | "genoa" | "turin")');
+  }
+  const warnings = [];
+  const wantPlatform = opts.platform ?? "snp";
+  const expected = opts.expectedReportData;
+
+  // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
+  let result;
+  try {
+    const out = await verifySnp(JSON.stringify(evidence), opts.generation, expected);
+    result = JSON.parse(out);
+  } catch (e) {
+    fail("verification_failed", `hardware attestation failed: ${e.message ?? e}`, { cause: e });
+  }
+
+  if (result.signature_valid !== true) {
+    fail("verification_failed", "attestation signature is not valid");
+  }
+  if (result.platform !== wantPlatform) {
+    fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
+  }
+
+  // Measurement allowlist (case-insensitive hex).
+  const measurement = String(result.claims.launch_digest).toLowerCase();
+  const allow = (opts.measurements ?? []).map((m) => m.toLowerCase());
+  if (allow.length === 0) {
+    warnings.push("no measurement allowlist provided — launch digest was not checked");
+  } else if (!allow.includes(measurement)) {
+    fail("measurement_denied", `launch digest ${measurement} is not in the allowlist`, {
+      details: { measurement, allowed: allow },
+    });
+  }
+
+  // report_data binding — only enforced when the caller supplies an expected value.
+  if (expected !== undefined) {
+    if (result.report_data_match !== true) {
+      fail(
+        "report_data_mismatch",
+        "report_data does not match the expected binding (stale or substituted evidence)",
+        { details: { expected: bytesToHex(expected), got: result.claims.report_data } },
+      );
+    }
+  } else {
+    warnings.push(
+      "no expectedReportData provided — report_data freshness/key binding was not verified",
+    );
+  }
+
+  return {
+    ok: true,
+    platform: result.platform,
+    measurement,
+    reportVersion: result.report_version,
+    reportDataMatch: result.report_data_match,
+    claims: result.claims,
+    warnings,
+  };
+}
