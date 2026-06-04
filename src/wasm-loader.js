@@ -3,6 +3,7 @@
 // since Node's fetch does not support file:// URLs). Initialised once and cached.
 
 import initWasm, { verify_snp } from "../wasm/attestation_wasm.js";
+import { toWasmEvidence } from "./hcl.js";
 
 const WASM_URL = new URL("../wasm/attestation_wasm_bg.wasm", import.meta.url);
 
@@ -37,7 +38,9 @@ export function initVerifier(input) {
 }
 
 /**
- * Call the SNP verifier. Initialises the module on first use.
+ * Call the SNP verifier. Initialises the module on first use. Accepts both
+ * bare SNP evidence and az-snp (Azure HCL-wrapped) evidence; the latter is
+ * unwrapped to the raw SNP report the WASM verifier understands.
  * @param {string} evidenceJson
  * @param {string} generation  "milan" | "genoa" | "turin"
  * @param {Uint8Array} [expectedReportData]
@@ -45,5 +48,6 @@ export function initVerifier(input) {
  */
 export async function verifySnp(evidenceJson, generation, expectedReportData) {
   await initVerifier();
-  return verify_snp(evidenceJson, generation, expectedReportData);
+  const evidence = toWasmEvidence(JSON.parse(evidenceJson));
+  return verify_snp(JSON.stringify(evidence), generation, expectedReportData);
 }
