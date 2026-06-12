@@ -7,6 +7,7 @@ import { verifyAttestation } from "/src/verify.js";
 import { initVerifier } from "/src/wasm-loader.js";
 import { clientKeyAgreement } from "/src/keyagreement.js";
 import { Channel, requestAAD, responseAAD } from "/src/channel.js";
+import { cborEncode, cborDecode } from "/src/cbor.js";
 import {
   bytesToBase64Url,
   base64UrlToBytes,
@@ -161,24 +162,27 @@ async function run() {
         `→ HKDF-SHA256 → AES-256-GCM · session ${session_id.slice(0, 16)}…`,
     );
 
-    // 8. over-encrypted request through the tunnel (full request envelope sealed)
+    // 8. over-encrypted request through the tunnel (full request envelope sealed).
+    // The transport is CBOR end to end (record and envelope), matching the
+    // library's Session.fetch and the mock LB: raw byte bodies, no base64/JSON.
     set("echo", "run");
     const msg = "hello from a browser that verified the enclave 🛡️";
     const envelope = {
       method: "POST",
       path: "/v1/echo",
       headers: { "content-type": "text/plain" },
-      body_b64: bytesToBase64(utf8ToBytes(msg)),
+      body: utf8ToBytes(msg),
     };
-    const rec = await channel.seal(utf8ToBytes(JSON.stringify(envelope)), requestAAD());
+    const rec = await channel.seal(cborEncode(envelope), requestAAD());
     const echoRes = await fetch(`${PREFIX}/tunnel`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-c8s-session": session_id },
-      body: JSON.stringify(rec),
+      headers: { "content-type": "application/cbor", "x-c8s-session": session_id },
+      body: cborEncode(rec),
     });
-    const respRec = await echoRes.json();
-    const respEnv = JSON.parse(bytesToUtf8(await channel.open(respRec, responseAAD())));
-    const plain = bytesToUtf8(base64ToBytes(respEnv.body_b64 ?? ""));
+    if (!echoRes.ok) throw new Error(`tunnel returned HTTP ${echoRes.status}`);
+    const respRec = cborDecode(new Uint8Array(await echoRes.arrayBuffer()));
+    const respEnv = cborDecode(await channel.open(respRec, responseAAD()));
+    const plain = bytesToUtf8(respEnv.body ?? new Uint8Array(0));
     set("echo", "ok", `sent (sealed envelope): ${JSON.stringify(msg)}\nrecv (opened): ${plain}`);
   } catch (e) {
     // Steps already mark themselves; mark any still-pending as not-reached.
