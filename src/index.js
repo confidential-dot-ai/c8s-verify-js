@@ -21,7 +21,7 @@ import { C8sVerifyError, fail } from "./errors.js";
 export { C8sVerifyError } from "./errors.js";
 export { verifyAttestation, verifyEvidence, expectedReportData } from "./verify.js";
 export { generateNonce } from "./nonce.js";
-export { initVerifier, verifySnp } from "./wasm-loader.js";
+export { initVerifier, verifySnp, verifyAzSnp } from "./wasm-loader.js";
 
 const WELL_KNOWN = "/.well-known/c8s";
 

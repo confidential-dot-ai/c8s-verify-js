@@ -1,6 +1,60 @@
 /* @ts-self-types="./attestation_wasm.d.ts" */
 
 /**
+ * Verify Azure SEV-SNP (az-snp) vTPM attestation evidence in WASM.
+ *
+ * Unlike [`verify_snp`], which only checks the bare SNP hardware report, this
+ * verifies the full az-snp evidence: the HCL-wrapped SNP report **and** the
+ * vTPM quote that binds freshness. The freshness anchor for az-snp lives in
+ * the TPM quote's `extraData` (qualifyingData), not in the SNP `report_data`
+ * — the SNP `report_data` instead binds the vTPM attestation key (AK).
+ *
+ * Verification (mirrors the native async path, minus the CRL revocation check
+ * which needs an async cert provider — so `collateral_verified` is always
+ * `false` here):
+ * 1. Verify the TPM quote signature with the AK extracted from HCL var_data.
+ * 2. Check the quote's `extraData` equals `expected_report_data` (freshness).
+ * 3. Verify the PCR digest, and optionally bind PCR[8] to `expected_init_data_hash`.
+ * 4. Bind the AK to the TEE: `snp.report_data[..32] == SHA-256(var_data)`.
+ * 5. Validate the VCEK chain (auto-detecting the generation from CPUID) and the
+ *    SNP report signature, then enforce VMPL/debug/TCB policy.
+ *
+ * - `evidence_json`: az-snp evidence JSON (`{ version, tpm_quote, hcl_report, vcek }`)
+ * - `expected_report_data`: optional raw bytes the TPM quote `extraData` must equal
+ * - `expected_init_data_hash`: optional 32-byte hash to bind against PCR[8]
+ *
+ * Returns the verification result as JSON, or throws on any check failure.
+ * @param {string} evidence_json
+ * @param {Uint8Array | null} [expected_report_data]
+ * @param {Uint8Array | null} [expected_init_data_hash]
+ * @returns {string}
+ */
+export function verify_az_snp(evidence_json, expected_report_data, expected_init_data_hash) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const ptr0 = passStringToWasm0(evidence_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(expected_report_data) ? 0 : passArray8ToWasm0(expected_report_data, wasm.__wbindgen_malloc);
+        var len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(expected_init_data_hash) ? 0 : passArray8ToWasm0(expected_init_data_hash, wasm.__wbindgen_malloc);
+        var len2 = WASM_VECTOR_LEN;
+        const ret = wasm.verify_az_snp(ptr0, len0, ptr1, len1, ptr2, len2);
+        var ptr4 = ret[0];
+        var len4 = ret[1];
+        if (ret[3]) {
+            ptr4 = 0; len4 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
  * Verify live SNP evidence in WASM.
  *
  * - `evidence_json`: evidence JSON with inline cert_chain.vcek

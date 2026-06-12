@@ -3,7 +3,7 @@
 // a caller-supplied policy (expected measurements, platform, freshness binding).
 
 import { subtle } from "./crypto-env.js";
-import { verifySnp } from "./wasm-loader.js";
+import { verifySnp, verifyAzSnp } from "./wasm-loader.js";
 import { verifyCertChain } from "./x509.js";
 import { decodePEM } from "./pem.js";
 import {
@@ -88,13 +88,16 @@ export async function verifyAttestation(bundle, nonce, policy) {
     nonce,
   );
 
+  // az-snp gets full verification (HCL report + vTPM quote), with `expected`
+  // checked against the TPM quote's extraData. Bare snp checks the SNP report
+  // only, with `expected` checked against report_data. Both return the same
+  // result shape, so the policy checks below are platform-agnostic.
   let result;
   try {
-    const out = await verifySnp(
-      JSON.stringify(bundle.evidence),
-      bundle.generation,
-      expected,
-    );
+    const out =
+      wantPlatform === "az-snp"
+        ? await verifyAzSnp(JSON.stringify(bundle.evidence), expected)
+        : await verifySnp(JSON.stringify(bundle.evidence), bundle.generation, expected);
     result = JSON.parse(out);
   } catch (e) {
     // The WASM verifier throws on VCEK chain / report signature failure.
@@ -180,11 +183,14 @@ export async function verifyAttestation(bundle, nonce, policy) {
 
 /**
  * @typedef {{
- *   generation: string,                 // "milan" | "genoa" | "turin"
+ *   generation?: string,                // "milan" | "genoa" | "turin"; required for "snp",
+ *                                       //   ignored for "az-snp" (auto-detected from CPUID)
  *   measurements?: string[],            // accepted launch digests (hex sha-384); empty = warn only
- *   expectedReportData?: Uint8Array,    // raw bytes report_data must equal (e.g. SHA-384(pubkey ‖ nonce));
- *                                       //   when provided, a mismatch fails closed
- *   platform?: string,                  // default "snp"
+ *   expectedReportData?: Uint8Array,    // raw bytes the freshness anchor must equal (e.g.
+ *                                       //   SHA-384(pubkey ‖ nonce)); when provided, a mismatch
+ *                                       //   fails closed. For "snp" this is the SNP report_data;
+ *                                       //   for "az-snp" it is the vTPM quote's extraData.
+ *   platform?: string,                  // default "snp"; set "az-snp" for full Azure vTPM verification
  * }} VerifyEvidenceOptions
  */
 
@@ -210,17 +216,21 @@ export async function verifyEvidence(evidence, opts) {
   if (!evidence || typeof evidence !== "object") {
     fail("invalid_request", "evidence object is required");
   }
-  if (!opts || !opts.generation) {
-    fail("invalid_request", 'generation is required ("milan" | "genoa" | "turin")');
-  }
   const warnings = [];
   const wantPlatform = opts.platform ?? "snp";
+  const isAzSnp = wantPlatform === "az-snp";
+  // az-snp auto-detects the generation from the report CPUID; bare snp needs it.
+  if (!opts || (!isAzSnp && !opts.generation)) {
+    fail("invalid_request", 'generation is required ("milan" | "genoa" | "turin")');
+  }
   const expected = opts.expectedReportData;
 
   // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
   let result;
   try {
-    const out = await verifySnp(JSON.stringify(evidence), opts.generation, expected);
+    const out = isAzSnp
+      ? await verifyAzSnp(JSON.stringify(evidence), expected)
+      : await verifySnp(JSON.stringify(evidence), opts.generation, expected);
     result = JSON.parse(out);
   } catch (e) {
     fail("verification_failed", `hardware attestation failed: ${e.message ?? e}`, { cause: e });
