@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { verifySnp, verifyAzSnp } from "../src/wasm-loader.js";
-import { verifyEvidence } from "../src/verify.js";
+import { verifyEvidence, expectedReportData } from "../src/verify.js";
 import { snpReportFromHcl } from "../src/hcl.js";
+import { base64UrlToBytes } from "../src/base64.js";
 import { C8sVerifyError } from "../src/errors.js";
 
 const FIX = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -170,5 +171,35 @@ test("verifyEvidence(platform:az-snp) rejects tampered evidence (HW signature fa
   await assert.rejects(
     verifyEvidence(evidence, { platform: "az-snp", expectedReportData: utf8("challenge") }),
     (e) => e instanceof C8sVerifyError && e.code === "verification_failed",
+  );
+});
+
+// A REAL c8s LB bundle (full c8s-verify/v1 shape) captured from a live cluster.
+// Unlike the coco fixture's 9-byte ASCII nonce, its vTPM quote binds the
+// production 48-byte freshness anchor SHA-384(x25519 ‖ mlkem768 ‖ nonce), so this
+// exercises the actual over-encryption binding shape end to end.
+test("verifyEvidence(platform:az-snp) verifies a real LB bundle's production freshness anchor", async () => {
+  const bundle = JSON.parse(await readFile(join(FIX, "az-snp-bundle.json"), "utf8"));
+  const expected = await expectedReportData(
+    base64UrlToBytes(bundle.session_pubkey.x25519),
+    base64UrlToBytes(bundle.session_pubkey.mlkem768),
+    base64UrlToBytes(bundle.nonce),
+  );
+
+  const res = await verifyEvidence(bundle.evidence, {
+    platform: "az-snp",
+    expectedReportData: expected, // 48-byte SHA-384, carried in the vTPM quote extraData
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.platform, "az-snp");
+  assert.equal(res.reportDataMatch, true, "the quote extraData binds the real session+nonce anchor");
+
+  // A wrong anchor on the same real bundle must fail closed.
+  await assert.rejects(
+    verifyEvidence(bundle.evidence, {
+      platform: "az-snp",
+      expectedReportData: new Uint8Array(expected.length),
+    }),
+    (e) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
   );
 });
