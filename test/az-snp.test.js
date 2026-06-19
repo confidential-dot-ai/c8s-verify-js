@@ -103,12 +103,15 @@ test("verify_az_snp confirms freshness when the quote extraData matches the anch
   assert.equal(out.report_data_match, true, "quote extraData binds the expected nonce");
 });
 
-test("verify_az_snp reports a freshness mismatch as false (does not throw)", async () => {
-  // Symmetry with verify_snp: the WASM boundary returns the match as a bool and
-  // lets the JS policy layer fail closed, rather than throwing inside the verifier.
-  const out = JSON.parse(await verifyAzSnp(JSON.stringify(await cocoEvidence()), utf8("wrong-nonce")));
-  assert.equal(out.report_data_match, false);
-  assert.equal(out.signature_valid, true, "hardware + TPM signature are still valid");
+test("verify_az_snp fails closed (throws) on a freshness mismatch", async () => {
+  // Unlike bare verify_snp (non-throwing bool), verify_az_snp binds the anchor in
+  // the verifier core and fails closed — it throws on a freshness mismatch. The JS
+  // policy layer (verifyEvidence / verifyAttestation) catches this and surfaces it
+  // as the report_data_mismatch code; see the policy-layer tests below.
+  await assert.rejects(
+    verifyAzSnp(JSON.stringify(await cocoEvidence()), utf8("wrong-nonce")),
+    /report_data mismatch|TPM nonce/i,
+  );
 });
 
 // --- Policy layer routing: verifyEvidence with platform:"az-snp" ---

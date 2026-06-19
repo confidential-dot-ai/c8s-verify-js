@@ -45,6 +45,18 @@ export async function expectedReportData(x25519, mlkem768, nonce) {
   return new Uint8Array(digest);
 }
 
+// az-snp's verifier (verify_az_snp) binds the freshness anchor in the verifier
+// core and FAILS CLOSED — it throws on a mismatch rather than returning a
+// non-throwing report_data_match=false (which is what bare `verify_snp` does).
+// Recognize that specific failure by message so the policy layer can surface it
+// as the precise `report_data_mismatch` code instead of a generic
+// `verification_failed`, and so the soft (requireFreshness=false) path can tell
+// a freshness mismatch apart from a real hardware/signature failure.
+function isFreshnessMismatch(e) {
+  const msg = String(e?.message ?? e);
+  return /report_data mismatch|TPM nonce (length )?mismatch/i.test(msg);
+}
+
 /**
  * Verify an attestation bundle end to end.
  *
@@ -92,15 +104,28 @@ export async function verifyAttestation(bundle, nonce, policy) {
   // checked against the TPM quote's extraData. Bare snp checks the SNP report
   // only, with `expected` checked against report_data. Both return the same
   // result shape, so the policy checks below are platform-agnostic.
+  const isAzSnp = wantPlatform === "az-snp";
+  // az-snp's verifier fails closed (throws) on a freshness mismatch, so in soft
+  // mode (requireFreshness=false) we omit the anchor to get a non-throwing
+  // result and warn below; bare snp returns a non-throwing bool either way.
+  const azSnpAnchor = requireFreshness ? expected : undefined;
   let result;
   try {
-    const out =
-      wantPlatform === "az-snp"
-        ? await verifyAzSnp(JSON.stringify(bundle.evidence), expected)
-        : await verifySnp(JSON.stringify(bundle.evidence), bundle.generation, expected);
+    const out = isAzSnp
+      ? await verifyAzSnp(JSON.stringify(bundle.evidence), azSnpAnchor)
+      : await verifySnp(JSON.stringify(bundle.evidence), bundle.generation, expected);
     result = JSON.parse(out);
   } catch (e) {
-    // The WASM verifier throws on VCEK chain / report signature failure.
+    // az-snp fails closed on a freshness mismatch — surface it as the precise
+    // report_data_mismatch code rather than a generic verification_failed.
+    if (isAzSnp && requireFreshness && isFreshnessMismatch(e)) {
+      fail(
+        "report_data_mismatch",
+        "report_data does not bind this session's key and nonce (stale or substituted evidence)",
+        { details: { expected: bytesToHex(expected) }, cause: e },
+      );
+    }
+    // Otherwise the WASM verifier threw on VCEK chain / report signature failure.
     fail("verification_failed", `hardware attestation failed: ${e.message ?? e}`, { cause: e });
   }
 
@@ -233,6 +258,16 @@ export async function verifyEvidence(evidence, opts) {
       : await verifySnp(JSON.stringify(evidence), opts.generation, expected);
     result = JSON.parse(out);
   } catch (e) {
+    // az-snp fails closed (throws) on a freshness mismatch when an anchor is
+    // supplied — map it to the precise report_data_mismatch code instead of the
+    // generic verification_failed used for chain/signature failures.
+    if (isAzSnp && expected !== undefined && isFreshnessMismatch(e)) {
+      fail(
+        "report_data_mismatch",
+        "report_data does not match the expected binding (stale or substituted evidence)",
+        { details: { expected: bytesToHex(expected) }, cause: e },
+      );
+    }
     fail("verification_failed", `hardware attestation failed: ${e.message ?? e}`, { cause: e });
   }
 

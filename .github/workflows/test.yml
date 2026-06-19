@@ -6,9 +6,49 @@ on:
   pull_request:
     branches: [main]
 
+# The verifier WASM is generated from attestation-rs at a pinned commit (kept in
+# scripts/build-wasm.sh / wasm/README.md), not committed. Build it once here and
+# share it with the test jobs as an artifact.
+env:
+  ATTESTATION_RS_REF: 13039e857e7124a8a8620c6aacaa7217d73a3958
+
 jobs:
+  build-wasm:
+    name: Build WASM verifier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout attestation-rs (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: confidential-dot-ai/attestation-rs
+          ref: ${{ env.ATTESTATION_RS_REF }}
+          path: attestation-rs
+          # attestation-rs is private; a PAT/app token with read access is needed
+          # to check it out from this repo. Falls back to GITHUB_TOKEN if the
+          # repos share access.
+          token: ${{ secrets.ATTESTATION_RS_TOKEN || github.token }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Build wasm/
+        run: npm run build:wasm
+        env:
+          ATTESTATION_RS_DIR: ${{ github.workspace }}/attestation-rs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm
+          if-no-files-found: error
+          path: |
+            wasm/attestation_wasm.js
+            wasm/attestation_wasm_bg.wasm
+            wasm/attestation_wasm.d.ts
+            wasm/attestation_wasm_bg.wasm.d.ts
+
   unit:
     name: Unit & E2E (Node ${{ matrix.node }})
+    needs: build-wasm
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -16,6 +56,10 @@ jobs:
         node: [20, 22, 24]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: wasm
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -25,9 +69,14 @@ jobs:
 
   browser:
     name: Browser smoke test
+    needs: build-wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: wasm
       - uses: actions/setup-node@v4
         with:
           node-version: 24
