@@ -16,10 +16,11 @@
 // the WASM verifies over the extracted report against the VCEK chain. A tampered
 // report fails that check.
 //
-// NOTE: this unwraps the hardware report only. Full az-snp verification also
-// binds the vTPM quote (evidence.tpm_quote) to the SNP report via report_data;
-// that AK binding is not verified here, which is why az-snp remains "reserved"
-// in PROTOCOL.md.
+// NOTE: this module unwraps the hardware report only (for the SNP signature +
+// measurement WASM check). The az-snp *freshness* binding — report_data ==
+// SHA-256(var_data) -> AK pub -> AK-signed tpm_quote -> quote extraData ==
+// session binding — is verified separately in src/tpmquote.js, which
+// verifyAttestation invokes for az-snp evidence.
 
 import { base64ToBytes, base64UrlToBytes, bytesToBase64 } from "./base64.js";
 import { fail } from "./errors.js";

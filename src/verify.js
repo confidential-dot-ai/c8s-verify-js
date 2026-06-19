@@ -9,9 +9,11 @@ import { decodePEM } from "./pem.js";
 import {
   concatBytes,
   bytesToHex,
+  hexToBytes,
   base64UrlToBytes,
   constantTimeEqual,
 } from "./base64.js";
+import { verifyVtpmFreshness } from "./tpmquote.js";
 import { C8sVerifyError, fail } from "./errors.js";
 
 /**
@@ -119,19 +121,27 @@ export async function verifyAttestation(bundle, nonce, policy) {
     });
   }
 
-  // 5. Freshness / key binding.
-  if (result.report_data_match === true) {
-    // bound to our session key + nonce — strongest result.
-  } else if (requireFreshness) {
-    fail(
-      "report_data_mismatch",
-      "report_data does not bind this session's key and nonce (stale or substituted evidence)",
-      { details: { expected: bytesToHex(expected), got: result.claims.report_data } },
-    );
+  // 5. Freshness / key binding. On Azure (az-snp) the hardware report_data binds
+  //    the vTPM AK, not the session key+nonce — so the WASM's report_data_match is
+  //    false and the binding instead rides in the AK-signed TPM quote. Verify that
+  //    chain (report_data == SHA-256(var_data) → AK → quote sig → quote extraData
+  //    == expected). Bare SNP keeps the direct report_data check.
+  const isAzSnp = !!(bundle.evidence && bundle.evidence.hcl_report);
+  if (requireFreshness) {
+    if (isAzSnp) {
+      const reportData = hexToBytes(String(result.claims.report_data ?? ""));
+      await verifyVtpmFreshness(bundle.evidence, reportData, expected); // fails closed inside
+    } else if (result.report_data_match !== true) {
+      fail(
+        "report_data_mismatch",
+        "report_data does not bind this session's key and nonce (stale or substituted evidence)",
+        { details: { expected: bytesToHex(expected), got: result.claims.report_data } },
+      );
+    }
   } else {
     warnings.push(
       "freshness binding not enforced (requireFreshness=false): hardware signature and " +
-        "measurement are verified, but report_data is not bound to this session key+nonce",
+        "measurement are verified, but the session key+nonce binding is not checked",
     );
   }
 

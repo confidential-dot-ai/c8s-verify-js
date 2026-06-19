@@ -54,7 +54,7 @@ the CDS, for the optional EAR-verification path.
 ```jsonc
 {
   "version": "c8s-verify/v1",
-  "platform": "snp",            // "snp" only today; "az-snp"/"tdx" reserved
+  "platform": "snp",            // "snp" (bare) and "az-snp" (Azure vTPM) supported; "tdx" reserved
   "generation": "genoa",        // AMD processor gen for the WASM verifier: milan|genoa|turin
   "nonce": "<echoed b64url>",   // MUST equal the request nonce
   "evidence": {                 // attestation-rs SnpEvidence shape (std base64 fields)
@@ -88,6 +88,15 @@ that (a) the evidence is **fresh** (binds our nonce) and (b) the over-encryption
 > demo/mock and the offline test fixtures use **recorded real evidence** with a fixed
 > `report_data`; in that mode the client verifies the hardware signature + measurement
 > for real and exercises the binding math against the fixture's recorded value.
+
+**Azure node-as-CVM (`az-snp`).** On Azure the hardware `report_data` binds the vTPM
+Attestation Key (it equals `SHA-256(var_data)`), not the session key — so the
+`SHA-384(x25519 ‖ mlkem768 ‖ nonce)` binding instead rides in the AK-signed
+`tpm_quote`. The evidence carries an `hcl_report` (HCL-wrapped SNP report + var_data)
+and a `tpm_quote`, and the client verifies the chain
+`report_data == SHA-256(var_data) → AK pub (var_data JWK) → AK-signed quote → quote
+extraData == SHA-384(x25519 ‖ mlkem768 ‖ nonce)` (`src/tpmquote.js`). This is a
+real freshness check, equivalent to the bare-SNP `report_data_match`.
 
 ## WASM verifier I/O (`attestation-rs` `verify_snp`)
 

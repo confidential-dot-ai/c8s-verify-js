@@ -66,3 +66,45 @@ test("rejects an HCL report whose hardware type is not SNP", () => {
     (e) => e instanceof C8sVerifyError && e.code === "unsupported",
   );
 });
+
+// The az-snp vTPM freshness chain (src/tpmquote.js): the per-session binding
+// rides in the AK-signed TPM quote, not the SNP report_data (which binds the AK).
+// Fixture is a real bundle captured from a live c8s LB.
+test("az-snp tpm_quote freshness chain verifies a live bundle (and rejects tampering)", async () => {
+  const { verifyVtpmFreshness } = await import("../src/tpmquote.js");
+  const { expectedReportData } = await import("../src/verify.js");
+  const { verifySnp } = await import("../src/wasm-loader.js");
+  const { toWasmEvidence } = await import("../src/hcl.js");
+  const { base64UrlToBytes, hexToBytes } = await import("../src/base64.js");
+
+  const bundle = JSON.parse(await readFile(join(FIX, "az-snp-bundle.json"), "utf8"));
+  const nonce = base64UrlToBytes(bundle.nonce);
+  const x = base64UrlToBytes(bundle.session_pubkey.x25519);
+  const m = base64UrlToBytes(bundle.session_pubkey.mlkem768);
+  const expected = await expectedReportData(x, m, nonce); // SHA-384(x ‖ m ‖ nonce)
+
+  // report_data the hardware actually signed (binds the AK), via the WASM claims.
+  const wasm = JSON.parse(
+    await verifySnp(JSON.stringify(toWasmEvidence(bundle.evidence)), bundle.generation, expected),
+  );
+  const reportData = hexToBytes(String(wasm.claims.report_data));
+
+  // Positive: the whole chain (var_data binding + AK sig + quote extraData == expected).
+  await verifyVtpmFreshness(bundle.evidence, reportData, expected);
+
+  // Negative: a different expected binding must fail closed.
+  await assert.rejects(
+    () => verifyVtpmFreshness(bundle.evidence, reportData, new Uint8Array(expected.length)),
+    (e) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
+  );
+
+  // Negative: tampering the AK-signed quote message must fail the signature.
+  const bad = JSON.parse(JSON.stringify(bundle.evidence));
+  const msg = bad.tpm_quote.message;
+  const i = msg.length - 40;
+  bad.tpm_quote.message = msg.slice(0, i) + (msg[i] === "a" ? "b" : "a") + msg.slice(i + 1);
+  await assert.rejects(
+    () => verifyVtpmFreshness(bad, reportData, expected),
+    (e) => e instanceof C8sVerifyError && e.code === "verification_failed",
+  );
+});
