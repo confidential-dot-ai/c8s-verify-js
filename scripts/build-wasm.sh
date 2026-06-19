@@ -31,7 +31,17 @@ command -v wasm-pack >/dev/null 2>&1 || {
 }
 
 work="$(mktemp -d)"
-src="${ATTESTATION_RS_DIR:-$root/../attestation-rs}"
+# Resolve the attestation-rs source: explicit override first, then common
+# checkout locations relative to this package — a standalone sibling
+# (../attestation-rs) or a nested git submodule whose superproject has
+# attestation-rs as a sibling (../../attestation-rs). Falls back to a clone.
+src="${ATTESTATION_RS_DIR:-}"
+if [ -z "$src" ]; then
+  for cand in "$root/../attestation-rs" "$root/../../attestation-rs"; do
+    if [ -d "$cand/.git" ]; then src="$cand"; break; fi
+  done
+  src="${src:-$root/../attestation-rs}" # default for the "clone" message below
+fi
 cleanup() {
   [ -n "${worktree_added:-}" ] && git -C "$src" worktree remove --force "$work/src" >/dev/null 2>&1 || true
   rm -rf "$work"
