@@ -7,27 +7,27 @@
 // Everything else — the PQ hybrid handshake and the AES-256-GCM over-encryption
 // channel — is real.
 
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize, extname } from "node:path";
+import { Buffer } from "node:buffer";
 
 import {
   generateServerHybridKey,
   serverKeyAgreement,
+  type ServerKeys,
+  type PublicHalves,
 } from "../src/keyagreement.js";
-import { Channel, requestAAD, responseAAD } from "../src/channel.js";
-import { cborEncode, cborDecode } from "../src/cbor.js";
-import {
-  bytesToBase64Url,
-  base64UrlToBytes,
-  utf8ToBytes,
-  bytesToUtf8,
-} from "../src/base64.js";
+import { Channel, requestAAD, responseAAD, type WireRecord } from "../src/channel.js";
+import { cborEncode, cborDecode, type CborValue } from "../src/cbor.js";
+import { bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8 } from "../src/base64.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, ".."); // package root, served statically
-const FIX = join(__dirname, "fixtures");
+// Compiled to dist/demo; the static root and fixtures live in the source tree
+// two directories up (dist/demo -> repo root).
+const REPO = join(__dirname, "..", ".."); // package root, served statically
+const FIX = join(REPO, "demo", "fixtures");
 const PORT = Number(process.env.PORT ?? 8799);
 
 // ---- load fixtures ----------------------------------------------------------
@@ -39,42 +39,48 @@ const leafPem = await readFile(join(FIX, "cds-leaf.crt"), "utf8");
 const cdsCertPem = leafPem.trim() + "\n" + meshCaPem.trim() + "\n";
 
 // ---- session state ----------------------------------------------------------
-/** nonce(b64url) -> { priv, pub, createdAt } */
-const pending = new Map();
-/** sessionId -> Channel */
-const sessions = new Map();
+interface PendingEntry {
+  priv: ServerKeys;
+  pub: PublicHalves;
+  createdAt: number;
+}
+const pending = new Map<string, PendingEntry>();
+const sessions = new Map<string, Channel>();
 const TTL_MS = 5 * 60 * 1000;
 
-function sweep() {
+function sweep(): void {
   const now = Date.now();
   for (const [k, v] of pending) if (now - v.createdAt > TTL_MS) pending.delete(k);
 }
 
 // ---- helpers ----------------------------------------------------------------
-function json(res, status, obj) {
+function json(res: ServerResponse, status: number, obj: unknown): void {
   const body = JSON.stringify(obj);
-  res.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
+  res.writeHead(status, {
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(body),
+  });
   res.end(body);
 }
-function text(res, status, body, type = "text/plain") {
+function text(res: ServerResponse, status: number, body: string, type = "text/plain"): void {
   res.writeHead(status, { "content-type": type });
   res.end(body);
 }
-function cbor(res, status, obj) {
+function cbor(res: ServerResponse, status: number, obj: unknown): void {
   const body = Buffer.from(cborEncode(obj));
   res.writeHead(status, { "content-type": "application/cbor", "content-length": body.length });
   res.end(body);
 }
-async function readBodyBytes(req) {
-  const chunks = [];
-  for await (const c of req) chunks.push(c);
+async function readBodyBytes(req: IncomingMessage): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
   return new Uint8Array(Buffer.concat(chunks));
 }
-async function readBody(req) {
+async function readBody(req: IncomingMessage): Promise<string> {
   return Buffer.from(await readBodyBytes(req)).toString("utf8");
 }
 
-const MIME = {
+const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
@@ -84,11 +90,11 @@ const MIME = {
   ".map": "application/json",
 };
 
-async function serveStatic(res, urlPath) {
+async function serveStatic(res: ServerResponse, urlPath: string): Promise<void> {
   // Map "/" to the demo page; everything else resolves under the package root.
   const rel = urlPath === "/" ? "demo/index.html" : urlPath.replace(/^\/+/, "");
-  const abs = normalize(join(ROOT, rel));
-  if (!abs.startsWith(ROOT)) return text(res, 403, "forbidden"); // path traversal guard
+  const abs = normalize(join(REPO, rel));
+  if (!abs.startsWith(REPO)) return text(res, 403, "forbidden"); // path traversal guard
   try {
     const data = await readFile(abs);
     res.writeHead(200, { "content-type": MIME[extname(abs)] ?? "application/octet-stream" });
@@ -99,9 +105,9 @@ async function serveStatic(res, urlPath) {
 }
 
 // ---- request router ---------------------------------------------------------
-const server = createServer(async (req, res) => {
+const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   try {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const p = url.pathname;
 
     if (req.method === "GET" && p === "/.well-known/c8s/cds-cert.pem") {
@@ -133,7 +139,8 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && p === "/.well-known/c8s/handshake") {
       const body = JSON.parse(await readBody(req));
       const entry = pending.get(body.nonce);
-      if (!entry) return json(res, 400, { error: "invalid_request", message: "unknown or expired nonce" });
+      if (!entry)
+        return json(res, 400, { error: "invalid_request", message: "unknown or expired nonce" });
       pending.delete(body.nonce);
       const nonce = base64UrlToBytes(body.nonce);
       const key = await serverKeyAgreement(
@@ -153,27 +160,32 @@ const server = createServer(async (req, res) => {
     // to the backend (echo here), and seal the response back. A real LB forwards
     // the reconstructed plaintext request to the upstream over the raTLS mesh.
     if (req.method === "POST" && p === "/.well-known/c8s/tunnel") {
-      const channel = sessions.get(req.headers["x-c8s-session"]);
+      const sid = req.headers["x-c8s-session"];
+      const channel = typeof sid === "string" ? sessions.get(sid) : undefined;
       if (!channel) return json(res, 401, { error: "channel_error", message: "no session" });
-      let record;
+      let record: WireRecord;
       try {
-        record = cborDecode(await readBodyBytes(req));
+        record = cborDecode(await readBodyBytes(req)) as unknown as WireRecord;
       } catch {
         return json(res, 400, { error: "channel_error", message: "invalid record" });
       }
-      let plaintext;
+      let plaintext: Uint8Array;
       try {
         plaintext = await channel.open(record, requestAAD());
       } catch {
         return json(res, 400, { error: "channel_error", message: "decrypt failed" });
       }
-      const env = cborDecode(plaintext);
+      const env = cborDecode(plaintext) as {
+        method?: string;
+        path?: string;
+        body?: Uint8Array;
+      };
       const body = env.body ?? new Uint8Array(0);
       const reply = utf8ToBytes(
         `LB enclave received ${body.length} bytes over the over-encrypted channel for ` +
           `${env.method} ${env.path}: ${JSON.stringify(bytesToUtf8(body))}`,
       );
-      const respEnv = {
+      const respEnv: Record<string, CborValue> = {
         status: 200,
         headers: { "content-type": "text/plain; charset=utf-8" },
         body: reply,
@@ -182,16 +194,18 @@ const server = createServer(async (req, res) => {
       return cbor(res, 200, out);
     }
 
-    // Static demo assets (index.html, /src/*, /wasm/*, /node_modules/*).
+    // Static demo assets (index.html, /dist/*, /wasm/*, /node_modules/*).
     if (req.method === "GET") return serveStatic(res, p);
 
     text(res, 405, "method not allowed");
   } catch (e) {
-    json(res, 500, { error: "internal", message: String(e?.message ?? e) });
+    json(res, 500, {
+      error: "internal",
+      message: String((e as { message?: unknown })?.message ?? e),
+    });
   }
 });
 
 server.listen(PORT, () => {
-  // eslint-disable-next-line no-console
   console.log(`mock C8s LB listening on http://localhost:${PORT}  (open this in a browser)`);
 });

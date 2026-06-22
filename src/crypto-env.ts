@@ -4,10 +4,9 @@
 
 import { C8sVerifyError } from "./errors.js";
 
-/** @returns {Crypto} */
-export function getCrypto() {
+export function getCrypto(): Crypto {
   const c = globalThis.crypto;
-  if (!c || !c.subtle) {
+  if (!c?.subtle) {
     throw new C8sVerifyError(
       "unsupported",
       "WebCrypto (globalThis.crypto.subtle) is not available in this environment",
@@ -16,17 +15,14 @@ export function getCrypto() {
   return c;
 }
 
-/** @returns {SubtleCrypto} */
-export function subtle() {
+export function subtle(): SubtleCrypto {
   return getCrypto().subtle;
 }
 
 /**
  * Fill a Uint8Array with cryptographically secure random bytes.
- * @param {number} n
- * @returns {Uint8Array}
  */
-export function randomBytes(n) {
+export function randomBytes(n: number): Uint8Array {
   const out = new Uint8Array(n);
   getCrypto().getRandomValues(out);
   return out;

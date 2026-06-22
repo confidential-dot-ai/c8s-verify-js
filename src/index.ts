@@ -11,41 +11,91 @@
 //   const res = await session.fetch("/v1/chat", { method: "POST", body: "..." });
 
 import { generateNonce } from "./nonce.js";
-import { verifyAttestation } from "./verify.js";
+import {
+  verifyAttestation,
+  type AttestationBundle,
+  type AttestationResult,
+  type VerifyPolicy,
+} from "./verify.js";
 import { clientKeyAgreement } from "./keyagreement.js";
-import { Channel, requestAAD, responseAAD } from "./channel.js";
+import { Channel, requestAAD, responseAAD, type WireRecord } from "./channel.js";
 import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
 
 export { C8sVerifyError } from "./errors.js";
 export { verifyAttestation, verifyEvidence, expectedReportData } from "./verify.js";
+export type {
+  VerifyPolicy,
+  AttestationBundle,
+  AttestationResult,
+  EvidenceResult,
+  VerifyEvidenceOptions,
+  CertInfo,
+} from "./verify.js";
 export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp } from "./wasm-loader.js";
+export type { Evidence, SnpEvidence, AzSnpEvidence } from "./hcl.js";
 
 const WELL_KNOWN = "/.well-known/c8s";
 
-/**
- * @typedef {import("./verify.js").VerifyPolicy & {
- *   baseUrl: string,
- *   fetch?: typeof fetch,
- *   wellKnownPrefix?: string,
- * }} C8sClientOptions
- */
+export interface C8sClientOptions {
+  baseUrl: string;
+  measurements?: string[];
+  platform?: string;
+  requireFreshness?: boolean;
+  meshCaPem?: string;
+  at?: Date;
+  fetch?: typeof fetch;
+  wellKnownPrefix?: string;
+}
+
+export interface RequestInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string | Uint8Array;
+}
+
+export interface TunnelResponse {
+  status: number;
+  headers: Record<string, string>;
+  bytes: Uint8Array;
+  text: () => string;
+}
+
+/** Response envelope decoded from a sealed tunnel record. */
+interface ResponseEnvelope {
+  status: number;
+  headers?: Record<string, string>;
+  body?: Uint8Array;
+}
+
+interface SessionOptions {
+  baseUrl: string;
+  prefix: string;
+  fetch: typeof fetch;
+  channel: Channel;
+  sessionId: string;
+  attestation: AttestationResult;
+}
 
 export class C8sClient {
-  /** @param {C8sClientOptions} opts */
-  constructor(opts) {
-    if (!opts || !opts.baseUrl) {
+  readonly baseUrl: string;
+  readonly prefix: string;
+  readonly fetch: typeof fetch;
+  readonly policy: VerifyPolicy;
+
+  constructor(opts: C8sClientOptions) {
+    if (!opts?.baseUrl) {
       throw new C8sVerifyError("invalid_request", "baseUrl is required");
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
-    this.fetch = opts.fetch ?? globalThis.fetch?.bind(globalThis);
-    if (!this.fetch) {
+    const f = opts.fetch ?? globalThis.fetch?.bind(globalThis);
+    if (!f) {
       throw new C8sVerifyError("invalid_request", "no fetch implementation available");
     }
-    /** @type {import("./verify.js").VerifyPolicy} */
+    this.fetch = f;
     this.policy = {
       measurements: opts.measurements ?? [],
       platform: opts.platform,
@@ -55,31 +105,27 @@ export class C8sClient {
     };
   }
 
-  /** @param {string} path */
-  _url(path) {
+  private _url(path: string): string {
     return `${this.baseUrl}${path}`;
   }
 
   /**
    * Fetch the LB attestation bundle for a fresh nonce.
-   * @param {Uint8Array} nonce
-   * @returns {Promise<import("./verify.js").AttestationBundle>}
    */
-  async fetchAttestation(nonce) {
+  async fetchAttestation(nonce: Uint8Array): Promise<AttestationBundle> {
     const url = `${this._url(this.prefix)}/attestation?nonce=${bytesToBase64Url(nonce)}`;
     const res = await this.fetch(url, { headers: { accept: "application/json" } });
     if (!res.ok) {
       fail("verification_failed", `attestation endpoint returned HTTP ${res.status}`);
     }
-    return /** @type {any} */ (await res.json());
+    return (await res.json()) as AttestationBundle;
   }
 
   /**
    * Run the full flow: fetch attestation, verify it, and establish the
    * over-encrypted channel.
-   * @returns {Promise<Session>}
    */
-  async connect() {
+  async connect(): Promise<Session> {
     const nonce = generateNonce();
     const bundle = await this.fetchAttestation(nonce);
     const attestation = await verifyAttestation(bundle, nonce, this.policy);
@@ -99,7 +145,7 @@ export class C8sClient {
     if (!hsRes.ok) {
       fail("channel_error", `handshake endpoint returned HTTP ${hsRes.status}`);
     }
-    const { session_id: sessionId } = await hsRes.json();
+    const { session_id: sessionId } = (await hsRes.json()) as { session_id?: string };
     if (!sessionId) fail("channel_error", "handshake did not return a session id");
 
     return new Session({
@@ -117,19 +163,20 @@ export class C8sClient {
  * An established, verified, over-encrypted session with the LB.
  */
 export class Session {
-  /**
-   * @param {{
-   *   baseUrl: string, prefix: string, fetch: typeof fetch, channel: Channel,
-   *   sessionId: string, attestation: object
-   * }} o
-   */
-  constructor(o) {
+  readonly baseUrl: string;
+  readonly prefix: string;
+  private readonly _fetch: typeof fetch;
+  readonly channel: Channel;
+  readonly sessionId: string;
+  /** Verification result: measurement, platform, cert info, warnings, ... */
+  readonly attestation: AttestationResult;
+
+  constructor(o: SessionOptions) {
     this.baseUrl = o.baseUrl;
     this.prefix = o.prefix;
     this._fetch = o.fetch;
     this.channel = o.channel;
     this.sessionId = o.sessionId;
-    /** Verification result: measurement, platform, cert info, warnings, ... */
     this.attestation = o.attestation;
   }
 
@@ -139,12 +186,8 @@ export class Session {
    * endpoint, so a TLS-terminating proxy in front of the LB sees only ciphertext.
    * The LB enclave decrypts it, forwards the plaintext request to the backend
    * (over the cluster raTLS mesh), and seals the response back.
-   *
-   * @param {string} path
-   * @param {{ method?: string, headers?: Record<string,string>, body?: string|Uint8Array }} [init]
-   * @returns {Promise<{ status: number, headers: Record<string,string>, bytes: Uint8Array, text: () => string }>}
    */
-  async fetch(path, init = {}) {
+  async fetch(path: string, init: RequestInit = {}): Promise<TunnelResponse> {
     const method = (init.method ?? "GET").toUpperCase();
     const bodyBytes =
       init.body === undefined
@@ -169,8 +212,10 @@ export class Session {
     if (!res.ok) {
       fail("channel_error", `over-encrypted request returned HTTP ${res.status}`);
     }
-    const respRecord = cborDecode(new Uint8Array(await res.arrayBuffer()));
-    const respEnvelope = cborDecode(await this.channel.open(respRecord, responseAAD()));
+    const respRecord = cborDecode(new Uint8Array(await res.arrayBuffer())) as unknown as WireRecord;
+    const respEnvelope = cborDecode(
+      await this.channel.open(respRecord, responseAAD()),
+    ) as unknown as ResponseEnvelope;
     const bytes = respEnvelope.body ?? new Uint8Array(0);
     return {
       status: respEnvelope.status,

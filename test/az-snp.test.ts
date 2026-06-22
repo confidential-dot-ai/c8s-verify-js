@@ -9,9 +9,11 @@ import { verifyEvidence, expectedReportData } from "../src/verify.js";
 import { snpReportFromHcl } from "../src/hcl.js";
 import { base64UrlToBytes } from "../src/base64.js";
 import { C8sVerifyError } from "../src/errors.js";
+import type { Evidence, AzSnpEvidence } from "../src/hcl.js";
 
-const FIX = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
-const utf8 = (s) => new TextEncoder().encode(s);
+// Compiled to dist/test; fixtures live in the source tree two levels up.
+const FIX = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "test", "fixtures");
+const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 // A recorded Azure SEV-SNP (az-snp) attestation: an HCL report wrapping the raw
 // SNP report, plus a TPM quote and the VCEK. Verified end-to-end through the
@@ -23,7 +25,11 @@ test("verifies a recorded az-snp attestation through the WASM verifier", async (
   const out = await verifySnp(att.evidence, "milan");
   const result = JSON.parse(out);
 
-  assert.equal(result.signature_valid, true, "hardware signature must verify against the VCEK chain");
+  assert.equal(
+    result.signature_valid,
+    true,
+    "hardware signature must verify against the VCEK chain",
+  );
 });
 
 // A second, independently-recorded Milan az-snp attestation (distinct host:
@@ -35,13 +41,17 @@ test("verifies a second recorded az-snp (Milan) attestation", async () => {
   const out = await verifySnp(att.evidence, "milan");
   const result = JSON.parse(out);
 
-  assert.equal(result.signature_valid, true, "hardware signature must verify against the VCEK chain");
+  assert.equal(
+    result.signature_valid,
+    true,
+    "hardware signature must verify against the VCEK chain",
+  );
 });
 
 // The HCL header is host-controlled and untrusted: we only use it to locate the
 // SNP report, so malformed envelopes must be rejected before we slice — never
 // read out of bounds, never hand the WASM a bogus report.
-function hclHeader({ magic = 0x414c4348, requestType = 2 } = {}) {
+function hclHeader({ magic = 0x414c4348, requestType = 2 } = {}): Uint8Array {
   const buf = new Uint8Array(32 + 1184);
   const dv = new DataView(buf.buffer);
   dv.setUint32(0, magic, true);
@@ -52,21 +62,21 @@ function hclHeader({ magic = 0x414c4348, requestType = 2 } = {}) {
 test("rejects an HCL report that is too short to contain an SNP report", () => {
   assert.throws(
     () => snpReportFromHcl(new Uint8Array(64)),
-    (e) => e instanceof C8sVerifyError && e.code === "verification_failed",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "verification_failed",
   );
 });
 
 test("rejects an HCL report with a bad magic", () => {
   assert.throws(
     () => snpReportFromHcl(hclHeader({ magic: 0xdeadbeef })),
-    (e) => e instanceof C8sVerifyError && e.code === "verification_failed",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "verification_failed",
   );
 });
 
 test("rejects an HCL report whose hardware type is not SNP", () => {
   assert.throws(
     () => snpReportFromHcl(hclHeader({ requestType: 1 })),
-    (e) => e instanceof C8sVerifyError && e.code === "unsupported",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "unsupported",
   );
 });
 
@@ -85,8 +95,9 @@ test("rejects an HCL report whose hardware type is not SNP", () => {
 const COCO_MEASUREMENT =
   "9ac48fcac8a2d88aeeff8d427ad4f2be0e3917c748a18bdf52cc317e7fe20308b459d5ef1a12e0c22944eb386d17c315";
 
-async function cocoEvidence() {
-  return JSON.parse(await readFile(join(FIX, "az-snp-coco-bound.json"), "utf8")).evidence;
+async function cocoEvidence(): Promise<Evidence> {
+  return JSON.parse(await readFile(join(FIX, "az-snp-coco-bound.json"), "utf8"))
+    .evidence as Evidence;
 }
 
 test("verify_az_snp verifies the vTPM quote, not just the hardware report", async () => {
@@ -99,7 +110,9 @@ test("verify_az_snp verifies the vTPM quote, not just the hardware report", asyn
 });
 
 test("verify_az_snp confirms freshness when the quote extraData matches the anchor", async () => {
-  const out = JSON.parse(await verifyAzSnp(JSON.stringify(await cocoEvidence()), utf8("challenge")));
+  const out = JSON.parse(
+    await verifyAzSnp(JSON.stringify(await cocoEvidence()), utf8("challenge")),
+  );
   assert.equal(out.report_data_match, true, "quote extraData binds the expected nonce");
 });
 
@@ -141,7 +154,7 @@ test("verifyEvidence(platform:az-snp) fails closed when the freshness anchor is 
       platform: "az-snp",
       expectedReportData: utf8("not-the-nonce"),
     }),
-    (e) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
   );
 });
 
@@ -149,7 +162,7 @@ test("verifyEvidence(platform:az-snp) warns (does not fail) when no anchor is su
   const res = await verifyEvidence(await cocoEvidence(), { platform: "az-snp" });
   assert.equal(res.reportDataMatch, null);
   assert.ok(
-    res.warnings.some((w) => /report_data freshness/.test(w)),
+    res.warnings.some((w) => w.includes("report_data freshness")),
     "should warn that freshness was not verified",
   );
 });
@@ -161,19 +174,19 @@ test("verifyEvidence(platform:az-snp) denies a measurement outside the allowlist
       measurements: ["00".repeat(48)],
       expectedReportData: utf8("challenge"),
     }),
-    (e) => e instanceof C8sVerifyError && e.code === "measurement_denied",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "measurement_denied",
   );
 });
 
 test("verifyEvidence(platform:az-snp) rejects tampered evidence (HW signature fails)", async () => {
-  const evidence = await cocoEvidence();
+  const evidence = (await cocoEvidence()) as AzSnpEvidence;
   // Flip a byte deep in the HCL report (base64url) — the SNP signature must break.
-  const h = evidence.hcl_report;
+  const h = evidence.hcl_report!;
   const i = Math.floor(h.length / 2);
   evidence.hcl_report = h.slice(0, i) + (h[i] === "A" ? "B" : "A") + h.slice(i + 1);
   await assert.rejects(
     verifyEvidence(evidence, { platform: "az-snp", expectedReportData: utf8("challenge") }),
-    (e) => e instanceof C8sVerifyError && e.code === "verification_failed",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "verification_failed",
   );
 });
 
@@ -195,7 +208,11 @@ test("verifyEvidence(platform:az-snp) verifies a real LB bundle's production fre
   });
   assert.equal(res.ok, true);
   assert.equal(res.platform, "az-snp");
-  assert.equal(res.reportDataMatch, true, "the quote extraData binds the real session+nonce anchor");
+  assert.equal(
+    res.reportDataMatch,
+    true,
+    "the quote extraData binds the real session+nonce anchor",
+  );
 
   // A wrong anchor on the same real bundle must fail closed.
   await assert.rejects(
@@ -203,6 +220,6 @@ test("verifyEvidence(platform:az-snp) verifies a real LB bundle's production fre
       platform: "az-snp",
       expectedReportData: new Uint8Array(expected.length),
     }),
-    (e) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
   );
 });

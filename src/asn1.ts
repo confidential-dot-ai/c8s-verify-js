@@ -18,29 +18,24 @@ export const TAG = {
   IA5_STRING: 0x16,
   UTC_TIME: 0x17,
   GENERALIZED_TIME: 0x18,
-};
+} as const;
 
-/**
- * @typedef {{
- *   tag: number,
- *   constructed: boolean,
- *   start: number,        // offset of the tag byte
- *   headerLen: number,    // tag + length bytes
- *   contentStart: number,
- *   contentEnd: number,   // exclusive
- *   end: number,          // exclusive (== contentEnd)
- *   bytes: Uint8Array,    // full element incl. header
- *   content: Uint8Array,  // content only
- * }} DERNode
- */
+export interface DERNode {
+  tag: number;
+  constructed: boolean;
+  start: number; // offset of the tag byte
+  headerLen: number; // tag + length bytes
+  contentStart: number;
+  contentEnd: number; // exclusive
+  end: number; // exclusive (== contentEnd)
+  bytes: Uint8Array; // full element incl. header
+  content: Uint8Array; // content only
+}
 
 /**
  * Read one TLV element starting at `offset`.
- * @param {Uint8Array} buf
- * @param {number} offset
- * @returns {DERNode}
  */
-export function readTLV(buf, offset) {
+export function readTLV(buf: Uint8Array, offset: number): DERNode {
   if (offset >= buf.length) {
     throw new C8sVerifyError("invalid_cert", "ASN.1: unexpected end of input");
   }
@@ -87,16 +82,12 @@ export function readTLV(buf, offset) {
 
 /**
  * Read all child TLVs of a constructed node.
- * @param {Uint8Array} buf
- * @param {DERNode} node
- * @returns {DERNode[]}
  */
-export function readChildren(buf, node) {
+export function readChildren(buf: Uint8Array, node: DERNode): DERNode[] {
   if (!node.constructed) {
     throw new C8sVerifyError("invalid_cert", "ASN.1: expected constructed node");
   }
-  /** @type {DERNode[]} */
-  const children = [];
+  const children: DERNode[] = [];
   let off = node.contentStart;
   while (off < node.contentEnd) {
     const child = readTLV(buf, off);
@@ -108,10 +99,8 @@ export function readChildren(buf, node) {
 
 /**
  * Decode an OID node's content into dotted-decimal string.
- * @param {Uint8Array} content
- * @returns {string}
  */
-export function decodeOID(content) {
+export function decodeOID(content: Uint8Array): string {
   if (content.length === 0) throw new C8sVerifyError("invalid_cert", "ASN.1: empty OID");
   const first = content[0];
   const parts = [Math.floor(first / 40), first % 40];
@@ -128,12 +117,10 @@ export function decodeOID(content) {
 
 /**
  * Parse a DER time (UTCTime or GeneralizedTime) into a Date.
- * @param {DERNode} node
- * @returns {Date}
  */
-export function decodeTime(node) {
+export function decodeTime(node: DERNode): Date {
   const s = new TextDecoder().decode(node.content);
-  let year, rest;
+  let year: number, rest: string;
   if (node.tag === TAG.UTC_TIME) {
     // YYMMDDHHMMSSZ — pivot at 50 per RFC 5280.
     const yy = parseInt(s.slice(0, 2), 10);
@@ -149,6 +136,7 @@ export function decodeTime(node) {
   const da = parseInt(rest.slice(2, 4), 10);
   const ho = parseInt(rest.slice(4, 6), 10);
   const mi = parseInt(rest.slice(6, 8), 10);
-  const se = rest.length >= 10 && /\d\d/.test(rest.slice(8, 10)) ? parseInt(rest.slice(8, 10), 10) : 0;
+  const se =
+    rest.length >= 10 && /\d\d/.test(rest.slice(8, 10)) ? parseInt(rest.slice(8, 10), 10) : 0;
   return new Date(Date.UTC(year, mo - 1, da, ho, mi, se));
 }

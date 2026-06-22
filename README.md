@@ -132,8 +132,9 @@ A self-contained mock LB lets you run the whole flow offline:
 
 ```sh
 npm install
+npm run build:wasm     # generate the WASM verifier from vendor/attestation-rs (once)
 npm run gen-fixtures   # openssl mesh CA + leaf, copies recorded SNP evidence
-npm run demo           # serves the mock LB + browser demo on http://localhost:8799
+npm run demo           # compiles TypeScript, then serves the mock LB + demo on http://localhost:8799
 ```
 
 Open the URL and click **Run verification**. The page walks each step (green/red),
@@ -146,13 +147,19 @@ are all genuine; only the live `report_data` key-binding is necessarily simulate
 ## Tests
 
 ```sh
-npm test                       # node:test — crypto, X.509, verification, end-to-end
-node demo/browser-check.mjs    # headless-Chromium run of the demo (needs `npx playwright install chromium`)
+npm run build:wasm             # once, if you haven't already (see Demo above)
+npm test                       # compiles TypeScript, then node:test — crypto, X.509, verification, end-to-end
+npm run browser-check          # headless-Chromium run of the demo (needs `npx playwright install chromium`)
 ```
+
+The library is written in TypeScript (`src/*.ts`) and compiled with `tsc` to
+`dist/` (the published `c8s-verify` package points at `dist/src/index.js` with
+bundled `.d.ts` types). `npm run build` runs the compiler; `npm test`, `npm run
+demo`, and `npm run browser-check` build first.
 
 ## Status
 
-- **Implemented (client):** the JS library (`src/`), the WASM verifier wiring, the
+- **Implemented (client):** the TypeScript library (`src/`), the WASM verifier wiring, the
   PQ over-encryption channel, the mock LB, the browser demo, and the test suite.
 - **Implemented (server):** the matching c8s endpoints ship as the `c8s cds-attest`
   sidecar, fronted by the existing tls-lb nginx (chart flag `tlsLb.attest.enabled`):

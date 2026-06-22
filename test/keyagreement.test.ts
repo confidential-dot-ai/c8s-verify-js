@@ -43,7 +43,10 @@ test("a different nonce derives a different key", async () => {
   const s = new Channel(serverKey);
   const aad = responseAAD();
   const rec = await c.seal(utf8ToBytes("secret"), aad);
-  await assert.rejects(() => s.open(rec, aad), (e) => e instanceof C8sVerifyError);
+  await assert.rejects(
+    () => s.open(rec, aad),
+    (e: unknown) => e instanceof C8sVerifyError,
+  );
 });
 
 test("AES-GCM open rejects a tampered AAD", async () => {
@@ -55,7 +58,7 @@ test("AES-GCM open rejects a tampered AAD", async () => {
   const rec = await c.seal(utf8ToBytes("payload"), requestAAD());
   await assert.rejects(
     () => c.open(rec, responseAAD()),
-    (e) => e instanceof C8sVerifyError && e.code === "channel_error",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "channel_error",
   );
 });
 
@@ -63,6 +66,6 @@ test("rejects an ML-KEM key of the wrong size", async () => {
   const nonce = generateNonce();
   await assert.rejects(
     () => clientKeyAgreement({ x25519: new Uint8Array(32), mlkem768: new Uint8Array(10) }, nonce),
-    (e) => e instanceof C8sVerifyError && e.code === "key_binding",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "key_binding",
   );
 });

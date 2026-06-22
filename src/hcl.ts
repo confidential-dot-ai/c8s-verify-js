@@ -26,6 +26,23 @@
 import { base64ToBytes, base64UrlToBytes, bytesToBase64 } from "./base64.js";
 import { fail } from "./errors.js";
 
+/** Bare SEV-SNP evidence: the shape the WASM `verify_snp` entry consumes. */
+export interface SnpEvidence {
+  attestation_report: string;
+  cert_chain: { vcek: string };
+}
+
+/** Azure HCL-wrapped (az-snp) evidence, as emitted by the c8s Go extractor. */
+export interface AzSnpEvidence {
+  version?: string;
+  tpm_quote?: unknown;
+  hcl_report?: string;
+  vcek?: string;
+}
+
+/** Either evidence shape the verifier layer can accept. */
+export type Evidence = SnpEvidence | AzSnpEvidence;
+
 const HCL_MAGIC = 0x414c4348; // "HCLA", little-endian u32 at offset 0
 const HCL_HEADER_SIZE = 32; // signature, version, report_size, request_type, status, reserved[3]
 const HCL_REQUEST_TYPE_SNP = 2; // request_type field selects the hardware report type
@@ -35,31 +52,35 @@ const SNP_REPORT_SIZE = 1184; // sizeof(struct ATTESTATION_REPORT)
  * Decode standard or URL-safe base64 by sniffing the alphabet. vTPM (az-snp)
  * evidence is URL-safe (per the c8s Go extractor), but VCEKs may arrive in
  * either alphabet, so we detect per field rather than assume.
- * @param {string} s
- * @returns {Uint8Array}
  */
-function decodeB64(s) {
+function decodeB64(s: string): Uint8Array {
   return /[-_]/.test(s) ? base64UrlToBytes(s) : base64ToBytes(s);
 }
 
 /**
  * Extract the raw 1184-byte SNP attestation report from an Azure HCL report.
  * Validates the magic, hardware report type, and length before slicing.
- * @param {Uint8Array} hcl  decoded HCL report bytes
- * @returns {Uint8Array} the 1184-byte SNP ATTESTATION_REPORT
+ * @param hcl decoded HCL report bytes
+ * @returns the 1184-byte SNP ATTESTATION_REPORT
  */
-export function snpReportFromHcl(hcl) {
+export function snpReportFromHcl(hcl: Uint8Array): Uint8Array {
   if (hcl.length < HCL_HEADER_SIZE + SNP_REPORT_SIZE) {
     fail("verification_failed", `az-snp: HCL report too short (${hcl.length} bytes)`);
   }
   const dv = new DataView(hcl.buffer, hcl.byteOffset, hcl.byteLength);
   const magic = dv.getUint32(0, true);
   if (magic !== HCL_MAGIC) {
-    fail("verification_failed", `az-snp: bad HCL signature 0x${magic.toString(16)}, expected "HCLA"`);
+    fail(
+      "verification_failed",
+      `az-snp: bad HCL signature 0x${magic.toString(16)}, expected "HCLA"`,
+    );
   }
   const requestType = dv.getUint32(12, true);
   if (requestType !== HCL_REQUEST_TYPE_SNP) {
-    fail("unsupported", `az-snp: HCL request_type ${requestType} is not SNP (${HCL_REQUEST_TYPE_SNP})`);
+    fail(
+      "unsupported",
+      `az-snp: HCL request_type ${requestType} is not SNP (${HCL_REQUEST_TYPE_SNP})`,
+    );
   }
   return hcl.subarray(HCL_HEADER_SIZE, HCL_HEADER_SIZE + SNP_REPORT_SIZE);
 }
@@ -69,10 +90,8 @@ export function snpReportFromHcl(hcl) {
  * the WASM verifier expects: `{ attestation_report, cert_chain: { vcek } }`,
  * both standard base64. The TPM quote and version are dropped — the WASM
  * verifies the hardware report only (see module note).
- * @param {{ hcl_report?: string, vcek?: string }} evidence
- * @returns {{ attestation_report: string, cert_chain: { vcek: string } }}
  */
-export function hclEvidenceToSnp(evidence) {
+export function hclEvidenceToSnp(evidence: AzSnpEvidence): SnpEvidence {
   if (!evidence.hcl_report || !evidence.vcek) {
     fail("invalid_request", "az-snp evidence requires both hcl_report and vcek");
   }
@@ -87,9 +106,9 @@ export function hclEvidenceToSnp(evidence) {
  * Normalize an evidence object to the bare-SNP shape the WASM verifier accepts.
  * az-snp evidence (carries `hcl_report`) is unwrapped; bare SNP evidence
  * (carries `attestation_report`) is returned unchanged.
- * @param {object} evidence
- * @returns {object}
  */
-export function toWasmEvidence(evidence) {
-  return evidence && evidence.hcl_report ? hclEvidenceToSnp(evidence) : evidence;
+export function toWasmEvidence(evidence: Evidence): SnpEvidence {
+  return evidence && (evidence as AzSnpEvidence).hcl_report
+    ? hclEvidenceToSnp(evidence as AzSnpEvidence)
+    : (evidence as SnpEvidence);
 }

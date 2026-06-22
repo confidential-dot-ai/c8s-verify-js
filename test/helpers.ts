@@ -5,26 +5,48 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { generateServerHybridKey } from "../src/keyagreement.js";
+import {
+  generateServerHybridKey,
+  type ServerKeys,
+  type PublicHalves,
+} from "../src/keyagreement.js";
 import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js";
+import type { AttestationBundle } from "../src/verify.js";
+import type { Evidence } from "../src/hcl.js";
 
-const FIX = join(dirname(fileURLToPath(import.meta.url)), "..", "demo", "fixtures");
+// Compiled to dist/test/helpers.js; the fixtures live in the source tree, two
+// directories up from the compiled file (dist/test -> repo root).
+const FIX = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "demo", "fixtures");
 
-export async function loadFixtures() {
+export interface Fixtures {
+  snpEvidence: Evidence;
+  meshCaPem: string;
+  leafPem: string;
+}
+
+export async function loadFixtures(): Promise<Fixtures> {
   const evidence = JSON.parse(await readFile(join(FIX, "snp-evidence-genoa.json"), "utf8"));
   return {
-    snpEvidence: evidence.evidence ?? evidence,
+    snpEvidence: (evidence.evidence ?? evidence) as Evidence,
     meshCaPem: await readFile(join(FIX, "mesh-ca.crt"), "utf8"),
     leafPem: await readFile(join(FIX, "cds-leaf.crt"), "utf8"),
   };
 }
 
+export interface BuiltBundle {
+  bundle: AttestationBundle;
+  priv: ServerKeys;
+  pub: PublicHalves;
+  meshCaPem: string;
+}
+
 /**
  * Build an attestation bundle bound to `nonce`, mirroring the mock LB.
- * @param {Uint8Array} nonce
- * @param {{ tamperReport?: boolean }} [opts]
  */
-export async function buildBundle(nonce, opts = {}) {
+export async function buildBundle(
+  nonce: Uint8Array,
+  opts: { tamperReport?: boolean } = {},
+): Promise<BuiltBundle> {
   const { snpEvidence, meshCaPem, leafPem } = await loadFixtures();
   const { priv, pub } = await generateServerHybridKey();
 
@@ -35,7 +57,7 @@ export async function buildBundle(nonce, opts = {}) {
     evidence.attestation_report = bytesToBase64(rep);
   }
 
-  const bundle = {
+  const bundle: AttestationBundle = {
     version: "c8s-verify/v1",
     platform: "snp",
     generation: "genoa",

@@ -5,19 +5,32 @@
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
   },
+  "types": "./dist/src/index.d.ts",
   "files": [
-    "src",
-    "wasm",
+    "dist/src",
+    "dist/wasm",
     "PROTOCOL.md",
     "README.md"
   ],
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
-    "test": "node --test",
-    "demo": "node demo/server.js",
-    "gen-fixtures": "bash demo/gen-fixtures.sh"
+    "build": "tsc && bash scripts/copy-assets.sh",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"{src,test,demo}/**/*.ts\" eslint.config.js",
+    "format:check": "prettier --check \"{src,test,demo}/**/*.ts\" eslint.config.js",
+    "check": "npm run typecheck && npm run lint && npm run format:check",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "demo": "npm run build && node dist/demo/server.js",
+    "browser-check": "npm run build && node dist/demo/browser-check.js",
+    "gen-fixtures": "bash demo/gen-fixtures.sh",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "mlkem-wasm": "^0.0.7"
@@ -26,6 +39,13 @@
     "node": ">=20"
   },
   "devDependencies": {
-    "playwright": "^1.60.0"
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.20.0",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^9.1.2",
+    "playwright": "^1.60.0",
+    "prettier": "^3.8.4",
+    "typescript": "~5.6.3",
+    "typescript-eslint": "^8.61.1"
   }
 }

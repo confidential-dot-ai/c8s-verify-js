@@ -6,41 +6,86 @@ import { subtle } from "./crypto-env.js";
 import { verifySnp, verifyAzSnp } from "./wasm-loader.js";
 import { verifyCertChain } from "./x509.js";
 import { decodePEM } from "./pem.js";
-import {
-  concatBytes,
-  bytesToHex,
-  base64UrlToBytes,
-  constantTimeEqual,
-} from "./base64.js";
-import { C8sVerifyError, fail } from "./errors.js";
+import { concatBytes, bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
+import { fail } from "./errors.js";
+import type { Evidence } from "./hcl.js";
 
-/**
- * @typedef {{
- *   measurements: string[],            // accepted launch digests (hex sha-384)
- *   platform?: string,                 // default "snp"
- *   requireFreshness?: boolean,        // default true: report_data must bind session key+nonce
- *   meshCaPem?: string,                // pinned CA; if omitted, bundle.cds_cert_pem is the anchor
- *   at?: Date,                         // validity reference time (default now)
- * }} VerifyPolicy
- */
+export interface VerifyPolicy {
+  /** accepted launch digests (hex sha-384) */
+  measurements: string[];
+  /** default "snp" */
+  platform?: string;
+  /** default true: report_data must bind session key+nonce */
+  requireFreshness?: boolean;
+  /** pinned CA; if omitted, bundle.cds_cert_pem is the anchor */
+  meshCaPem?: string;
+  /** validity reference time (default now) */
+  at?: Date;
+}
 
-/**
- * @typedef {{
- *   version: string, platform: string, generation: string, nonce: string,
- *   evidence: object, cds_cert_pem?: string, ear?: string,
- *   session_pubkey: { x25519: string, mlkem768: string }
- * }} AttestationBundle
- */
+export interface SessionPubKeyB64 {
+  x25519: string;
+  mlkem768: string;
+}
+
+export interface AttestationBundle {
+  version: string;
+  platform: string;
+  generation: string;
+  nonce: string;
+  evidence: Evidence;
+  cds_cert_pem?: string;
+  ear?: string;
+  session_pubkey: SessionPubKeyB64;
+}
+
+/** Claims block inside the WASM verifier's JSON result. */
+export interface WasmClaims {
+  launch_digest: string;
+  report_data?: string;
+  [key: string]: unknown;
+}
+
+/** Parsed JSON result returned by the WASM verifier. */
+export interface WasmVerifyResult {
+  signature_valid: boolean;
+  platform: string;
+  generation?: string;
+  report_version: number;
+  report_data_match: boolean | null;
+  collateral_verified?: boolean;
+  claims: WasmClaims;
+}
+
+export interface CertInfo {
+  subjectCN: string | null;
+  issuerCN: string | null;
+  sha256: string;
+  caSha256: string;
+  notAfter: string;
+}
+
+export interface AttestationResult {
+  ok: true;
+  platform: string;
+  measurement: string;
+  reportVersion: number;
+  reportDataMatch: boolean | null;
+  sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array };
+  cert: CertInfo | null;
+  claims: WasmClaims;
+  warnings: string[];
+}
 
 /**
  * Compute the expected hardware report_data binding: SHA-384(x25519 || mlkem768 || nonce).
  * Returns the raw 48-byte digest (the verifier zero-pads to 64).
- * @param {Uint8Array} x25519
- * @param {Uint8Array} mlkem768
- * @param {Uint8Array} nonce
- * @returns {Promise<Uint8Array>}
  */
-export async function expectedReportData(x25519, mlkem768, nonce) {
+export async function expectedReportData(
+  x25519: Uint8Array,
+  mlkem768: Uint8Array,
+  nonce: Uint8Array,
+): Promise<Uint8Array> {
   const digest = await subtle().digest("SHA-384", concatBytes(x25519, mlkem768, nonce));
   return new Uint8Array(digest);
 }
@@ -52,32 +97,28 @@ export async function expectedReportData(x25519, mlkem768, nonce) {
 // as the precise `report_data_mismatch` code instead of a generic
 // `verification_failed`, and so the soft (requireFreshness=false) path can tell
 // a freshness mismatch apart from a real hardware/signature failure.
-function isFreshnessMismatch(e) {
-  const msg = String(e?.message ?? e);
+function isFreshnessMismatch(e: unknown): boolean {
+  const msg = String((e as { message?: unknown })?.message ?? e);
   return /report_data mismatch|TPM nonce (length )?mismatch/i.test(msg);
+}
+
+/** Best-effort error message for embedding in a typed failure. */
+function errMessage(e: unknown): string {
+  return String((e as { message?: unknown })?.message ?? e);
 }
 
 /**
  * Verify an attestation bundle end to end.
  *
- * @param {AttestationBundle} bundle  the LB /attestation response
- * @param {Uint8Array} nonce          the nonce WE generated and sent
- * @param {VerifyPolicy} policy
- * @returns {Promise<{
- *   ok: true,
- *   platform: string,
- *   measurement: string,
- *   reportVersion: number,
- *   reportDataMatch: boolean|null,
- *   sessionPubKey: { x25519: Uint8Array, mlkem768: Uint8Array },
- *   cert: { subjectCN: string|null, issuerCN: string|null, sha256: string,
- *           caSha256: string, notAfter: string } | null,
- *   claims: object,
- *   warnings: string[],
- * }>}
+ * @param bundle the LB /attestation response
+ * @param nonce the nonce WE generated and sent
  */
-export async function verifyAttestation(bundle, nonce, policy) {
-  const warnings = [];
+export async function verifyAttestation(
+  bundle: AttestationBundle,
+  nonce: Uint8Array,
+  policy: VerifyPolicy,
+): Promise<AttestationResult> {
+  const warnings: string[] = [];
   const wantPlatform = policy.platform ?? "snp";
   const requireFreshness = policy.requireFreshness !== false;
 
@@ -94,11 +135,7 @@ export async function verifyAttestation(bundle, nonce, policy) {
   };
 
   // 3. Hardware attestation via WASM. report_data binds the session key + nonce.
-  const expected = await expectedReportData(
-    sessionPubKey.x25519,
-    sessionPubKey.mlkem768,
-    nonce,
-  );
+  const expected = await expectedReportData(sessionPubKey.x25519, sessionPubKey.mlkem768, nonce);
 
   // az-snp gets full verification (HCL report + vTPM quote), with `expected`
   // checked against the TPM quote's extraData. Bare snp checks the SNP report
@@ -109,12 +146,12 @@ export async function verifyAttestation(bundle, nonce, policy) {
   // mode (requireFreshness=false) we omit the anchor to get a non-throwing
   // result and warn below; bare snp returns a non-throwing bool either way.
   const azSnpAnchor = requireFreshness ? expected : undefined;
-  let result;
+  let result: WasmVerifyResult;
   try {
     const out = isAzSnp
       ? await verifyAzSnp(JSON.stringify(bundle.evidence), azSnpAnchor)
       : await verifySnp(bundle.evidence, bundle.generation, expected);
-    result = JSON.parse(out);
+    result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
     // az-snp fails closed on a freshness mismatch — surface it as the precise
     // report_data_mismatch code rather than a generic verification_failed.
@@ -126,7 +163,7 @@ export async function verifyAttestation(bundle, nonce, policy) {
       );
     }
     // Otherwise the WASM verifier threw on VCEK chain / report signature failure.
-    fail("verification_failed", `hardware attestation failed: ${e.message ?? e}`, { cause: e });
+    fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
 
   if (result.signature_valid !== true) {
@@ -164,7 +201,7 @@ export async function verifyAttestation(bundle, nonce, policy) {
   }
 
   // 6. CDS / mesh-CA certificate: parse, check validity, chain to the anchor.
-  let cert = null;
+  let cert: CertInfo | null = null;
   if (bundle.cds_cert_pem) {
     const blocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
     if (blocks.length === 0) {
@@ -206,18 +243,33 @@ export async function verifyAttestation(bundle, nonce, policy) {
   };
 }
 
-/**
- * @typedef {{
- *   generation?: string,                // "milan" | "genoa" | "turin"; required for "snp",
- *                                       //   ignored for "az-snp" (auto-detected from CPUID)
- *   measurements?: string[],            // accepted launch digests (hex sha-384); empty = warn only
- *   expectedReportData?: Uint8Array,    // raw bytes the freshness anchor must equal (e.g.
- *                                       //   SHA-384(pubkey ‖ nonce)); when provided, a mismatch
- *                                       //   fails closed. For "snp" this is the SNP report_data;
- *                                       //   for "az-snp" it is the vTPM quote's extraData.
- *   platform?: string,                  // default "snp"; set "az-snp" for full Azure vTPM verification
- * }} VerifyEvidenceOptions
- */
+export interface VerifyEvidenceOptions {
+  /**
+   * "milan" | "genoa" | "turin"; required for "snp", ignored for "az-snp"
+   * (auto-detected from CPUID)
+   */
+  generation?: string;
+  /** accepted launch digests (hex sha-384); empty = warn only */
+  measurements?: string[];
+  /**
+   * raw bytes the freshness anchor must equal (e.g. SHA-384(pubkey ‖ nonce));
+   * when provided, a mismatch fails closed. For "snp" this is the SNP
+   * report_data; for "az-snp" it is the vTPM quote's extraData.
+   */
+  expectedReportData?: Uint8Array;
+  /** default "snp"; set "az-snp" for full Azure vTPM verification */
+  platform?: string;
+}
+
+export interface EvidenceResult {
+  ok: true;
+  platform: string;
+  measurement: string;
+  reportVersion: number;
+  reportDataMatch: boolean | null;
+  claims: WasmClaims;
+  warnings: string[];
+}
 
 /**
  * Verify a bare SEV-SNP evidence object: the AMD hardware signature + VCEK chain
@@ -231,17 +283,15 @@ export async function verifyAttestation(bundle, nonce, policy) {
  * document binding `SHA-384(cert_spki ‖ challenge)`). Cluster identity
  * (mesh-CA chaining) must then be checked separately. Fails closed with a typed
  * {@link C8sVerifyError}.
- *
- * @param {object} evidence  attestation-rs SnpEvidence: { attestation_report, cert_chain: { vcek } }
- * @param {VerifyEvidenceOptions} opts
- * @returns {Promise<{ ok: true, platform: string, measurement: string,
- *   reportVersion: number, reportDataMatch: boolean|null, claims: object, warnings: string[] }>}
  */
-export async function verifyEvidence(evidence, opts) {
+export async function verifyEvidence(
+  evidence: Evidence,
+  opts: VerifyEvidenceOptions,
+): Promise<EvidenceResult> {
   if (!evidence || typeof evidence !== "object") {
     fail("invalid_request", "evidence object is required");
   }
-  const warnings = [];
+  const warnings: string[] = [];
   const wantPlatform = opts.platform ?? "snp";
   const isAzSnp = wantPlatform === "az-snp";
   // az-snp auto-detects the generation from the report CPUID; bare snp needs it.
@@ -251,12 +301,12 @@ export async function verifyEvidence(evidence, opts) {
   const expected = opts.expectedReportData;
 
   // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
-  let result;
+  let result: WasmVerifyResult;
   try {
     const out = isAzSnp
       ? await verifyAzSnp(JSON.stringify(evidence), expected)
-      : await verifySnp(evidence, opts.generation, expected);
-    result = JSON.parse(out);
+      : await verifySnp(evidence, opts.generation!, expected);
+    result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
     // az-snp fails closed (throws) on a freshness mismatch when an anchor is
     // supplied — map it to the precise report_data_mismatch code instead of the
@@ -268,7 +318,7 @@ export async function verifyEvidence(evidence, opts) {
         { details: { expected: bytesToHex(expected) }, cause: e },
       );
     }
-    fail("verification_failed", `hardware attestation failed: ${e.message ?? e}`, { cause: e });
+    fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
 
   if (result.signature_valid !== true) {

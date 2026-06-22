@@ -1,7 +1,7 @@
 # `wasm/` — the attestation-rs verifier (generated, not committed)
 
 This directory holds the WebAssembly build of the attestation-rs SNP / az-snp
-verifier that `src/wasm-loader.js` imports. **The `.wasm`/`.js` artifacts are
+verifier that `src/wasm-loader.ts` imports. **The `.wasm`/`.js` artifacts are
 generated, not committed** — they are `.gitignore`d. A fresh checkout has no
 verifier until you build it from the in-tree source submodule:
 
@@ -10,7 +10,7 @@ git submodule update --init vendor/attestation-rs   # once, after clone
 npm run build:wasm                                  # or: bash scripts/build-wasm.sh
 ```
 
-The library cannot load (`src/wasm-loader.js` imports `./attestation_wasm.js`
+The library cannot load (`src/wasm-loader.ts` imports `./attestation_wasm.js`
 and `./attestation_wasm_bg.wasm`) and the test suite will fail until this runs.
 
 ## Provenance
@@ -34,7 +34,7 @@ pin variable. To move to a newer `attestation-rs`:
 git -C vendor/attestation-rs fetch origin
 git -C vendor/attestation-rs checkout <new-commit>
 git add vendor/attestation-rs        # records the new gitlink
-npm run build:wasm && node --test    # rebuild + verify
+npm run build:wasm && npm test    # rebuild + verify
 ```
 
 Update the table above in the same change.
@@ -42,9 +42,9 @@ Update the table above in the same change.
 > **az-snp contract note.** As of this pin, `verify_az_snp` *fails closed* — it
 > **throws** on a freshness (TPM quote `extraData`) mismatch rather than
 > returning a non-throwing `report_data_match: false`. The policy layer
-> (`src/verify.js`) catches that throw and surfaces it as the `report_data_mismatch`
+> (`src/verify.ts`) catches that throw and surfaces it as the `report_data_mismatch`
 > error code. Bare `verify_snp` still returns a non-throwing bool. If you bump the
-> pin and that contract changes, revisit `isFreshnessMismatch` in `src/verify.js`.
+> pin and that contract changes, revisit `isFreshnessMismatch` in `src/verify.ts`.
 
 ## Build inputs
 

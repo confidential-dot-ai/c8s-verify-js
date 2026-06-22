@@ -5,7 +5,7 @@ import { cborEncode, cborDecode } from "../src/cbor.js";
 import { bytesToHex, hexToBytes } from "../src/base64.js";
 
 // RFC 8949 Appendix A vectors for the subset we implement.
-const VECTORS = [
+const VECTORS: [unknown, string][] = [
   [0, "00"],
   [1, "01"],
   [10, "0a"],
@@ -56,7 +56,7 @@ test("tunnel envelope round-trips with a raw byte body", () => {
     headers: { "content-type": "application/json" },
     body,
   };
-  const dec = cborDecode(cborEncode(env));
+  const dec = cborDecode(cborEncode(env)) as Record<string, unknown>;
   assert.equal(dec.method, "POST");
   assert.equal(dec.path, "/v1/chat");
   assert.deepEqual(dec.headers, { "content-type": "application/json" });
@@ -65,7 +65,7 @@ test("tunnel envelope round-trips with a raw byte body", () => {
 
 test("record map round-trips", () => {
   const rec = { iv: hexToBytes("0102030405060708090a0b0c"), ct: hexToBytes("deadbeef") };
-  const dec = cborDecode(cborEncode(rec));
+  const dec = cborDecode(cborEncode(rec)) as Record<string, unknown>;
   assert.deepEqual(dec.iv, rec.iv);
   assert.deepEqual(dec.ct, rec.ct);
 });

@@ -9,10 +9,8 @@ export const NONCE_BYTES = 32;
 
 /**
  * Generate a cryptographically secure random nonce.
- * @param {number} [len=NONCE_BYTES]
- * @returns {Uint8Array}
  */
-export function generateNonce(len = NONCE_BYTES) {
+export function generateNonce(len: number = NONCE_BYTES): Uint8Array {
   if (!Number.isInteger(len) || len <= 0) {
     throw new Error("nonce length must be a positive integer");
   }

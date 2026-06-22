@@ -12,7 +12,7 @@ import { subtle } from "./crypto-env.js";
 import { concatBytes, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError } from "./errors.js";
 
-const ML_KEM = { name: "ML-KEM-768" };
+const ML_KEM = { name: "ML-KEM-768" } as const;
 
 // ML-KEM-768 fixed sizes (bytes).
 export const MLKEM768_EK_BYTES = 1184; // encapsulation (public) key
@@ -21,19 +21,40 @@ export const X25519_PUB_BYTES = 32;
 
 const HKDF_INFO = utf8ToBytes("c8s-verify/over-encryption/v1");
 
-/** @param {ArrayBuffer|Uint8Array} b @returns {Uint8Array} */
-function u8(b) {
+/** Raw public halves of the LB's hybrid key. */
+export interface PublicHalves {
+  x25519: Uint8Array;
+  mlkem768: Uint8Array;
+}
+
+/** The client's contribution sent to the LB to complete the handshake. */
+export interface Handshake {
+  clientX25519: Uint8Array;
+  mlkemCiphertext: Uint8Array;
+}
+
+/** Server-side (LB) private key handles. */
+export interface ServerKeys {
+  x25519Priv: CryptoKey;
+  mlkemPriv: CryptoKey;
+}
+
+function u8(b: ArrayBuffer | Uint8Array): Uint8Array {
   return b instanceof Uint8Array ? b : new Uint8Array(b);
 }
 
 /**
  * Derive the AES-256-GCM session key from the two shared secrets and the nonce.
- * @param {Uint8Array} mlkemSecret 32-byte ML-KEM shared secret
- * @param {Uint8Array} x25519Secret 32-byte X25519 shared secret
- * @param {Uint8Array} nonce session nonce (HKDF salt)
- * @returns {Promise<CryptoKey>} AES-256-GCM key (non-extractable)
+ * @param mlkemSecret 32-byte ML-KEM shared secret
+ * @param x25519Secret 32-byte X25519 shared secret
+ * @param nonce session nonce (HKDF salt)
+ * @returns AES-256-GCM key (non-extractable)
  */
-export async function deriveSessionKey(mlkemSecret, x25519Secret, nonce) {
+export async function deriveSessionKey(
+  mlkemSecret: Uint8Array,
+  x25519Secret: Uint8Array,
+  nonce: Uint8Array,
+): Promise<CryptoKey> {
   const ikm = concatBytes(mlkemSecret, x25519Secret);
   const hkdfKey = await subtle().importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
   const bits = await subtle().deriveBits(
@@ -51,14 +72,13 @@ export async function deriveSessionKey(mlkemSecret, x25519Secret, nonce) {
  * Client side: encapsulate against the LB's attested hybrid public key and derive
  * the session key.
  *
- * @param {{ x25519: Uint8Array, mlkem768: Uint8Array }} peerPub raw public halves
- * @param {Uint8Array} nonce session nonce
- * @returns {Promise<{
- *   key: CryptoKey,
- *   handshake: { clientX25519: Uint8Array, mlkemCiphertext: Uint8Array }
- * }>}
+ * @param peerPub raw public halves
+ * @param nonce session nonce
  */
-export async function clientKeyAgreement(peerPub, nonce) {
+export async function clientKeyAgreement(
+  peerPub: PublicHalves,
+  nonce: Uint8Array,
+): Promise<{ key: CryptoKey; handshake: Handshake }> {
   if (peerPub.mlkem768.length !== MLKEM768_EK_BYTES) {
     throw new C8sVerifyError(
       "key_binding",
@@ -76,21 +96,14 @@ export async function clientKeyAgreement(peerPub, nonce) {
   const ek = await mlkem.importKey("raw-public", peerPub.mlkem768, ML_KEM, true, [
     "encapsulateBits",
   ]);
-  const { sharedKey: mlkemSecret, ciphertext: mlkemCt } = await mlkem.encapsulateBits(
-    ML_KEM,
-    ek,
-  );
+  const { sharedKey: mlkemSecret, ciphertext: mlkemCt } = await mlkem.encapsulateBits(ML_KEM, ek);
 
   // Classical half: ephemeral X25519, ECDH against the LB's X25519 key.
-  const clientPair = await subtle().generateKey({ name: "X25519" }, true, ["deriveBits"]);
+  const clientPair = (await subtle().generateKey({ name: "X25519" }, true, [
+    "deriveBits",
+  ])) as CryptoKeyPair;
   const clientX25519 = u8(await subtle().exportKey("raw", clientPair.publicKey));
-  const peerX25519 = await subtle().importKey(
-    "raw",
-    peerPub.x25519,
-    { name: "X25519" },
-    false,
-    [],
-  );
+  const peerX25519 = await subtle().importKey("raw", peerPub.x25519, { name: "X25519" }, false, []);
   const x25519Secret = u8(
     await subtle().deriveBits({ name: "X25519", public: peerX25519 }, clientPair.privateKey, 256),
   );
@@ -103,13 +116,12 @@ export async function clientKeyAgreement(peerPub, nonce) {
  * LB / server side: decapsulate the client's ciphertext and ECDH against the
  * client's X25519 public key to derive the same session key. Used by the mock LB
  * and by tests.
- *
- * @param {{ x25519Priv: CryptoKey, mlkemPriv: any }} serverKeys
- * @param {{ clientX25519: Uint8Array, mlkemCiphertext: Uint8Array }} handshake
- * @param {Uint8Array} nonce
- * @returns {Promise<CryptoKey>}
  */
-export async function serverKeyAgreement(serverKeys, handshake, nonce) {
+export async function serverKeyAgreement(
+  serverKeys: ServerKeys,
+  handshake: Handshake,
+  nonce: Uint8Array,
+): Promise<CryptoKey> {
   const mlkemSecret = u8(
     await mlkem.decapsulateBits(ML_KEM, serverKeys.mlkemPriv, handshake.mlkemCiphertext),
   );
@@ -129,14 +141,12 @@ export async function serverKeyAgreement(serverKeys, handshake, nonce) {
 /**
  * Generate a fresh LB-side hybrid keypair and return both the private handles and
  * the raw public halves to publish. Used by the mock LB.
- *
- * @returns {Promise<{
- *   priv: { x25519Priv: CryptoKey, mlkemPriv: any },
- *   pub: { x25519: Uint8Array, mlkem768: Uint8Array }
- * }>}
  */
-export async function generateServerHybridKey() {
-  const x = await subtle().generateKey({ name: "X25519" }, true, ["deriveBits"]);
+export async function generateServerHybridKey(): Promise<{
+  priv: ServerKeys;
+  pub: PublicHalves;
+}> {
+  const x = (await subtle().generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;
   const x25519 = u8(await subtle().exportKey("raw", x.publicKey));
 
   const m = await mlkem.generateKey(ML_KEM, true, ["encapsulateBits", "decapsulateBits"]);

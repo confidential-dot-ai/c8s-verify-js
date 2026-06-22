@@ -40,7 +40,7 @@ trap 'rm -rf "$work"' EXIT
 ( cd "$src/crates/attestation-wasm" && wasm-pack build --target web --out-dir "$work/pkg" )
 
 mkdir -p "$out"
-# Copy only the runtime artifacts the library imports (see src/wasm-loader.js).
+# Copy only the runtime artifacts the library imports (see src/wasm-loader.ts).
 cp "$work/pkg/attestation_wasm.js" "$work/pkg/attestation_wasm_bg.wasm" "$out/"
 [ -f "$work/pkg/attestation_wasm.d.ts" ] &&
   cp "$work/pkg/attestation_wasm.d.ts" "$work/pkg/attestation_wasm_bg.wasm.d.ts" "$out/" 2>/dev/null || true

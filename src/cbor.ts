@@ -10,8 +10,18 @@
 
 import { utf8ToBytes, bytesToUtf8, concatBytes } from "./base64.js";
 
+/** Any value the codec can round-trip. */
+export type CborValue =
+  | number
+  | string
+  | boolean
+  | null
+  | Uint8Array
+  | CborValue[]
+  | { [key: string]: CborValue };
+
 /** Encode a length/value argument into a CBOR head for the given major type. */
-function head(major, n) {
+function head(major: number, n: number): Uint8Array {
   const mt = major << 5;
   if (n < 24) return Uint8Array.of(mt | n);
   if (n < 0x100) return Uint8Array.of(mt | 24, n);
@@ -24,12 +34,18 @@ function head(major, n) {
   const lo = n >>> 0;
   return Uint8Array.of(
     mt | 27,
-    (hi >>> 24) & 0xff, (hi >>> 16) & 0xff, (hi >>> 8) & 0xff, hi & 0xff,
-    (lo >>> 24) & 0xff, (lo >>> 16) & 0xff, (lo >>> 8) & 0xff, lo & 0xff,
+    (hi >>> 24) & 0xff,
+    (hi >>> 16) & 0xff,
+    (hi >>> 8) & 0xff,
+    hi & 0xff,
+    (lo >>> 24) & 0xff,
+    (lo >>> 16) & 0xff,
+    (lo >>> 8) & 0xff,
+    lo & 0xff,
   );
 }
 
-function encodeInto(value, out) {
+function encodeInto(value: unknown, out: Uint8Array[]): void {
   if (value === null || value === undefined) {
     out.push(Uint8Array.of(0xf6)); // null
     return;
@@ -61,7 +77,9 @@ function encodeInto(value, out) {
   if (typeof value === "object") {
     // Plain object => CBOR map with text-string keys. undefined-valued fields are
     // dropped, mirroring Go's `omitempty` so absent and empty are indistinguishable.
-    const entries = Object.entries(value).filter(([, v]) => v !== undefined);
+    const entries = Object.entries(value as Record<string, unknown>).filter(
+      ([, v]) => v !== undefined,
+    );
     out.push(head(5, entries.length));
     for (const [k, v] of entries) {
       const kb = utf8ToBytes(k);
@@ -75,19 +93,26 @@ function encodeInto(value, out) {
 
 /**
  * Encode a JS value to CBOR bytes.
- * @param {*} value
- * @returns {Uint8Array}
  */
-export function cborEncode(value) {
-  const out = [];
+export function cborEncode(value: unknown): Uint8Array {
+  const out: Uint8Array[] = [];
   encodeInto(value, out);
   return concatBytes(...out);
 }
 
+interface DecodeState {
+  bytes: Uint8Array;
+  pos: number;
+  dv: DataView;
+}
+
 /** Cursor over the input bytes. */
-function readArg(st, ai) {
+function readArg(st: DecodeState, ai: number): number {
   if (ai < 24) return ai;
-  if (ai === 24) return need(st, 1) && st.bytes[st.pos++];
+  if (ai === 24) {
+    need(st, 1);
+    return st.bytes[st.pos++];
+  }
   if (ai === 25) {
     need(st, 2);
     const v = (st.bytes[st.pos] << 8) | st.bytes[st.pos + 1];
@@ -110,19 +135,19 @@ function readArg(st, ai) {
   throw new Error(`cbor: unsupported additional info ${ai} (indefinite lengths not supported)`);
 }
 
-function need(st, n) {
+function need(st: DecodeState, n: number): true {
   if (st.pos + n > st.bytes.length) throw new Error("cbor: truncated input");
   return true;
 }
 
-function readBytes(st, n) {
+function readBytes(st: DecodeState, n: number): Uint8Array {
   need(st, n);
   const out = st.bytes.slice(st.pos, st.pos + n);
   st.pos += n;
   return out;
 }
 
-function decodeValue(st) {
+function decodeValue(st: DecodeState): CborValue | undefined {
   need(st, 1);
   const ib = st.bytes[st.pos++];
   const major = ib >> 5;
@@ -137,19 +162,21 @@ function decodeValue(st) {
       return readBytes(st, readArg(st, ai));
     case 3: // text string
       return bytesToUtf8(readBytes(st, readArg(st, ai)));
-    case 4: { // array
+    case 4: {
+      // array
       const n = readArg(st, ai);
-      const arr = new Array(n);
-      for (let i = 0; i < n; i++) arr[i] = decodeValue(st);
+      const arr: CborValue[] = new Array<CborValue>(n);
+      for (let i = 0; i < n; i++) arr[i] = decodeValue(st) as CborValue;
       return arr;
     }
-    case 5: { // map
+    case 5: {
+      // map
       const n = readArg(st, ai);
-      const obj = {};
+      const obj: Record<string, CborValue> = {};
       for (let i = 0; i < n; i++) {
         const k = decodeValue(st);
         if (typeof k !== "string") throw new Error("cbor: only string map keys are supported");
-        obj[k] = decodeValue(st);
+        obj[k] = decodeValue(st) as CborValue;
       }
       return obj;
     }
@@ -158,8 +185,16 @@ function decodeValue(st) {
       if (ai === 21) return true;
       if (ai === 22) return null;
       if (ai === 23) return undefined;
-      if (ai === 26) { const v = st.dv.getFloat32(st.pos); st.pos += 4; return v; }
-      if (ai === 27) { const v = st.dv.getFloat64(st.pos); st.pos += 8; return v; }
+      if (ai === 26) {
+        const v = st.dv.getFloat32(st.pos);
+        st.pos += 4;
+        return v;
+      }
+      if (ai === 27) {
+        const v = st.dv.getFloat64(st.pos);
+        st.pos += 8;
+        return v;
+      }
       throw new Error(`cbor: unsupported simple value ${ai}`);
     default:
       throw new Error(`cbor: unsupported major type ${major}`);
@@ -169,14 +204,12 @@ function decodeValue(st) {
 /**
  * Decode CBOR bytes to a JS value. Byte strings decode to Uint8Array, text strings
  * to string, maps to plain objects.
- * @param {Uint8Array} bytes
- * @returns {*}
  */
-export function cborDecode(bytes) {
-  const st = {
+export function cborDecode(bytes: Uint8Array): CborValue {
+  const st: DecodeState = {
     bytes,
     pos: 0,
     dv: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength),
   };
-  return decodeValue(st);
+  return decodeValue(st) as CborValue;
 }

@@ -9,9 +9,12 @@ import { C8sVerifyError } from "./errors.js";
 const IV_BYTES = 12;
 
 /**
- * @typedef {{ iv: Uint8Array, ct: Uint8Array }} WireRecord
- *   Raw AES-GCM record; the tunnel transport carries iv/ct as CBOR byte strings.
+ * Raw AES-GCM record; the tunnel transport carries iv/ct as CBOR byte strings.
  */
+export interface WireRecord {
+  iv: Uint8Array;
+  ct: Uint8Array;
+}
 
 // The method and path are sealed inside the request envelope, so the record AAD
 // is a fixed domain separator rather than per-route. Must match Go overenc.
@@ -19,12 +22,12 @@ const REQUEST_AAD = utf8ToBytes("c8s-verify/v1/tunnel-request");
 const RESPONSE_AAD = utf8ToBytes("c8s-verify/v1/tunnel-response");
 
 /** AAD for a request record. */
-export function requestAAD() {
+export function requestAAD(): Uint8Array {
   return REQUEST_AAD;
 }
 
 /** AAD for a response record. */
-export function responseAAD() {
+export function responseAAD(): Uint8Array {
   return RESPONSE_AAD;
 }
 
@@ -33,19 +36,17 @@ export function responseAAD() {
  * hybrid handshake; the AES key is identical on both ends.
  */
 export class Channel {
-  /** @param {CryptoKey} key AES-256-GCM key */
-  constructor(key) {
-    /** @type {CryptoKey} */
+  readonly key: CryptoKey;
+
+  /** @param key AES-256-GCM key */
+  constructor(key: CryptoKey) {
     this.key = key;
   }
 
   /**
    * Encrypt a plaintext record.
-   * @param {Uint8Array} plaintext
-   * @param {Uint8Array} aad
-   * @returns {Promise<WireRecord>}
    */
-  async seal(plaintext, aad) {
+  async seal(plaintext: Uint8Array, aad: Uint8Array): Promise<WireRecord> {
     const iv = randomBytes(IV_BYTES);
     const ct = await subtle().encrypt(
       { name: "AES-GCM", iv, additionalData: aad },
@@ -57,11 +58,8 @@ export class Channel {
 
   /**
    * Decrypt a record. Throws channel_error on authentication failure.
-   * @param {WireRecord} record
-   * @param {Uint8Array} aad
-   * @returns {Promise<Uint8Array>}
    */
-  async open(record, aad) {
+  async open(record: WireRecord, aad: Uint8Array): Promise<Uint8Array> {
     const iv = record?.iv;
     const ct = record?.ct;
     if (!(iv instanceof Uint8Array) || !(ct instanceof Uint8Array)) {
@@ -71,11 +69,7 @@ export class Channel {
       throw new C8sVerifyError("channel_error", `record IV must be ${IV_BYTES} bytes`);
     }
     try {
-      const pt = await subtle().decrypt(
-        { name: "AES-GCM", iv, additionalData: aad },
-        this.key,
-        ct,
-      );
+      const pt = await subtle().decrypt({ name: "AES-GCM", iv, additionalData: aad }, this.key, ct);
       return new Uint8Array(pt);
     } catch (e) {
       throw new C8sVerifyError(
@@ -87,12 +81,12 @@ export class Channel {
   }
 
   /** Convenience: seal a UTF-8 string. */
-  async sealText(text, aad) {
+  async sealText(text: string, aad: Uint8Array): Promise<WireRecord> {
     return this.seal(utf8ToBytes(text), aad);
   }
 
   /** Convenience: open to a UTF-8 string. */
-  async openText(record, aad) {
+  async openText(record: WireRecord, aad: Uint8Array): Promise<string> {
     return bytesToUtf8(await this.open(record, aad));
   }
 }

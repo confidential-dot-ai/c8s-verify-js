@@ -1,28 +1,30 @@
 // Browser demo: drives the c8s-verify library step by step against the mock LB,
-// visualising each verification stage. Imports the library straight from source
-// (no bundler) using the import map in index.html for the mlkem-wasm dependency.
+// visualising each verification stage. Imports the library straight from the
+// compiled output (no bundler) using the import map in index.html for the
+// mlkem-wasm dependency. Relative imports resolve to dist/src once compiled.
 
-import { generateNonce } from "/src/nonce.js";
-import { verifyAttestation } from "/src/verify.js";
-import { initVerifier } from "/src/wasm-loader.js";
-import { clientKeyAgreement } from "/src/keyagreement.js";
-import { Channel, requestAAD, responseAAD } from "/src/channel.js";
-import { cborEncode, cborDecode } from "/src/cbor.js";
+import { generateNonce } from "../src/nonce.js";
+import { verifyAttestation, type AttestationResult } from "../src/verify.js";
+import { initVerifier } from "../src/wasm-loader.js";
+import { clientKeyAgreement } from "../src/keyagreement.js";
+import { Channel, requestAAD, responseAAD } from "../src/channel.js";
+import { cborEncode, cborDecode } from "../src/cbor.js";
 import {
   bytesToBase64Url,
-  base64UrlToBytes,
   base64ToBytes,
   bytesToBase64,
   utf8ToBytes,
   bytesToUtf8,
-} from "/src/base64.js";
-import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "/demo/config.js";
+} from "../src/base64.js";
+import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "./config.js";
 
-const stepsEl = document.getElementById("steps");
-const runBtn = document.getElementById("run");
-const tamperEl = document.getElementById("tamper");
+const stepsEl = document.getElementById("steps")!;
+const runBtn = document.getElementById("run") as HTMLButtonElement;
+const tamperEl = document.getElementById("tamper") as HTMLInputElement;
 
-const STEPS = [
+type StepState = "run" | "ok" | "bad" | "warn" | "pending";
+
+const STEPS: [string, string][] = [
   ["nonce", "Generate a fresh random nonce"],
   ["fetch", "Fetch attestation bundle from the LB"],
   ["wasm", "Verify SEV-SNP hardware evidence (WASM)"],
@@ -33,9 +35,8 @@ const STEPS = [
   ["echo", "Send an over-encrypted request"],
 ];
 
-/** @type {Record<string, HTMLElement>} */
-const nodes = {};
-function render() {
+const nodes: Record<string, HTMLElement> = {};
+function render(): void {
   stepsEl.innerHTML = "";
   for (const [id, title] of STEPS) {
     const el = document.createElement("div");
@@ -45,24 +46,23 @@ function render() {
     nodes[id] = el;
   }
 }
-function set(id, state, detail) {
+function set(id: string, state: StepState, detail?: string): void {
   const el = nodes[id];
   el.className = `step ${state}`;
-  const icon = { run: "◌", ok: "✓", bad: "✗", warn: "⚠" }[state] ?? "○";
-  el.querySelector(".icon").textContent = icon;
-  if (detail !== undefined) el.querySelector(".detail").textContent = detail;
+  const icon = ({ run: "◌", ok: "✓", bad: "✗", warn: "⚠" } as Record<string, string>)[state] ?? "○";
+  el.querySelector(".icon")!.textContent = icon;
+  if (detail !== undefined) el.querySelector(".detail")!.textContent = detail;
 }
 
-const BASE = location.origin;
 const PREFIX = "/.well-known/c8s";
 
-async function fetchPinnedMeshCa() {
+async function fetchPinnedMeshCa(): Promise<string> {
   // Out-of-band trust anchor: in production the operator ships you the mesh CA.
   const res = await fetch("/demo/fixtures/mesh-ca.crt");
   return res.text();
 }
 
-async function run() {
+async function run(): Promise<void> {
   render();
   runBtn.disabled = true;
   const tamper = tamperEl.checked;
@@ -101,7 +101,7 @@ async function run() {
     // 3–6: verifyAttestation runs WASM verify + measurement + binding + cert chain.
     // We surface the sub-results by inspecting the returned object / thrown error.
     set("wasm", "run");
-    let result;
+    let result!: AttestationResult;
     try {
       result = await verifyAttestation(bundle, nonce, {
         measurements: DEMO_MEASUREMENTS,
@@ -110,16 +110,30 @@ async function run() {
       });
     } catch (e) {
       // Attribute the failure to the right step.
-      const code = e.code ?? "verification_failed";
-      if (code === "verification_failed") set("wasm", "bad", `✗ ${e.message}`);
-      else if (code === "measurement_denied") { set("wasm", "ok", "signature OK"); set("measure", "bad", `✗ ${e.message}`); }
-      else if (code === "report_data_mismatch") { set("wasm", "ok"); set("measure", "ok"); set("binding", "bad", `✗ ${e.message}`); }
-      else if (code === "nonce_mismatch") set("fetch", "bad", `✗ ${e.message}`);
-      else if (code.includes("cert")) { set("wasm","ok"); set("measure","ok"); set("cert", "bad", `✗ ${e.message}`); }
+      const err = e as { code?: string; message?: string };
+      const code = err.code ?? "verification_failed";
+      if (code === "verification_failed") set("wasm", "bad", `✗ ${err.message}`);
+      else if (code === "measurement_denied") {
+        set("wasm", "ok", "signature OK");
+        set("measure", "bad", `✗ ${err.message}`);
+      } else if (code === "report_data_mismatch") {
+        set("wasm", "ok");
+        set("measure", "ok");
+        set("binding", "bad", `✗ ${err.message}`);
+      } else if (code === "nonce_mismatch") set("fetch", "bad", `✗ ${err.message}`);
+      else if (code.includes("cert")) {
+        set("wasm", "ok");
+        set("measure", "ok");
+        set("cert", "bad", `✗ ${err.message}`);
+      }
       throw e;
     }
 
-    set("wasm", "ok", `signature_valid=true · report v${result.reportVersion} · platform=${result.platform}`);
+    set(
+      "wasm",
+      "ok",
+      `signature_valid=true · report v${result.reportVersion} · platform=${result.platform}`,
+    );
     set("measure", "ok", `launch_digest ∈ allowlist\n${result.measurement}`);
 
     if (result.reportDataMatch === true) {
@@ -136,9 +150,9 @@ async function run() {
     set(
       "cert",
       "ok",
-      `leaf CN=${result.cert.subjectCN}  issuer CN=${result.cert.issuerCN}\n` +
-        `leaf sha256=${result.cert.sha256.slice(0, 32)}…\n` +
-        `mesh-CA sha256=${result.cert.caSha256.slice(0, 32)}… (pinned)`,
+      `leaf CN=${result.cert!.subjectCN}  issuer CN=${result.cert!.issuerCN}\n` +
+        `leaf sha256=${result.cert!.sha256.slice(0, 32)}…\n` +
+        `mesh-CA sha256=${result.cert!.caSha256.slice(0, 32)}… (pinned)`,
     );
 
     // 7. handshake
@@ -180,8 +194,11 @@ async function run() {
       body: cborEncode(rec),
     });
     if (!echoRes.ok) throw new Error(`tunnel returned HTTP ${echoRes.status}`);
-    const respRec = cborDecode(new Uint8Array(await echoRes.arrayBuffer()));
-    const respEnv = cborDecode(await channel.open(respRec, responseAAD()));
+    const respRec = cborDecode(new Uint8Array(await echoRes.arrayBuffer())) as unknown as {
+      iv: Uint8Array;
+      ct: Uint8Array;
+    };
+    const respEnv = cborDecode(await channel.open(respRec, responseAAD())) as { body?: Uint8Array };
     const plain = bytesToUtf8(respEnv.body ?? new Uint8Array(0));
     set("echo", "ok", `sent (sealed envelope): ${JSON.stringify(msg)}\nrecv (opened): ${plain}`);
   } catch (e) {

@@ -1,14 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { verifyAttestation, verifyEvidence, expectedReportData } from "../src/verify.js";
+import {
+  verifyAttestation,
+  verifyEvidence,
+  expectedReportData,
+  type VerifyPolicy,
+} from "../src/verify.js";
 import { generateNonce } from "../src/nonce.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { DEMO_MEASUREMENTS } from "../demo/config.js";
 import { buildBundle, loadFixtures } from "./helpers.js";
 import { base64ToBytes, bytesToBase64 } from "../src/base64.js";
 
-const POLICY = { measurements: DEMO_MEASUREMENTS, requireFreshness: false };
+const POLICY: VerifyPolicy = { measurements: DEMO_MEASUREMENTS, requireFreshness: false };
 
 test("verifies a well-formed bundle (recorded evidence)", async () => {
   const nonce = generateNonce();
@@ -17,8 +22,8 @@ test("verifies a well-formed bundle (recorded evidence)", async () => {
   assert.equal(r.ok, true);
   assert.equal(r.platform, "snp");
   assert.equal(r.measurement, DEMO_MEASUREMENTS[0]);
-  assert.equal(r.cert.subjectCN, "lb.demo.c8s.local");
-  assert.equal(r.cert.issuerCN, "c8s-demo-mesh-ca");
+  assert.equal(r.cert!.subjectCN, "lb.demo.c8s.local");
+  assert.equal(r.cert!.issuerCN, "c8s-demo-mesh-ca");
 });
 
 test("rejects a nonce mismatch", async () => {
@@ -26,7 +31,7 @@ test("rejects a nonce mismatch", async () => {
   const { bundle, meshCaPem } = await buildBundle(nonce);
   await assert.rejects(
     () => verifyAttestation(bundle, generateNonce(), { ...POLICY, meshCaPem }),
-    (e) => e instanceof C8sVerifyError && e.code === "nonce_mismatch",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "nonce_mismatch",
   );
 });
 
@@ -35,7 +40,7 @@ test("rejects tampered hardware evidence (signature fails in WASM)", async () =>
   const { bundle, meshCaPem } = await buildBundle(nonce, { tamperReport: true });
   await assert.rejects(
     () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
-    (e) => e instanceof C8sVerifyError && e.code === "verification_failed",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "verification_failed",
   );
 });
 
@@ -43,8 +48,13 @@ test("rejects a measurement not in the allowlist", async () => {
   const nonce = generateNonce();
   const { bundle, meshCaPem } = await buildBundle(nonce);
   await assert.rejects(
-    () => verifyAttestation(bundle, nonce, { measurements: ["deadbeef"], requireFreshness: false, meshCaPem }),
-    (e) => e instanceof C8sVerifyError && e.code === "measurement_denied",
+    () =>
+      verifyAttestation(bundle, nonce, {
+        measurements: ["deadbeef"],
+        requireFreshness: false,
+        meshCaPem,
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "measurement_denied",
   );
 });
 
@@ -53,19 +63,20 @@ test("enforces freshness binding when required (fixture is not live-bound)", asy
   const { bundle, meshCaPem } = await buildBundle(nonce);
   await assert.rejects(
     () => verifyAttestation(bundle, nonce, { ...POLICY, requireFreshness: true, meshCaPem }),
-    (e) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
   );
 });
 
 test("rejects when the pinned anchor is the wrong cert", async () => {
   const nonce = generateNonce();
   const { bundle } = await buildBundle(nonce);
-  const { leafPem } = await import("./helpers.js").then((m) => m.loadFixtures());
+  const { leafPem } = await loadFixtures();
   // Pin the (P-256, non-CA) leaf as the anchor: the served leaf must fail to
   // verify against it, since it was actually signed by the P-384 mesh CA.
   await assert.rejects(
     () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem: leafPem }),
-    (e) => e instanceof C8sVerifyError && (e.code === "cert_chain" || e.code === "invalid_cert"),
+    (e: unknown) =>
+      e instanceof C8sVerifyError && (e.code === "cert_chain" || e.code === "invalid_cert"),
   );
 });
 
@@ -93,7 +104,7 @@ test("verifyEvidence rejects a measurement not in the allowlist", async () => {
   const { snpEvidence } = await loadFixtures();
   await assert.rejects(
     () => verifyEvidence(snpEvidence, { generation: "genoa", measurements: ["deadbeef"] }),
-    (e) => e instanceof C8sVerifyError && e.code === "measurement_denied",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "measurement_denied",
   );
 });
 
@@ -105,7 +116,7 @@ test("verifyEvidence rejects tampered hardware evidence", async () => {
   evidence.attestation_report = bytesToBase64(rep);
   await assert.rejects(
     () => verifyEvidence(evidence, { generation: "genoa", measurements: DEMO_MEASUREMENTS }),
-    (e) => e instanceof C8sVerifyError && e.code === "verification_failed",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "verification_failed",
   );
 });
 
@@ -118,7 +129,7 @@ test("verifyEvidence enforces an explicit report_data binding", async () => {
         measurements: DEMO_MEASUREMENTS,
         expectedReportData: new Uint8Array(48), // will not match the fixture's report_data
       }),
-    (e) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
   );
 });
 
@@ -126,6 +137,6 @@ test("verifyEvidence requires a generation", async () => {
   const { snpEvidence } = await loadFixtures();
   await assert.rejects(
     () => verifyEvidence(snpEvidence, { measurements: DEMO_MEASUREMENTS }),
-    (e) => e instanceof C8sVerifyError && e.code === "invalid_request",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
   );
 });

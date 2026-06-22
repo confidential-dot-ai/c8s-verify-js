@@ -1,23 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { C8sClient } from "../src/index.js";
 import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "../demo/config.js";
 
+// Compiled to dist/test; the compiled server sits at dist/demo/server.js.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Start the mock LB on an ephemeral port; resolve once it logs readiness. */
-function startServer(port) {
+function startServer(port: number): Promise<ChildProcess> {
   const child = spawn(process.execPath, [join(ROOT, "demo", "server.js")], {
     env: { ...process.env, PORT: String(port) },
     stdio: ["ignore", "pipe", "inherit"],
   });
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("server did not start in time")), 8000);
-    child.stdout.on("data", (d) => {
+    child.stdout?.on("data", (d: Buffer) => {
       if (d.toString().includes("listening")) {
         clearTimeout(t);
         resolve(child);
@@ -39,7 +40,7 @@ test("end-to-end: connect, verify, and over-encrypted echo", async () => {
     const session = await client.connect();
     assert.equal(session.attestation.platform, "snp");
     assert.equal(session.attestation.measurement, DEMO_MEASUREMENTS[0]);
-    assert.equal(session.attestation.cert.subjectCN, "lb.demo.c8s.local");
+    assert.equal(session.attestation.cert!.subjectCN, "lb.demo.c8s.local");
 
     const msg = "round-trip over the post-quantum channel";
     const res = await session.fetch("/v1/echo", { method: "POST", body: msg });

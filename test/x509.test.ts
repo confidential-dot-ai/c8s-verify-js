@@ -35,7 +35,7 @@ test("rejects a tampered leaf signature", async () => {
   leafDer[leafDer.length - 1] ^= 0x01; // mangle last signature byte
   await assert.rejects(
     () => verifyCertChain(leafDer, decodePEM(meshCaPem)[0]),
-    (e) => e instanceof C8sVerifyError && e.code === "cert_chain",
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "cert_chain",
   );
 });
 
@@ -45,15 +45,18 @@ test("rejects a leaf not signed by the given CA (self as issuer)", async () => {
   // The leaf is P-256 but not self-signed; verifying it against itself must fail.
   await assert.rejects(
     () => verifySignedBy(leaf, leaf),
-    (e) => e instanceof C8sVerifyError,
+    (e: unknown) => e instanceof C8sVerifyError,
   );
 });
 
 test("rejects an expired certificate", async () => {
   const { meshCaPem, leafPem } = await loadFixtures();
   await assert.rejects(
-    () => verifyCertChain(decodePEM(leafPem)[0], decodePEM(meshCaPem)[0], { at: new Date("2999-01-01") }),
-    (e) => e instanceof C8sVerifyError && e.code === "invalid_cert",
+    () =>
+      verifyCertChain(decodePEM(leafPem)[0], decodePEM(meshCaPem)[0], {
+        at: new Date("2999-01-01"),
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_cert",
   );
 });
 
