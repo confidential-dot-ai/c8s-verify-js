@@ -3,10 +3,11 @@
 This directory holds the WebAssembly build of the attestation-rs SNP / az-snp
 verifier that `src/wasm-loader.js` imports. **The `.wasm`/`.js` artifacts are
 generated, not committed** — they are `.gitignore`d. A fresh checkout has no
-verifier until you build it:
+verifier until you build it from the in-tree source submodule:
 
 ```sh
-npm run build:wasm     # or: bash scripts/build-wasm.sh
+git submodule update --init vendor/attestation-rs   # once, after clone
+npm run build:wasm                                  # or: bash scripts/build-wasm.sh
 ```
 
 The library cannot load (`src/wasm-loader.js` imports `./attestation_wasm.js`
@@ -21,14 +22,22 @@ rather than shipped as an opaque binary in git history:
 
 | | |
 |---|---|
-| Source | `confidential-dot-ai/attestation-rs`, `crates/attestation-wasm` |
-| Pinned commit | `13039e857e7124a8a8620c6aacaa7217d73a3958` (origin/main) |
+| Source | `vendor/attestation-rs` submodule (`confidential-dot-ai/attestation-rs`), `crates/attestation-wasm` |
+| Pinned commit | `13039e857e7124a8a8620c6aacaa7217d73a3958` |
 | Build | `wasm-pack build --target web` |
 | Entry points | `verify_snp`, `verify_az_snp` |
 
-The pin lives in `scripts/build-wasm.sh` (the `PIN` variable). To move to a newer
-`attestation-rs`, bump that pin, re-run `npm run build:wasm`, run the tests, and
-update the table above in the same change.
+The pin is the `vendor/attestation-rs` submodule gitlink — there is no separate
+pin variable. To move to a newer `attestation-rs`:
+
+```sh
+git -C vendor/attestation-rs fetch origin
+git -C vendor/attestation-rs checkout <new-commit>
+git add vendor/attestation-rs        # records the new gitlink
+npm run build:wasm && node --test    # rebuild + verify
+```
+
+Update the table above in the same change.
 
 > **az-snp contract note.** As of this pin, `verify_az_snp` *fails closed* — it
 > **throws** on a freshness (TPM quote `extraData`) mismatch rather than
@@ -39,14 +48,9 @@ update the table above in the same change.
 
 ## Build inputs
 
-`scripts/build-wasm.sh` resolves the Rust source in this order:
-
-1. `ATTESTATION_RS_DIR` if set (a local checkout), else
-2. the sibling `../attestation-rs` checkout, else
-3. a fresh clone of `ATTESTATION_RS_REPO` at the pinned ref.
-
-It always builds the pinned commit via a throwaway `git worktree`, so your local
-`attestation-rs` branch/working tree is never disturbed. Requires `wasm-pack`
-(`cargo install wasm-pack`).
+`scripts/build-wasm.sh` builds directly from the `vendor/attestation-rs`
+submodule at its checked-out (pinned) commit — no sibling lookup or network
+clone. The script initialises the submodule if a fresh checkout skipped it.
+Requires `wasm-pack` (`cargo install wasm-pack`).
 
 [attestation-rs]: https://github.com/confidential-dot-ai/attestation-rs
