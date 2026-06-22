@@ -7,19 +7,21 @@
 // etc.). The layout matches Microsoft's az-cvm-vtpm crate and the c8s Go
 // extractor (c8s/pkg/attestclient/snpreport.go).
 //
-// The attestation-rs WASM verifier only understands a bare SNP report
-// (`attestation_report` + `cert_chain.vcek`); it has no notion of the HCL
-// envelope. So before crossing the JS -> WASM boundary we unwrap the HCL report
-// down to the raw SNP report the verifier expects. The (host-controlled,
-// untrusted) header is only used to *locate* bytes, with bounds checks so we
-// never read out of range — authenticity comes entirely from the SNP signature
-// the WASM verifies over the extracted report against the VCEK chain. A tampered
-// report fails that check.
+// This unwrap supports the *degraded* az-snp path: the WASM `verify_snp` entry
+// understands only a bare SNP report (`attestation_report` + `cert_chain.vcek`)
+// and has no notion of the HCL envelope, so we unwrap the HCL report down to the
+// raw SNP report it expects. The (host-controlled, untrusted) header is only used
+// to *locate* bytes, with bounds checks so we never read out of range —
+// authenticity comes entirely from the SNP signature the WASM verifies over the
+// extracted report against the VCEK chain. A tampered report fails that check.
 //
-// NOTE: this unwraps the hardware report only. Full az-snp verification also
-// binds the vTPM quote (evidence.tpm_quote) to the SNP report via report_data;
-// that AK binding is not verified here, which is why az-snp remains "reserved"
-// in PROTOCOL.md.
+// This unwraps the hardware report only: it does NOT bind the vTPM quote
+// (evidence.tpm_quote) to the SNP report, so it verifies hardware + measurement
+// but not freshness/key-binding. For full az-snp verification — which also
+// verifies the TPM quote against the AK and checks the quote's extraData against
+// the session nonce — use the WASM `verify_az_snp` entry (exposed as
+// `verifyAzSnp`, selected by `platform: "az-snp"`). This unwrap remains for
+// callers that opt into the degraded `platform: "snp"` mode over az-snp evidence.
 
 import { base64ToBytes, base64UrlToBytes, bytesToBase64 } from "./base64.js";
 import { fail } from "./errors.js";

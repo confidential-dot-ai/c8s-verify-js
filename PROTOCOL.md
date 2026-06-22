@@ -54,7 +54,7 @@ the CDS, for the optional EAR-verification path.
 ```jsonc
 {
   "version": "c8s-verify/v1",
-  "platform": "snp",            // "snp" only today; "az-snp"/"tdx" reserved
+  "platform": "snp",            // "snp" (bare metal) or "az-snp" (Azure vTPM); "tdx" reserved
   "generation": "genoa",        // AMD processor gen for the WASM verifier: milan|genoa|turin
   "nonce": "<echoed b64url>",   // MUST equal the request nonce
   "evidence": {                 // attestation-rs SnpEvidence shape (std base64 fields)
@@ -89,6 +89,40 @@ that (a) the evidence is **fresh** (binds our nonce) and (b) the over-encryption
 > `report_data`; in that mode the client verifies the hardware signature + measurement
 > for real and exercises the binding math against the fixture's recorded value.
 
+#### `platform: "az-snp"` (Azure Confidential VM, vTPM)
+
+Azure CVMs do not hand back a bare SNP report; the guest receives an **HCL report**
+(the SNP report wrapped by the paravisor, with the vTPM AK public key in its runtime
+data) plus a **vTPM quote**. The `evidence` object then has the attestation-rs
+`AzSnpEvidence` shape (base64url fields):
+
+```jsonc
+"evidence": {
+  "version": 1,
+  "hcl_report": "<base64url HCL report: header + 1184-byte SNP report + runtime data>",
+  "vcek":       "<base64url DER VCEK>",
+  "tpm_quote": {
+    "signature": "<hex RSA-2048 PKCS1v1.5 signature over message>",
+    "message":   "<hex TPMS_ATTEST: magic, extraData(=freshness anchor), PCR digest, ...>",
+    "pcrs":      ["<hex sha-256>", ... 24 entries]
+  }
+}
+```
+
+For az-snp the freshness anchor **moves out of the SNP report_data into the vTPM
+quote's `extraData`**. The SNP `report_data` instead binds the AK to the TEE
+(`report_data[..32] == SHA-256(runtime_data)`), and the quote, signed by that AK,
+carries the session binding. The client still computes the same
+`SHA-384(x25519 || mlkem768 || nonce)` and passes it as `expected_report_data`; the
+verifier checks it against the quote's `extraData`. A passing `report_data_match`
+therefore proves the same freshness + key-binding property, now rooted in the AK
+rather than the bare report. `generation` is auto-detected from the report CPUID and
+is not required in the bundle for az-snp.
+
+The `generation` field, the bare-SNP `evidence.attestation_report`/`cert_chain`
+shape, and `platform: "az-snp"` are mutually exclusive with the bare-`snp` shape
+above: a bundle is one or the other.
+
 ## WASM verifier I/O (`attestation-rs` `verify_snp`)
 
 ```
@@ -118,6 +152,30 @@ verify_snp(evidenceJson: string, generation: "milan"|"genoa"|"turin",
 The JS policy layer treats verification as **passed** iff: `verify_snp` did not throw
 (`signature_valid === true`), `report_data_match === true`, `platform` is acceptable, and
 `claims.launch_digest` ∈ the caller's measurement allowlist (case-insensitive hex).
+
+## WASM verifier I/O (`attestation-rs` `verify_az_snp`)
+
+```
+verify_az_snp(evidenceJson: string, expectedReportData?: Uint8Array,
+              expectedInitDataHash?: Uint8Array) -> string (JSON) | throws
+```
+
+Full Azure vTPM verification of an `AzSnpEvidence` object (above). Unlike `verify_snp`
+it takes no `generation` (auto-detected) and verifies the vTPM quote in addition to the
+hardware report:
+
+1. TPM quote signature against the AK extracted from the HCL runtime data.
+2. Quote `extraData` == `expectedReportData` (the freshness anchor).
+3. PCR digest integrity, and optionally `expectedInitDataHash` bound to PCR[8].
+4. AK-to-TEE binding: `snp.report_data[..32] == SHA-256(runtime_data)`.
+5. VCEK chain to the bundled AMD roots, SNP report signature, and VMPL/debug/TCB policy.
+
+- **Throws** (JsError) if any check fails.
+- On success returns the same shape as `verify_snp` with `platform: "az-snp"` and an
+  added `collateral_verified: false` (the WASM path skips the async CRL revocation
+  check; `report_data_match` reflects the quote `extraData`, not the SNP report_data).
+
+The JS policy layer applies the **same** pass/fail rule as for `verify_snp`.
 
 ## Over-encryption channel (post-quantum hybrid)
 

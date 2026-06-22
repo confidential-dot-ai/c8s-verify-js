@@ -6,9 +6,39 @@ on:
   pull_request:
     branches: [main]
 
+# The verifier WASM is generated from attestation-rs at a pinned commit — the
+# in-tree `vendor/attestation-rs` submodule gitlink (see wasm/README.md) — and is
+# not committed. Build it once here and share it with the test jobs as an artifact.
+
 jobs:
+  build-wasm:
+    name: Build WASM verifier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # vendor/attestation-rs is a public repo, so the default credentials
+          # fetch the submodule — no PAT/app token needed.
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Build wasm/
+        run: npm run build:wasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm
+          if-no-files-found: error
+          path: |
+            wasm/attestation_wasm.js
+            wasm/attestation_wasm_bg.wasm
+            wasm/attestation_wasm.d.ts
+            wasm/attestation_wasm_bg.wasm.d.ts
+
   unit:
     name: Unit & E2E (Node ${{ matrix.node }})
+    needs: build-wasm
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -16,6 +46,10 @@ jobs:
         node: [20, 22, 24]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: wasm
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -25,9 +59,14 @@ jobs:
 
   browser:
     name: Browser smoke test
+    needs: build-wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: wasm
       - uses: actions/setup-node@v4
         with:
           node-version: 24
