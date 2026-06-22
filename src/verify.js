@@ -113,7 +113,7 @@ export async function verifyAttestation(bundle, nonce, policy) {
   try {
     const out = isAzSnp
       ? await verifyAzSnp(JSON.stringify(bundle.evidence), azSnpAnchor)
-      : await verifySnp(JSON.stringify(bundle.evidence), bundle.generation, expected);
+      : await verifySnp(bundle.evidence, bundle.generation, expected);
     result = JSON.parse(out);
   } catch (e) {
     // az-snp fails closed on a freshness mismatch — surface it as the precise
@@ -255,7 +255,7 @@ export async function verifyEvidence(evidence, opts) {
   try {
     const out = isAzSnp
       ? await verifyAzSnp(JSON.stringify(evidence), expected)
-      : await verifySnp(JSON.stringify(evidence), opts.generation, expected);
+      : await verifySnp(evidence, opts.generation, expected);
     result = JSON.parse(out);
   } catch (e) {
     // az-snp fails closed (throws) on a freshness mismatch when an anchor is

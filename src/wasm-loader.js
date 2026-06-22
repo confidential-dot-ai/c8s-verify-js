@@ -41,15 +41,14 @@ export function initVerifier(input) {
  * Call the SNP verifier. Initialises the module on first use. Accepts both
  * bare SNP evidence and az-snp (Azure HCL-wrapped) evidence; the latter is
  * unwrapped to the raw SNP report the WASM verifier understands.
- * @param {string} evidenceJson
+ * @param {object} evidence
  * @param {string} generation  "milan" | "genoa" | "turin"
  * @param {Uint8Array} [expectedReportData]
  * @returns {Promise<string>} verification result JSON (or throws on HW/chain failure)
  */
-export async function verifySnp(evidenceJson, generation, expectedReportData) {
+export async function verifySnp(evidence, generation, expectedReportData) {
   await initVerifier();
-  const evidence = toWasmEvidence(JSON.parse(evidenceJson));
-  return verify_snp(JSON.stringify(evidence), generation, expectedReportData);
+  return verify_snp(JSON.stringify(toWasmEvidence(evidence)), generation, expectedReportData);
 }
 
 /**

@@ -20,7 +20,7 @@ test("verifies a recorded az-snp attestation through the WASM verifier", async (
   const att = JSON.parse(await readFile(join(FIX, "az-snp-attestation.json"), "utf8"));
 
   // VCEK subject is SEV-Milan / HwID "Milan-B0" -> Milan generation.
-  const out = await verifySnp(JSON.stringify(att.evidence), "milan");
+  const out = await verifySnp(att.evidence, "milan");
   const result = JSON.parse(out);
 
   assert.equal(result.signature_valid, true, "hardware signature must verify against the VCEK chain");
@@ -32,7 +32,7 @@ test("verifies a recorded az-snp attestation through the WASM verifier", async (
 test("verifies a second recorded az-snp (Milan) attestation", async () => {
   const att = JSON.parse(await readFile(join(FIX, "az-snp-milan-2.json"), "utf8"));
 
-  const out = await verifySnp(JSON.stringify(att.evidence), "milan");
+  const out = await verifySnp(att.evidence, "milan");
   const result = JSON.parse(out);
 
   assert.equal(result.signature_valid, true, "hardware signature must verify against the VCEK chain");
