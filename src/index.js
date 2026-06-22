@@ -24,12 +24,20 @@ export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp } from "./wasm-loader.js";
 
 const WELL_KNOWN = "/.well-known/c8s";
+// The CDS leaf cert is served by nginx as a static discovery file (sibling of
+// mesh-ca.pem), NOT under the attest prefix. The cds-attest sidecar no longer
+// embeds it in the attestation bundle (it would freeze a copy that goes stale
+// when get-cert rotates the LB leaf); nginx serves the live cert here and
+// hot-reloads it on renewal, so the client fetches it from here when the bundle
+// omits it.
+const CDS_CERT_PATH = "/.well-known/cds-cert.pem";
 
 /**
  * @typedef {import("./verify.js").VerifyPolicy & {
  *   baseUrl: string,
  *   fetch?: typeof fetch,
  *   wellKnownPrefix?: string,
+ *   cdsCertPath?: string | null,
  * }} C8sClientOptions
  */
 
@@ -41,6 +49,9 @@ export class C8sClient {
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
+    // Where to fetch the CDS leaf cert when the bundle omits it. Pass null/""
+    // to disable (e.g. an offline bundle that carries its own cds_cert_pem).
+    this.cdsCertPath = opts.cdsCertPath === undefined ? CDS_CERT_PATH : opts.cdsCertPath;
     this.fetch = opts.fetch ?? globalThis.fetch?.bind(globalThis);
     if (!this.fetch) {
       throw new C8sVerifyError("invalid_request", "no fetch implementation available");
@@ -75,6 +86,27 @@ export class C8sClient {
   }
 
   /**
+   * Fetch the statically-served CDS leaf cert (PEM). Best-effort: returns null
+   * on any network/HTTP error or non-PEM body so connect() degrades to the
+   * "cert not verified" warning instead of failing closed. The cert's trust is
+   * the pinned mesh CA it chains to, so fetching it over the plain hop is safe.
+   * @returns {Promise<string | null>}
+   */
+  async fetchCdsCert() {
+    if (!this.cdsCertPath) return null;
+    try {
+      const res = await this.fetch(this._url(this.cdsCertPath), {
+        headers: { accept: "application/x-pem-file, text/plain" },
+      });
+      if (!res.ok) return null;
+      const pem = await res.text();
+      return pem.includes("BEGIN CERTIFICATE") ? pem : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Run the full flow: fetch attestation, verify it, and establish the
    * over-encrypted channel.
    * @returns {Promise<Session>}
@@ -82,6 +114,13 @@ export class C8sClient {
   async connect() {
     const nonce = generateNonce();
     const bundle = await this.fetchAttestation(nonce);
+    // The cds-attest sidecar no longer embeds the leaf in the bundle (it would
+    // go stale on LB cert rotation); pull the live one nginx serves statically
+    // so the chain-to-mesh-CA check in verifyAttestation can run.
+    if (!bundle.cds_cert_pem) {
+      const pem = await this.fetchCdsCert();
+      if (pem) bundle.cds_cert_pem = pem;
+    }
     const attestation = await verifyAttestation(bundle, nonce, this.policy);
 
     const { key, handshake } = await clientKeyAgreement(attestation.sessionPubKey, nonce);
