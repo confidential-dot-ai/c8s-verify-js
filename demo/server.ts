@@ -24,9 +24,9 @@ import { cborEncode, cborDecode, type CborValue } from "../src/cbor.js";
 import { bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8 } from "../src/base64.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Compiled to dist/demo; the static root and fixtures live in the source tree
-// two directories up (dist/demo -> repo root).
-const REPO = join(__dirname, "..", ".."); // package root, served statically
+// Run from source via tsx; this file lives at demo/, so the repo root — the
+// static root, also holding demo/fixtures — is one directory up.
+const REPO = join(__dirname, ".."); // package root, served statically
 const FIX = join(REPO, "demo", "fixtures");
 const PORT = Number(process.env.PORT ?? 8799);
 

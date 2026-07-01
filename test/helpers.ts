@@ -14,9 +14,9 @@ import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js
 import type { AttestationBundle } from "../src/verify.js";
 import type { Evidence } from "../src/hcl.js";
 
-// Compiled to dist/test/helpers.js; the fixtures live in the source tree, two
-// directories up from the compiled file (dist/test -> repo root).
-const FIX = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "demo", "fixtures");
+// Run from source via tsx (see package.json); this file lives at test/, so the
+// repo root is one directory up (test/ -> repo root).
+const FIX = join(dirname(fileURLToPath(import.meta.url)), "..", "demo", "fixtures");
 
 export interface Fixtures {
   snpEvidence: Evidence;

@@ -11,8 +11,8 @@ import { base64UrlToBytes } from "../src/base64.js";
 import { C8sVerifyError } from "../src/errors.js";
 import type { Evidence, AzSnpEvidence } from "../src/hcl.js";
 
-// Compiled to dist/test; fixtures live in the source tree two levels up.
-const FIX = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "test", "fixtures");
+// Run from source via tsx; fixtures live alongside this file in test/fixtures.
+const FIX = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 // A recorded Azure SEV-SNP (az-snp) attestation: an HCL report wrapping the raw

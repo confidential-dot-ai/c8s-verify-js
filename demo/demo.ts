@@ -1,7 +1,8 @@
 // Browser demo: drives the c8s-verify library step by step against the mock LB,
 // visualising each verification stage. Imports the library straight from the
 // compiled output (no bundler) using the import map in index.html for the
-// mlkem-wasm dependency. Relative imports resolve to dist/src once compiled.
+// mlkem-wasm dependency. Built by `npm run build:demo`; sibling imports
+// (`../src/*.js`) resolve to `dist-demo/src` once compiled.
 
 import { generateNonce } from "../src/nonce.js";
 import { verifyAttestation, type AttestationResult } from "../src/verify.js";

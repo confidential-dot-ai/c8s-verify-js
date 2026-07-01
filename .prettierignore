@@ -1,0 +1,4 @@
+# Generated WASM verifier artifacts (see scripts/build-wasm.sh) — not formatted.
+src/wasm/
+dist/
+dist-demo/

@@ -37,15 +37,16 @@ test-results/
 
 # Build output
 dist/
+dist-demo/
 build/
 out/
 
-# Generated WASM verifier — rebuild with `npm run build:wasm` (see wasm/README.md).
+# Generated WASM verifier — rebuild with `npm run build:wasm` (see src/wasm/README.md).
 # Reproducibly built from attestation-rs at the pin in scripts/build-wasm.sh, so
-# the binary is not committed. wasm/README.md is kept.
-/wasm/*.wasm
-/wasm/*.js
-/wasm/*.d.ts
+# the binary is not committed. src/wasm/README.md is kept.
+/src/wasm/*.wasm
+/src/wasm/*.js
+/src/wasm/*.d.ts
 
 # Environment / secrets
 .env

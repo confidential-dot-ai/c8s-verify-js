@@ -1,4 +1,4 @@
-# `wasm/` — the attestation-rs verifier (generated, not committed)
+# `src/wasm/` — the attestation-rs verifier (generated, not committed)
 
 This directory holds the WebAssembly build of the attestation-rs SNP / az-snp
 verifier that `src/wasm-loader.ts` imports. **The `.wasm`/`.js` artifacts are
