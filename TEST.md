@@ -7,7 +7,7 @@ handshake, and the CBOR over-encrypted application tunnel — across two indepen
 implementations (Go and JavaScript). If the echo round-trips, the wire formats match.
 
 > This is the integration counterpart to the JS-only e2e test (`npm test`, which runs the
-> client against the JS mock LB in `demo/server.js`). Here the server is the production Go
+> client against the JS mock LB in `demo/server.ts`). Here the server is the production Go
 > code instead.
 
 ## Layout assumed
@@ -41,7 +41,7 @@ hardware signature, launch measurement, and the X.509 chain are still verified *
 by the client; only their *origin* is faked.
 
 The expected launch measurement and these settings are centralised in
-[`demo/config.js`](demo/config.js) (`DEMO_MEASUREMENTS`, `DEMO_GENERATION`,
+[`demo/config.ts`](demo/config.ts) (`DEMO_MEASUREMENTS`, `DEMO_GENERATION`,
 `DEMO_PLATFORM`, `DEMO_REQUIRE_FRESHNESS`) and reused below so the two repos agree.
 
 ## 1. Build the Go sidecar
@@ -105,9 +105,19 @@ Leave it running. The endpoints it now serves:
 From this repo, run a small Node client against the Go server. (Node ≥ 20; no install
 needed beyond `npm install`, which fetches `mlkem-wasm`.)
 
+Installed as a dependency, the client is a normal package import:
+
+```js
+import { C8sClient } from "c8s-verify";
+```
+
+To drive it from a checkout of this repo, run the TypeScript sources directly
+with `tsx` (no build step — only the WASM verifier needs generating once):
+
 ```bash
 cd ../c8s-verify-js
-node --input-type=module -e '
+npm run build:wasm                    # generate src/wasm/ verifier (once)
+node --import tsx --input-type=module -e '
 import { C8sClient } from "./src/index.js";
 import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "./demo/config.js";
 
