@@ -84,3 +84,67 @@ test("undefined object fields are dropped (omitempty parity)", () => {
 test("truncated input throws", () => {
   assert.throws(() => cborDecode(hexToBytes("1a000f42"))); // 4-byte int, only 3 bytes
 });
+
+// Integer encodings at each width boundary (RFC 8949 §3 head sizes).
+const INT_VECTORS: [number, string][] = [
+  [23, "17"], // last 1-byte
+  [24, "1818"], // first 2-byte
+  [255, "18ff"],
+  [256, "190100"], // first 3-byte
+  [65535, "19ffff"],
+  [65536, "1a00010000"], // first 5-byte
+  [4294967295, "1affffffff"],
+  [4294967296, "1b0000000100000000"], // first 9-byte (64-bit length)
+  [-24, "37"],
+  [-25, "3818"],
+  [-256, "38ff"],
+  [-257, "390100"],
+];
+
+test("integers round-trip at every head-width boundary", () => {
+  for (const [value, hex] of INT_VECTORS) {
+    assert.equal(bytesToHex(cborEncode(value)), hex, `encode ${value}`);
+    assert.equal(cborDecode(hexToBytes(hex)), value, `decode ${hex}`);
+  }
+});
+
+test("string-keyed maps encode in insertion order", () => {
+  // The Go side is deterministic; our encoder must preserve given key order.
+  assert.equal(bytesToHex(cborEncode({ a: 1, b: 2 })), "a2616101616202");
+});
+
+test("nested arrays and maps round-trip", () => {
+  const value = { a: [1, { b: 2 }, [true, null]], z: "end" };
+  assert.deepEqual(cborDecode(cborEncode(value)), value);
+});
+
+test("decodes float32 and float64 (major 7) even though the encoder emits only integers", () => {
+  assert.equal(cborDecode(hexToBytes("fa3fc00000")), 1.5); // float32 1.5
+  assert.equal(cborDecode(hexToBytes("fb3ff8000000000000")), 1.5); // float64 1.5
+});
+
+test("encoding a non-integer number throws", () => {
+  assert.throws(() => cborEncode(1.5), /only integer numbers/);
+});
+
+test("encoding an unsupported value type throws", () => {
+  assert.throws(() => cborEncode(() => 0), /unsupported value type/);
+  assert.throws(() => cborEncode(10n), /unsupported value type/);
+});
+
+test("decoding a non-string map key throws", () => {
+  // map(1){ 1: 0 } — integer key, which the codec refuses.
+  assert.throws(() => cborDecode(hexToBytes("a10100")), /only string map keys/);
+});
+
+test("decoding an unsupported major type (tag) throws", () => {
+  assert.throws(() => cborDecode(hexToBytes("c0")), /unsupported major type/); // major 6, tag
+});
+
+test("decoding indefinite-length items throws", () => {
+  assert.throws(() => cborDecode(hexToBytes("5f")), /indefinite lengths not supported/); // bstr, ai 31
+});
+
+test("decoding an unassigned simple value throws", () => {
+  assert.throws(() => cborDecode(hexToBytes("f8")), /unsupported simple value/); // ai 24
+});

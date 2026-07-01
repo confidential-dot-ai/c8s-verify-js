@@ -10,9 +10,9 @@ type FetchHandler = (url: string, init?: unknown) => unknown;
 /** Build a client whose fetch records the URLs it is asked for. */
 function clientWith(handler: FetchHandler, opts: Partial<C8sClientOptions> = {}) {
   const calls: string[] = [];
-  const fetch = (async (url: string, init?: unknown) => {
+  const fetch = ((url: string, init?: unknown) => {
     calls.push(url);
-    return handler(url, init);
+    return Promise.resolve(handler(url, init));
   }) as unknown as typeof globalThis.fetch;
   return {
     calls,
@@ -23,7 +23,7 @@ function clientWith(handler: FetchHandler, opts: Partial<C8sClientOptions> = {})
 test("fetchCdsCert: returns the PEM the discovery endpoint serves", async () => {
   const { client, calls } = clientWith(() => ({
     ok: true,
-    async text() {
+    text() {
       return PEM;
     },
   }));
@@ -36,7 +36,7 @@ test("fetchCdsCert: returns null on a non-2xx response (e.g. discovery disabled)
   const { client } = clientWith(() => ({
     ok: false,
     status: 404,
-    async text() {
+    text() {
       return "not found";
     },
   }));
@@ -46,7 +46,7 @@ test("fetchCdsCert: returns null on a non-2xx response (e.g. discovery disabled)
 test("fetchCdsCert: returns null when the body is not a PEM (e.g. an HTML error page)", async () => {
   const { client } = clientWith(() => ({
     ok: true,
-    async text() {
+    text() {
       return "<html>404</html>";
     },
   }));
@@ -64,7 +64,7 @@ test("fetchCdsCert: disabled via cdsCertPath=null makes no request", async () =>
   const { client, calls } = clientWith(
     () => ({
       ok: true,
-      async text() {
+      text() {
         return PEM;
       },
     }),
@@ -78,7 +78,7 @@ test("cdsCertPath is overridable", async () => {
   const { client, calls } = clientWith(
     () => ({
       ok: true,
-      async text() {
+      text() {
         return PEM;
       },
     }),
