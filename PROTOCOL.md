@@ -61,7 +61,7 @@ the CDS, for the optional EAR-verification path.
     "attestation_report": "<base64 of the 1184-byte SNP report>",
     "cert_chain": { "vcek": "<base64 DER VCEK>" }
   },
-  "cds_cert_pem": "-----BEGIN CERTIFICATE-----\n...",
+  "cds_cert_pem": "-----BEGIN CERTIFICATE-----\n...", // optional; see note below
   "ear": "<optional CDS-issued EAR JWT>",
   "session_pubkey": {
     "x25519":   "<b64url 32-byte X25519 public key>",
@@ -69,6 +69,15 @@ the CDS, for the optional EAR-verification path.
   }
 }
 ```
+
+> **`cds_cert_pem` may be empty/omitted.** Deployments where nginx serves the
+> CDS leaf statically (`GET /.well-known/cds-cert.pem`, hot-reloaded on cert
+> rotation) leave this field blank so the bundle never carries a stale copy. The
+> client then fetches the live cert from that discovery path (`cdsCertPath`,
+> default `/.well-known/cds-cert.pem`) and chains it to the pinned mesh CA. The
+> leaf is not bound to the attestation — `report_data` binds the session key —
+> so its transport (in-bundle vs. fetched) does not affect channel security; it
+> confirms the served identity chains to *your* pinned cluster CA.
 
 #### Report-data binding (freshness + key binding)
 

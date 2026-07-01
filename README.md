@@ -87,10 +87,14 @@ const client = new C8sClient({
   baseUrl: "https://lb.example.com",
   measurements: ["<expected hex SHA-384 launch digest>"], // pinned out of band
   meshCaPem: pinnedMeshCaPem,                              // pinned CDS/mesh CA anchor
+  // cdsCertPath defaults to "/.well-known/cds-cert.pem": when the attestation
+  // bundle omits cds_cert_pem (nginx serves the leaf statically), the client
+  // fetches it from there and chains it to meshCaPem. Set to null to disable.
 });
 
 // Generates a nonce, fetches the LB attestation, verifies the SEV-SNP evidence,
-// the measurement, the report_data binding and the CDS certificate chain, then
+// the measurement, the report_data binding and the CDS certificate chain (the
+// leaf comes from the bundle, or is fetched from cdsCertPath when absent), then
 // runs the X25519+ML-KEM-768 handshake and derives the AES-256-GCM channel.
 const session = await client.connect();
 console.log(session.attestation.measurement, session.attestation.cert.sha256);
