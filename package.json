@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
-    "build": "tsc -p tsconfig.build.json && bash scripts/copy-assets.sh",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -27,7 +27,7 @@
     "check": "npm run typecheck && npm run lint && npm run format:check",
     "test": "node --import tsx --test test/*.test.ts",
     "demo": "node --import tsx demo/server.ts",
-    "build:demo": "tsc -p tsconfig.demo.json && bash scripts/copy-assets.sh dist-demo/src",
+    "build:demo": "tsc -p tsconfig.demo.json && node scripts/copy-assets.mjs dist-demo/src",
     "browser-check": "npm run build:demo && node --import tsx demo/browser-check.ts",
     "gen-fixtures": "bash demo/gen-fixtures.sh",
     "prepublishOnly": "npm run build"

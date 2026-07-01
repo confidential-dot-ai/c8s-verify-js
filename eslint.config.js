@@ -14,6 +14,7 @@ export default tseslint.config(
       "vendor/**",
       "node_modules/**",
       "**/fixtures/**",
+      "scripts/**",
     ],
   },
   js.configs.recommended,
