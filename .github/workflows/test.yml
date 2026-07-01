@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 # The verifier WASM is generated from attestation-rs at a pinned commit — the
 # in-tree `vendor/attestation-rs` submodule gitlink (see src/wasm/README.md) — and
