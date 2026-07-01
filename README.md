@@ -148,14 +148,15 @@ are all genuine; only the live `report_data` key-binding is necessarily simulate
 
 ```sh
 npm run build:wasm             # once, if you haven't already (see Demo above)
-npm test                       # compiles TypeScript, then node:test — crypto, X.509, verification, end-to-end
+npm test                       # runs the TypeScript sources via tsx under node:test — crypto, X.509, verification, end-to-end
 npm run browser-check          # headless-Chromium run of the demo (needs `npx playwright install chromium`)
 ```
 
-The library is written in TypeScript (`src/*.ts`) and compiled with `tsc` to
-`dist/` (the published `c8s-verify` package points at `dist/src/index.js` with
-bundled `.d.ts` types). `npm run build` runs the compiler; `npm test`, `npm run
-demo`, and `npm run browser-check` build first.
+The library is written in TypeScript (`src/*.ts`) and compiled with `tsc` to a
+flat `dist/` (the published `c8s-verify` package points at `dist/index.js` with
+bundled `.d.ts` types). `npm run build` runs the compiler. `npm test` and `npm
+run demo` run the sources directly via `tsx` (no build step); `npm run
+browser-check` compiles a browser bundle first (`npm run build:demo`).
 
 ## Status
 

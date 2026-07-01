@@ -6,29 +6,29 @@
   "license": "Apache-2.0",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
-      "default": "./dist/src/index.js"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
-  "types": "./dist/src/index.d.ts",
+  "types": "./dist/index.d.ts",
   "files": [
-    "dist/src",
-    "dist/wasm",
+    "dist",
     "PROTOCOL.md",
     "README.md"
   ],
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
-    "build": "tsc && bash scripts/copy-assets.sh",
+    "build": "tsc -p tsconfig.build.json && bash scripts/copy-assets.sh",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"{src,test,demo}/**/*.ts\" eslint.config.js",
     "format:check": "prettier --check \"{src,test,demo}/**/*.ts\" eslint.config.js",
     "check": "npm run typecheck && npm run lint && npm run format:check",
-    "test": "npm run build && node --test dist/test/*.test.js",
-    "demo": "npm run build && node dist/demo/server.js",
-    "browser-check": "npm run build && node dist/demo/browser-check.js",
+    "test": "node --import tsx --test test/*.test.ts",
+    "demo": "node --import tsx demo/server.ts",
+    "build:demo": "tsc -p tsconfig.demo.json && bash scripts/copy-assets.sh dist-demo/src",
+    "browser-check": "npm run build:demo && node --import tsx demo/browser-check.ts",
     "gen-fixtures": "bash demo/gen-fixtures.sh",
     "prepublishOnly": "npm run build"
   },
@@ -45,6 +45,7 @@
     "eslint-config-prettier": "^9.1.2",
     "playwright": "^1.60.0",
     "prettier": "^3.8.4",
+    "tsx": "^4.22.4",
     "typescript": "~5.6.3",
     "typescript-eslint": "^8.61.1"
   }

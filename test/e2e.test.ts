@@ -7,12 +7,13 @@ import { dirname, join } from "node:path";
 import { C8sClient } from "../src/index.js";
 import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "../demo/config.js";
 
-// Compiled to dist/test; the compiled server sits at dist/demo/server.js.
+// Run from source via tsx; the repo root is one directory up (test/ -> root),
+// and the mock LB server is a TypeScript source run through the tsx loader.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Start the mock LB on an ephemeral port; resolve once it logs readiness. */
 function startServer(port: number): Promise<ChildProcess> {
-  const child = spawn(process.execPath, [join(ROOT, "demo", "server.js")], {
+  const child = spawn(process.execPath, ["--import", "tsx", join(ROOT, "demo", "server.ts")], {
     env: { ...process.env, PORT: String(port) },
     stdio: ["ignore", "pipe", "inherit"],
   });

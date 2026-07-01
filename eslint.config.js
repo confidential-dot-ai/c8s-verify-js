@@ -7,7 +7,14 @@ import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "wasm/**", "vendor/**", "node_modules/**", "**/fixtures/**"],
+    ignores: [
+      "dist/**",
+      "dist-demo/**",
+      "src/wasm/**",
+      "vendor/**",
+      "node_modules/**",
+      "**/fixtures/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

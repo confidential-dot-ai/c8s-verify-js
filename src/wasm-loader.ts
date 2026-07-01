@@ -2,10 +2,10 @@
 // Works in the browser (fetch the .wasm by URL) and in Node (read the file bytes,
 // since Node's fetch does not support file:// URLs). Initialised once and cached.
 
-import initWasm, { verify_snp, verify_az_snp, type InitInput } from "../wasm/attestation_wasm.js";
+import initWasm, { verify_snp, verify_az_snp, type InitInput } from "./wasm/attestation_wasm.js";
 import { toWasmEvidence, type Evidence } from "./hcl.js";
 
-const WASM_URL = new URL("../wasm/attestation_wasm_bg.wasm", import.meta.url);
+const WASM_URL = new URL("./wasm/attestation_wasm_bg.wasm", import.meta.url);
 
 let initialised: Promise<void> | null = null;
 

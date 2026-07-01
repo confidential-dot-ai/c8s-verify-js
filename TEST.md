@@ -105,12 +105,21 @@ Leave it running. The endpoints it now serves:
 From this repo, run a small Node client against the Go server. (Node ≥ 20; no install
 needed beyond `npm install`, which fetches `mlkem-wasm`.)
 
+Installed as a dependency, the client is a normal package import:
+
+```js
+import { C8sClient } from "c8s-verify";
+```
+
+To drive it from a checkout of this repo, run the TypeScript sources directly
+with `tsx` (no build step — only the WASM verifier needs generating once):
+
 ```bash
 cd ../c8s-verify-js
-npm run build:wasm && npm run build   # compile TypeScript to dist/ (once)
-node --input-type=module -e '
-import { C8sClient } from "./dist/src/index.js";
-import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "./dist/demo/config.js";
+npm run build:wasm                    # generate src/wasm/ verifier (once)
+node --import tsx --input-type=module -e '
+import { C8sClient } from "./src/index.js";
+import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "./demo/config.js";
 
 const client = new C8sClient({
   baseUrl: "http://localhost:8800",

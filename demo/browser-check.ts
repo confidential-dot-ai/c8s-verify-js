@@ -10,11 +10,13 @@ import { dirname, join } from "node:path";
 import { chromium, type Page } from "playwright";
 
 const PORT = 8855;
-// Compiled to dist/demo; the compiled server sits alongside this file.
-const SERVER = join(dirname(fileURLToPath(import.meta.url)), "server.js");
+// Run from source via tsx; the mock LB server is the TypeScript source alongside
+// this file, run through the tsx loader (the browser demo JS it serves is the
+// separate `dist-demo/` build — see `npm run build:demo`).
+const SERVER = join(dirname(fileURLToPath(import.meta.url)), "server.ts");
 
 function startServer(): Promise<ChildProcess> {
-  const child = spawn(process.execPath, [SERVER], {
+  const child = spawn(process.execPath, ["--import", "tsx", SERVER], {
     env: { ...process.env, PORT: String(PORT) },
     stdio: ["ignore", "pipe", "inherit"],
   });
