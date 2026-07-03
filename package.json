@@ -4,15 +4,37 @@
   "description": "Verify that a remote API is running in a C8s TEE-attested cluster, and establish a post-quantum over-encrypted channel to the attested Load Balancer.",
   "type": "module",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/confidential-dot-ai/c8s-verify-js.git"
+  },
+  "homepage": "https://github.com/confidential-dot-ai/c8s-verify-js#readme",
+  "bugs": {
+    "url": "https://github.com/confidential-dot-ai/c8s-verify-js/issues"
+  },
+  "keywords": [
+    "confidential-computing",
+    "attestation",
+    "sev-snp",
+    "tee",
+    "remote-attestation",
+    "post-quantum",
+    "ml-kem",
+    "kubernetes"
+  ],
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "src",
+    "!src/wasm",
     "PROTOCOL.md",
     "README.md"
   ],

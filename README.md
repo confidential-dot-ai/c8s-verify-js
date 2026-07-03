@@ -75,10 +75,14 @@ deployments.
 
 `c8s-verify` is a zero-build ES-module library (browser + Node ≥ 20). Verification
 of the LB's hardware evidence runs in your browser via the
-[`attestation-rs`](../attestation-rs) AMD SEV-SNP verifier compiled to WebAssembly
-(bundled AMD ARK/ASK roots, no network). The only runtime dependency is
-[`mlkem-wasm`](https://github.com/dchest/mlkem-wasm) for ML-KEM-768. The exact wire
-formats are specified in [`PROTOCOL.md`](./PROTOCOL.md).
+[`attestation-rs`](https://github.com/confidential-dot-ai/attestation-rs) AMD SEV-SNP
+verifier compiled to WebAssembly (bundled AMD ARK/ASK roots, no network). The only
+runtime dependency is [`mlkem-wasm`](https://github.com/dchest/mlkem-wasm) for
+ML-KEM-768. The exact wire formats are specified in [`PROTOCOL.md`](./PROTOCOL.md).
+
+```sh
+npm install c8s-verify
+```
 
 ```js
 import { C8sClient } from "c8s-verify";
