@@ -2,6 +2,7 @@
 // mock LB does, so verification tests can run without an HTTP server.
 
 import { readFile } from "node:fs/promises";
+import { sign } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -13,6 +14,14 @@ import {
 import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js";
 import type { AttestationBundle } from "../src/verify.js";
 import type { Evidence } from "../src/hcl.js";
+import { decodePEM } from "../src/pem.js";
+import {
+  certificateHashBase64Url,
+  IDENTITY_BINDING_V2,
+  IDENTITY_PROOF_ALGORITHM,
+  identityProofMessage,
+  identityTranscriptHash,
+} from "../src/identity.js";
 
 // Run from source via tsx (see package.json); this file lives at test/, so the
 // repo root is one directory up (test/ -> repo root).
@@ -22,6 +31,7 @@ export interface Fixtures {
   snpEvidence: Evidence;
   meshCaPem: string;
   leafPem: string;
+  leafKeyPem: string;
 }
 
 export async function loadFixtures(): Promise<Fixtures> {
@@ -30,6 +40,7 @@ export async function loadFixtures(): Promise<Fixtures> {
     snpEvidence: (evidence.evidence ?? evidence) as Evidence,
     meshCaPem: await readFile(join(FIX, "mesh-ca.crt"), "utf8"),
     leafPem: await readFile(join(FIX, "cds-leaf.crt"), "utf8"),
+    leafKeyPem: await readFile(join(FIX, "cds-leaf.key"), "utf8"),
   };
 }
 
@@ -45,9 +56,9 @@ export interface BuiltBundle {
  */
 export async function buildBundle(
   nonce: Uint8Array,
-  opts: { tamperReport?: boolean } = {},
+  opts: { tamperReport?: boolean; identity?: boolean } = {},
 ): Promise<BuiltBundle> {
-  const { snpEvidence, meshCaPem, leafPem } = await loadFixtures();
+  const { snpEvidence, meshCaPem, leafPem, leafKeyPem } = await loadFixtures();
   const { priv, pub } = await generateServerHybridKey();
 
   const evidence = JSON.parse(JSON.stringify(snpEvidence));
@@ -69,5 +80,23 @@ export async function buildBundle(
       mlkem768: bytesToBase64Url(pub.mlkem768),
     },
   };
+  if (opts.identity) {
+    const leafDer = decodePEM(leafPem, "CERTIFICATE")[0];
+    const caDer = decodePEM(meshCaPem, "CERTIFICATE")[0];
+    const transcript = await identityTranscriptHash(pub, nonce, leafDer, caDer);
+    bundle.version = "c8s-verify/v2";
+    bundle.binding = IDENTITY_BINDING_V2;
+    bundle.identity_proof = {
+      algorithm: IDENTITY_PROOF_ALGORITHM,
+      leaf_sha256: await certificateHashBase64Url(leafDer),
+      mesh_ca_sha256: await certificateHashBase64Url(caDer),
+      signature: bytesToBase64Url(
+        sign("sha384", identityProofMessage(transcript), {
+          key: leafKeyPem,
+          dsaEncoding: "der",
+        }),
+      ),
+    };
+  }
   return { bundle, priv, pub, meshCaPem };
 }

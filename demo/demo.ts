@@ -107,6 +107,7 @@ async function run(): Promise<void> {
       result = await verifyAttestation(bundle, nonce, {
         measurements: DEMO_MEASUREMENTS,
         requireFreshness: DEMO_REQUIRE_FRESHNESS,
+        requireClusterIdentity: false,
         meshCaPem: pinnedCa,
       });
     } catch (e) {

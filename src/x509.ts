@@ -151,6 +151,22 @@ function ecdsaDerToRaw(der: Uint8Array, size: number): Uint8Array {
   return out;
 }
 
+/** Verify an ASN.1 DER ECDSA signature with a certificate public key. */
+export async function verifyECDSASignature(
+  cert: Certificate,
+  message: Uint8Array,
+  signatureDER: Uint8Array,
+  hash: "SHA-256" | "SHA-384",
+): Promise<boolean> {
+  const size = CURVE_SIZE[cert.spkiCurve ?? ""];
+  if (!size) {
+    throw new C8sVerifyError("identity_binding", "unsupported mesh identity key curve");
+  }
+  const key = await importPublicKey(cert);
+  const signature = ecdsaDerToRaw(signatureDER, size);
+  return subtle().verify({ name: "ECDSA", hash }, key, signature, message);
+}
+
 /**
  * Import a certificate's SubjectPublicKeyInfo as an ECDSA verify key.
  */

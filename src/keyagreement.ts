@@ -19,7 +19,8 @@ export const MLKEM768_EK_BYTES = 1184; // encapsulation (public) key
 export const MLKEM768_CT_BYTES = 1088; // ciphertext
 export const X25519_PUB_BYTES = 32;
 
-const HKDF_INFO = utf8ToBytes("c8s-verify/over-encryption/v1");
+const HKDF_INFO_V1 = utf8ToBytes("c8s-verify/over-encryption/v1");
+const HKDF_INFO_IDENTITY = utf8ToBytes("c8s-verify/over-encryption/pq-mesh-identity/v2");
 
 /** Raw public halves of the LB's hybrid key. */
 export interface PublicHalves {
@@ -55,10 +56,19 @@ export async function deriveSessionKey(
   x25519Secret: Uint8Array,
   nonce: Uint8Array,
 ): Promise<CryptoKey> {
+  return deriveSessionKeyWithContext(mlkemSecret, x25519Secret, nonce, HKDF_INFO_V1);
+}
+
+async function deriveSessionKeyWithContext(
+  mlkemSecret: Uint8Array,
+  x25519Secret: Uint8Array,
+  salt: Uint8Array,
+  info: Uint8Array,
+): Promise<CryptoKey> {
   const ikm = concatBytes(mlkemSecret, x25519Secret);
   const hkdfKey = await subtle().importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
   const bits = await subtle().deriveBits(
-    { name: "HKDF", hash: "SHA-256", salt: nonce, info: HKDF_INFO },
+    { name: "HKDF", hash: "SHA-256", salt, info },
     hkdfKey,
     256,
   );
@@ -78,7 +88,14 @@ export async function deriveSessionKey(
 export async function clientKeyAgreement(
   peerPub: PublicHalves,
   nonce: Uint8Array,
+  identityTranscript?: Uint8Array,
 ): Promise<{ key: CryptoKey; handshake: Handshake }> {
+  if (identityTranscript && identityTranscript.length !== 48) {
+    throw new C8sVerifyError(
+      "identity_binding",
+      `identity transcript hash must be 48 bytes, got ${identityTranscript.length}`,
+    );
+  }
   if (peerPub.mlkem768.length !== MLKEM768_EK_BYTES) {
     throw new C8sVerifyError(
       "key_binding",
@@ -108,7 +125,14 @@ export async function clientKeyAgreement(
     await subtle().deriveBits({ name: "X25519", public: peerX25519 }, clientPair.privateKey, 256),
   );
 
-  const key = await deriveSessionKey(u8(mlkemSecret), x25519Secret, nonce);
+  const key = identityTranscript
+    ? await deriveSessionKeyWithContext(
+        u8(mlkemSecret),
+        x25519Secret,
+        identityTranscript,
+        HKDF_INFO_IDENTITY,
+      )
+    : await deriveSessionKey(u8(mlkemSecret), x25519Secret, nonce);
   return { key, handshake: { clientX25519, mlkemCiphertext: u8(mlkemCt) } };
 }
 
@@ -121,7 +145,14 @@ export async function serverKeyAgreement(
   serverKeys: ServerKeys,
   handshake: Handshake,
   nonce: Uint8Array,
+  identityTranscript?: Uint8Array,
 ): Promise<CryptoKey> {
+  if (identityTranscript && identityTranscript.length !== 48) {
+    throw new C8sVerifyError(
+      "identity_binding",
+      `identity transcript hash must be 48 bytes, got ${identityTranscript.length}`,
+    );
+  }
   const mlkemSecret = u8(
     await mlkem.decapsulateBits(ML_KEM, serverKeys.mlkemPriv, handshake.mlkemCiphertext),
   );
@@ -135,7 +166,9 @@ export async function serverKeyAgreement(
   const x25519Secret = u8(
     await subtle().deriveBits({ name: "X25519", public: clientPub }, serverKeys.x25519Priv, 256),
   );
-  return deriveSessionKey(mlkemSecret, x25519Secret, nonce);
+  return identityTranscript
+    ? deriveSessionKeyWithContext(mlkemSecret, x25519Secret, identityTranscript, HKDF_INFO_IDENTITY)
+    : deriveSessionKey(mlkemSecret, x25519Secret, nonce);
 }
 
 /**

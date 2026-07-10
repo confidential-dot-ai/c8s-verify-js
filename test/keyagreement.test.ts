@@ -34,6 +34,35 @@ test("hybrid KEM produces an identical key on both sides", async () => {
   assert.equal(bytesToUtf8(await s.open(rec, aad)), "ping");
 });
 
+test("identity-bound KEM uses the transcript as HKDF context", async () => {
+  const { priv, pub } = await generateServerHybridKey();
+  const nonce = generateNonce();
+  const transcript = new Uint8Array(48).fill(0x33);
+  const client = await clientKeyAgreement(pub, nonce, transcript);
+  const serverKey = await serverKeyAgreement(priv, client.handshake, nonce, transcript);
+  const c = new Channel(client.key);
+  const s = new Channel(serverKey);
+  const record = await c.seal(new TextEncoder().encode("bound"), requestAAD());
+  assert.equal(new TextDecoder().decode(await s.open(record, requestAAD())), "bound");
+});
+
+test("identity-bound KEM rejects a mismatched transcript", async () => {
+  const { priv, pub } = await generateServerHybridKey();
+  const nonce = generateNonce();
+  const client = await clientKeyAgreement(pub, nonce, new Uint8Array(48).fill(0x11));
+  const serverKey = await serverKeyAgreement(
+    priv,
+    client.handshake,
+    nonce,
+    new Uint8Array(48).fill(0x22),
+  );
+  const record = await new Channel(client.key).seal(
+    new TextEncoder().encode("bound"),
+    requestAAD(),
+  );
+  await assert.rejects(() => new Channel(serverKey).open(record, requestAAD()));
+});
+
 test("a different nonce derives a different key", async () => {
   const { priv, pub } = await generateServerHybridKey();
   const { key: clientKey, handshake } = await clientKeyAgreement(pub, generateNonce());

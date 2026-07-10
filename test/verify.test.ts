@@ -11,9 +11,13 @@ import { generateNonce } from "../src/nonce.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { DEMO_MEASUREMENTS } from "../demo/config.js";
 import { buildBundle, loadFixtures } from "./helpers.js";
-import { base64ToBytes, bytesToBase64 } from "../src/base64.js";
+import { base64ToBytes, bytesToBase64, bytesToBase64Url } from "../src/base64.js";
 
-const POLICY: VerifyPolicy = { measurements: DEMO_MEASUREMENTS, requireFreshness: false };
+const POLICY: VerifyPolicy = {
+  measurements: DEMO_MEASUREMENTS,
+  requireFreshness: false,
+  requireClusterIdentity: false,
+};
 
 test("verifies a well-formed bundle (recorded evidence)", async () => {
   const nonce = generateNonce();
@@ -52,6 +56,7 @@ test("rejects a measurement not in the allowlist", async () => {
       verifyAttestation(bundle, nonce, {
         measurements: ["deadbeef"],
         requireFreshness: false,
+        requireClusterIdentity: false,
         meshCaPem,
       }),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "measurement_denied",
@@ -83,6 +88,41 @@ test("rejects when the pinned anchor is the wrong cert", async () => {
 test("expectedReportData is a 48-byte SHA-384 digest", async () => {
   const d = await expectedReportData(new Uint8Array(32), new Uint8Array(1184), new Uint8Array(32));
   assert.equal(d.length, 48);
+});
+
+test("default policy rejects a legacy PQ bundle without cluster identity", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  await assert.rejects(
+    () =>
+      verifyAttestation(bundle, nonce, {
+        measurements: DEMO_MEASUREMENTS,
+        meshCaPem,
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("verifies the v2 mesh proof even when recorded evidence disables freshness", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  const result = await verifyAttestation(bundle, nonce, {
+    ...POLICY,
+    meshCaPem,
+  });
+  assert.equal(result.binding, "over-encryption+mesh-identity-v2");
+  assert.equal(result.identityBound, false);
+  assert.ok(result.warnings.some((w) => w.includes("freshness binding not enforced")));
+});
+
+test("v2 rejects session-key substitution after the mesh leaf signs", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  bundle.session_pubkey.x25519 = bytesToBase64Url(new Uint8Array(32).fill(0x55));
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
 });
 
 // --- verifyEvidence: bare SNP evidence (no bundle / nonce / session / cert) ---

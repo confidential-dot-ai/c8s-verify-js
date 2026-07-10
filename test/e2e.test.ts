@@ -37,6 +37,7 @@ test("end-to-end: connect, verify, and over-encrypted echo", async () => {
       baseUrl: `http://localhost:${port}`,
       measurements: DEMO_MEASUREMENTS,
       requireFreshness: DEMO_REQUIRE_FRESHNESS,
+      requireClusterIdentity: false,
     });
     const session = await client.connect();
     assert.equal(session.attestation.platform, "snp");

@@ -4,20 +4,29 @@
 
 import { subtle } from "./crypto-env.js";
 import { verifySnp, verifyAzSnp } from "./wasm-loader.js";
-import { verifyCertChain } from "./x509.js";
+import { verifyCertChain, type ChainResult } from "./x509.js";
 import { decodePEM } from "./pem.js";
 import { concatBytes, bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
 import { fail } from "./errors.js";
 import type { Evidence } from "./hcl.js";
+import {
+  certificateHashBase64Url,
+  IDENTITY_BINDING_V2,
+  identityTranscriptHash,
+  verifyMeshIdentityProof,
+  type MeshIdentityProof,
+} from "./identity.js";
 
 export interface VerifyPolicy {
   /** accepted launch digests (hex sha-384) */
   measurements: string[];
   /** default "snp" */
   platform?: string;
-  /** default true: report_data must bind session key+nonce */
+  /** default true: report_data must bind the selected session transcript */
   requireFreshness?: boolean;
-  /** pinned CA; if omitted, bundle.cds_cert_pem is the anchor */
+  /** default true: require the v2 mesh identity proof and all out-of-band pins */
+  requireClusterIdentity?: boolean;
+  /** pinned mesh CA; required by the default identity-bound v2 policy */
   meshCaPem?: string;
   /** validity reference time (default now) */
   at?: Date;
@@ -36,7 +45,9 @@ export interface AttestationBundle {
   evidence: Evidence;
   cds_cert_pem?: string;
   ear?: string;
+  binding?: string;
   session_pubkey: SessionPubKeyB64;
+  identity_proof?: MeshIdentityProof;
 }
 
 /** Claims block inside the WASM verifier's JSON result. */
@@ -71,6 +82,10 @@ export interface AttestationResult {
   measurement: string;
   reportVersion: number;
   reportDataMatch: boolean | null;
+  binding: string;
+  identityBound: boolean;
+  /** v2 transcript hash used as the identity-bound HKDF context. */
+  keyAgreementContext?: Uint8Array;
   sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array };
   cert: CertInfo | null;
   claims: WasmClaims;
@@ -121,6 +136,10 @@ export async function verifyAttestation(
   const warnings: string[] = [];
   const wantPlatform = policy.platform ?? "snp";
   const requireFreshness = policy.requireFreshness !== false;
+  const requireClusterIdentity = policy.requireClusterIdentity !== false;
+  if (requireClusterIdentity && !requireFreshness) {
+    fail("invalid_request", "cluster identity requires freshness enforcement");
+  }
 
   // 1. Nonce echo — cheap replay guard before any crypto.
   const echoed = base64UrlToBytes(bundle.nonce);
@@ -134,8 +153,61 @@ export async function verifyAttestation(
     mlkem768: base64UrlToBytes(bundle.session_pubkey.mlkem768),
   };
 
-  // 3. Hardware attestation via WASM. report_data binds the session key + nonce.
-  const expected = await expectedReportData(sessionPubKey.x25519, sessionPubKey.mlkem768, nonce);
+  const binding = bundle.binding ?? "over-encryption";
+  if (requireClusterIdentity && binding !== IDENTITY_BINDING_V2) {
+    fail(
+      "identity_binding",
+      `server returned ${binding}; ${IDENTITY_BINDING_V2} is required for cluster identity`,
+    );
+  }
+
+  // 3. Prepare the report_data expectation. V2 binds the hybrid keys and
+  // nonce to an exact mesh leaf and one of the caller's pinned mesh CAs.
+  let expected: Uint8Array;
+  let identityChain: ChainResult | null = null;
+  if (binding === IDENTITY_BINDING_V2) {
+    if (bundle.version !== "c8s-verify/v2") {
+      fail("identity_binding", `identity-bound response has unexpected version ${bundle.version}`);
+    }
+    if (!bundle.identity_proof) {
+      fail("identity_binding", "identity-bound response omitted identity_proof");
+    }
+    if (!bundle.cds_cert_pem) {
+      fail("identity_binding", "identity-bound response omitted cds_cert_pem");
+    }
+    if (!policy.meshCaPem) {
+      fail("identity_binding", "identity-bound verification requires meshCaPem pinned out of band");
+    }
+
+    const leafBlocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
+    const pinnedCAs = decodePEM(policy.meshCaPem, "CERTIFICATE");
+    if (leafBlocks.length === 0 || pinnedCAs.length === 0) {
+      fail("invalid_cert", "identity-bound verification requires a leaf and pinned mesh CA");
+    }
+    let selectedCA: Uint8Array | undefined;
+    for (const candidate of pinnedCAs) {
+      if ((await certificateHashBase64Url(candidate)) === bundle.identity_proof.mesh_ca_sha256) {
+        selectedCA = candidate;
+        break;
+      }
+    }
+    if (!selectedCA) {
+      fail("identity_binding", "identity proof does not name any pinned mesh CA");
+    }
+    identityChain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
+    expected = await identityTranscriptHash(
+      sessionPubKey,
+      nonce,
+      identityChain.leaf.der,
+      identityChain.ca.der,
+    );
+  } else if (binding === "over-encryption") {
+    expected = await expectedReportData(sessionPubKey.x25519, sessionPubKey.mlkem768, nonce);
+  } else {
+    fail("unsupported", `unsupported attestation binding ${binding}`);
+  }
+
+  // 4. Hardware attestation via WASM. report_data binds the selected transcript.
 
   // az-snp gets full verification (HCL report + vTPM quote), with `expected`
   // checked against the TPM quote's extraData. Bare snp checks the SNP report
@@ -158,7 +230,7 @@ export async function verifyAttestation(
     if (isAzSnp && requireFreshness && isFreshnessMismatch(e)) {
       fail(
         "report_data_mismatch",
-        "report_data does not bind this session's key and nonce (stale or substituted evidence)",
+        "report_data does not bind this session transcript (stale or substituted evidence)",
         { details: { expected: bytesToHex(expected) }, cause: e },
       );
     }
@@ -173,10 +245,13 @@ export async function verifyAttestation(
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
 
-  // 4. Measurement allowlist (case-insensitive hex).
+  // 5. Measurement allowlist (case-insensitive hex).
   const measurement = String(result.claims.launch_digest).toLowerCase();
   const allow = (policy.measurements ?? []).map((m) => m.toLowerCase());
   if (allow.length === 0) {
+    if (requireClusterIdentity) {
+      fail("measurement_denied", "cluster identity requires a non-empty measurement allowlist");
+    }
     warnings.push("no measurement allowlist provided — launch digest was not checked");
   } else if (!allow.includes(measurement)) {
     fail("measurement_denied", `launch digest ${measurement} is not in the allowlist`, {
@@ -184,25 +259,35 @@ export async function verifyAttestation(
     });
   }
 
-  // 5. Freshness / key binding.
+  // 6. Freshness / key binding.
   if (result.report_data_match === true) {
     // bound to our session key + nonce — strongest result.
   } else if (requireFreshness) {
     fail(
       "report_data_mismatch",
-      "report_data does not bind this session's key and nonce (stale or substituted evidence)",
+      "report_data does not bind the expected session and identity transcript",
       { details: { expected: bytesToHex(expected), got: result.claims.report_data } },
     );
   } else {
     warnings.push(
       "freshness binding not enforced (requireFreshness=false): hardware signature and " +
-        "measurement are verified, but report_data is not bound to this session key+nonce",
+        "measurement are verified, but report_data is not bound to this session transcript",
     );
   }
 
-  // 6. CDS / mesh-CA certificate: parse, check validity, chain to the anchor.
+  // 7. Mesh identity proof or legacy certificate-only check.
   let cert: CertInfo | null = null;
-  if (bundle.cds_cert_pem) {
+  let identityBound = false;
+  if (binding === IDENTITY_BINDING_V2 && identityChain && bundle.identity_proof) {
+    await verifyMeshIdentityProof(
+      bundle.identity_proof,
+      expected,
+      identityChain.leaf,
+      identityChain.ca,
+    );
+    identityBound = result.report_data_match === true;
+    cert = certInfo(identityChain);
+  } else if (bundle.cds_cert_pem) {
     const blocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
     if (blocks.length === 0) {
       fail("invalid_cert", "cds_cert_pem contained no certificate");
@@ -219,13 +304,7 @@ export async function verifyAttestation(
           "pin the mesh CA out of band for a stronger guarantee",
       );
     }
-    cert = {
-      subjectCN: chain.leaf.subjectCN,
-      issuerCN: chain.leaf.issuerCN,
-      sha256: chain.leafSha256,
-      caSha256: chain.caSha256,
-      notAfter: chain.leaf.notAfter.toISOString(),
-    };
+    cert = certInfo(chain);
   } else {
     warnings.push("bundle did not include cds_cert_pem; CDS certificate was not verified");
   }
@@ -236,10 +315,23 @@ export async function verifyAttestation(
     measurement,
     reportVersion: result.report_version,
     reportDataMatch: result.report_data_match,
+    binding,
+    identityBound,
+    keyAgreementContext: identityBound ? expected : undefined,
     sessionPubKey,
     cert,
     claims: result.claims,
     warnings,
+  };
+}
+
+function certInfo(chain: ChainResult): CertInfo {
+  return {
+    subjectCN: chain.leaf.subjectCN,
+    issuerCN: chain.leaf.issuerCN,
+    sha256: chain.leafSha256,
+    caSha256: chain.caSha256,
+    notAfter: chain.leaf.notAfter.toISOString(),
   };
 }
 

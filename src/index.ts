@@ -22,6 +22,7 @@ import { Channel, requestAAD, responseAAD, type WireRecord } from "./channel.js"
 import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
+import { IDENTITY_BINDING_V2 } from "./identity.js";
 
 export { C8sVerifyError } from "./errors.js";
 export { verifyAttestation, verifyEvidence, expectedReportData } from "./verify.js";
@@ -51,6 +52,8 @@ export interface C8sClientOptions {
   measurements?: string[];
   platform?: string;
   requireFreshness?: boolean;
+  /** default true: require PQ session keys to be bound to the pinned mesh identity */
+  requireClusterIdentity?: boolean;
   meshCaPem?: string;
   at?: Date;
   fetch?: typeof fetch;
@@ -112,6 +115,7 @@ export class C8sClient {
       measurements: opts.measurements ?? [],
       platform: opts.platform,
       requireFreshness: opts.requireFreshness,
+      requireClusterIdentity: opts.requireClusterIdentity,
       meshCaPem: opts.meshCaPem,
       at: opts.at,
     };
@@ -125,7 +129,11 @@ export class C8sClient {
    * Fetch the LB attestation bundle for a fresh nonce.
    */
   async fetchAttestation(nonce: Uint8Array): Promise<AttestationBundle> {
-    const url = `${this._url(this.prefix)}/attestation?nonce=${bytesToBase64Url(nonce)}`;
+    const params = new URLSearchParams({ nonce: bytesToBase64Url(nonce) });
+    if (this.policy.requireClusterIdentity !== false) {
+      params.set("binding", IDENTITY_BINDING_V2);
+    }
+    const url = `${this._url(this.prefix)}/attestation?${params.toString()}`;
     const res = await this.fetch(url, { headers: { accept: "application/json" } });
     if (!res.ok) {
       fail("verification_failed", `attestation endpoint returned HTTP ${res.status}`);
@@ -134,10 +142,10 @@ export class C8sClient {
   }
 
   /**
-   * Fetch the statically-served CDS leaf cert (PEM). Best-effort: returns null
-   * on any network/HTTP error or non-PEM body so connect() degrades to the
-   * "cert not verified" warning instead of failing closed. The cert's trust is
-   * the pinned mesh CA it chains to, so fetching it over the plain hop is safe.
+   * Fetch the statically-served CDS leaf cert (PEM) for legacy v1 responses.
+   * Best-effort: returns null on any network/HTTP error or non-PEM body. V2
+   * requires the exact attestation-bound chain in its response and never relies
+   * on this fallback.
    */
   async fetchCdsCert(): Promise<string | null> {
     if (!this.cdsCertPath) return null;
@@ -169,7 +177,11 @@ export class C8sClient {
     }
     const attestation = await verifyAttestation(bundle, nonce, this.policy);
 
-    const { key, handshake } = await clientKeyAgreement(attestation.sessionPubKey, nonce);
+    const { key, handshake } = await clientKeyAgreement(
+      attestation.sessionPubKey,
+      nonce,
+      attestation.keyAgreementContext,
+    );
 
     // Register the channel with the LB; it derives the identical key.
     const hsRes = await this.fetch(`${this._url(this.prefix)}/handshake`, {
