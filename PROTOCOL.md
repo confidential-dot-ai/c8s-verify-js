@@ -52,8 +52,10 @@ Returns the CDS EAR-signing JWKS (ES256, `kid` = RFC 7638 thumbprint), republish
 the CDS, for the optional EAR-verification path.
 
 ### `GET /.well-known/c8s/attestation?nonce=<b64url>&binding=<mode>`
-`nonce` is the client's fresh 32-byte random challenge, base64url (unpadded). Response is
-`application/json`:
+`nonce` is the client's fresh 32-byte random challenge, base64url (unpadded). The
+`binding` value contains a literal `+`, which query-string parsers decode as a
+space — clients MUST percent-encode it (`binding=over-encryption%2Bmesh-identity-v2`).
+Response is `application/json`:
 
 ```jsonc
 {
@@ -80,6 +82,10 @@ the CDS, for the optional EAR-verification path.
   }
 }
 ```
+
+All `b64url` fields are **unpadded** base64url (RFC 4648 §5 without `=`); the
+`signature` is DER — a `SEQUENCE` spanning the whole value, holding exactly two
+positive `INTEGER`s without redundant sign padding.
 
 `binding=over-encryption+mesh-identity-v2` is the current, identity-bound mode and
 is requested by the client by default. Its `cds_cert_pem` and `identity_proof`

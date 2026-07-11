@@ -5,20 +5,25 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { C8sClient } from "../src/index.js";
+import { IDENTITY_BINDING_V2 } from "../src/identity.js";
 import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "../demo/config.js";
+import { loadFixtures } from "./helpers.js";
 
 // Run from source via tsx; the repo root is one directory up (test/ -> root),
 // and the mock LB server is a TypeScript source run through the tsx loader.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Start the mock LB on an ephemeral port; resolve once it logs readiness. */
-function startServer(port: number): Promise<ChildProcess> {
+function startServer(port: number, extraEnv: Record<string, string> = {}): Promise<ChildProcess> {
   const child = spawn(process.execPath, ["--import", "tsx", join(ROOT, "demo", "server.ts")], {
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), ...extraEnv },
     stdio: ["ignore", "pipe", "inherit"],
   });
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("server did not start in time")), 8000);
+    const t = setTimeout(() => {
+      child.kill();
+      reject(new Error("server did not start in time"));
+    }, 8000);
     child.stdout?.on("data", (d: Buffer) => {
       if (d.toString().includes("listening")) {
         clearTimeout(t);
@@ -49,6 +54,36 @@ test("end-to-end: connect, verify, and over-encrypted echo", async () => {
     assert.equal(res.status, 200);
     assert.match(res.text(), /over-encrypted channel/);
     assert.ok(res.text().includes(JSON.stringify(msg)));
+  } finally {
+    server.kill();
+  }
+});
+
+test("end-to-end v2: identity-bound bundle, transcript-keyed channel, echo", async () => {
+  const port = 9200 + Math.floor(Math.random() * 200);
+  // MOCK_BINDING makes the mock mint v2 bundles even though this client cannot
+  // request the binding: recorded evidence can never match a fresh transcript,
+  // so the client must run with the explicit freshness/identity downgrades —
+  // yet it still verifies the mesh proof and derives the v2 transcript-keyed
+  // channel key, which only matches if connect() threads keyAgreementContext.
+  const server = await startServer(port, { MOCK_BINDING: IDENTITY_BINDING_V2 });
+  try {
+    const { meshCaPem } = await loadFixtures();
+    const client = new C8sClient({
+      baseUrl: `http://localhost:${port}`,
+      measurements: DEMO_MEASUREMENTS,
+      requireFreshness: false,
+      requireClusterIdentity: false,
+      meshCaPem,
+    });
+    const session = await client.connect();
+    assert.equal(session.attestation.binding, IDENTITY_BINDING_V2);
+    assert.equal(session.attestation.identityBound, false); // recorded evidence
+    assert.equal(session.attestation.keyAgreementContext?.length, 48);
+
+    const res = await session.fetch("/v1/echo", { method: "POST", body: "v2 round-trip" });
+    assert.equal(res.status, 200);
+    assert.match(res.text(), /over-encrypted channel/);
   } finally {
     server.kill();
   }

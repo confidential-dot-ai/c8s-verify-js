@@ -10,9 +10,11 @@ import { concatBytes, bytesToHex, base64UrlToBytes, constantTimeEqual } from "./
 import { fail } from "./errors.js";
 import type { Evidence } from "./hcl.js";
 import {
-  certificateHashBase64Url,
+  BINDING_V1,
   IDENTITY_BINDING_V2,
+  IDENTITY_BUNDLE_VERSION,
   identityTranscriptHash,
+  selectPinnedCA,
   verifyMeshIdentityProof,
   type MeshIdentityProof,
 } from "./identity.js";
@@ -83,8 +85,13 @@ export interface AttestationResult {
   reportVersion: number;
   reportDataMatch: boolean | null;
   binding: string;
+  /** true only when the v2 transcript is hardware-bound (report_data matched). */
   identityBound: boolean;
-  /** v2 transcript hash used as the identity-bound HKDF context. */
+  /**
+   * V2 transcript hash, used as the HKDF context whenever a v2 response was
+   * accepted — the KDF is keyed on the protocol version (see PROTOCOL.md), not
+   * on freshness. Hardware-bound only when {@link identityBound} is true.
+   */
   keyAgreementContext?: Uint8Array;
   sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array };
   cert: CertInfo | null;
@@ -140,20 +147,43 @@ export async function verifyAttestation(
   if (requireClusterIdentity && !requireFreshness) {
     fail("invalid_request", "cluster identity requires freshness enforcement");
   }
+  if (requireClusterIdentity && (policy.measurements ?? []).length === 0) {
+    fail("invalid_request", "cluster identity requires a non-empty measurement allowlist");
+  }
+
+  if (
+    typeof bundle?.nonce !== "string" ||
+    typeof bundle?.session_pubkey?.x25519 !== "string" ||
+    typeof bundle?.session_pubkey?.mlkem768 !== "string"
+  ) {
+    fail("invalid_request", "attestation bundle is missing nonce or session_pubkey fields");
+  }
 
   // 1. Nonce echo — cheap replay guard before any crypto.
-  const echoed = base64UrlToBytes(bundle.nonce);
+  let echoed: Uint8Array;
+  try {
+    echoed = base64UrlToBytes(bundle.nonce);
+  } catch (cause) {
+    fail("invalid_request", "attestation bundle nonce is not base64url", { cause });
+  }
   if (!constantTimeEqual(echoed, nonce)) {
     fail("nonce_mismatch", "attestation bundle nonce does not match the nonce we sent");
   }
 
   // 2. Session public key shape.
-  const sessionPubKey = {
-    x25519: base64UrlToBytes(bundle.session_pubkey.x25519),
-    mlkem768: base64UrlToBytes(bundle.session_pubkey.mlkem768),
-  };
+  let sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array };
+  try {
+    sessionPubKey = {
+      x25519: base64UrlToBytes(bundle.session_pubkey.x25519),
+      mlkem768: base64UrlToBytes(bundle.session_pubkey.mlkem768),
+    };
+  } catch (cause) {
+    fail("invalid_request", "attestation bundle session_pubkey is not base64url", { cause });
+  }
 
-  const binding = bundle.binding ?? "over-encryption";
+  // `||`, not `??`: an empty-string binding (zero-value marshaling) is legacy.
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+  const binding = bundle.binding || BINDING_V1;
   if (requireClusterIdentity && binding !== IDENTITY_BINDING_V2) {
     fail(
       "identity_binding",
@@ -164,9 +194,9 @@ export async function verifyAttestation(
   // 3. Prepare the report_data expectation. V2 binds the hybrid keys and
   // nonce to an exact mesh leaf and one of the caller's pinned mesh CAs.
   let expected: Uint8Array;
-  let identityChain: ChainResult | null = null;
+  let identity: { chain: ChainResult; proof: MeshIdentityProof } | null = null;
   if (binding === IDENTITY_BINDING_V2) {
-    if (bundle.version !== "c8s-verify/v2") {
+    if (bundle.version !== IDENTITY_BUNDLE_VERSION) {
       fail("identity_binding", `identity-bound response has unexpected version ${bundle.version}`);
     }
     if (!bundle.identity_proof) {
@@ -184,24 +214,14 @@ export async function verifyAttestation(
     if (leafBlocks.length === 0 || pinnedCAs.length === 0) {
       fail("invalid_cert", "identity-bound verification requires a leaf and pinned mesh CA");
     }
-    let selectedCA: Uint8Array | undefined;
-    for (const candidate of pinnedCAs) {
-      if ((await certificateHashBase64Url(candidate)) === bundle.identity_proof.mesh_ca_sha256) {
-        selectedCA = candidate;
-        break;
-      }
-    }
+    const selectedCA = await selectPinnedCA(bundle.identity_proof, pinnedCAs);
     if (!selectedCA) {
       fail("identity_binding", "identity proof does not name any pinned mesh CA");
     }
-    identityChain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
-    expected = await identityTranscriptHash(
-      sessionPubKey,
-      nonce,
-      identityChain.leaf.der,
-      identityChain.ca.der,
-    );
-  } else if (binding === "over-encryption") {
+    const chain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
+    identity = { chain, proof: bundle.identity_proof };
+    expected = await identityTranscriptHash(sessionPubKey, nonce, chain.leaf.der, chain.ca.der);
+  } else if (binding === BINDING_V1) {
     expected = await expectedReportData(sessionPubKey.x25519, sessionPubKey.mlkem768, nonce);
   } else {
     fail("unsupported", `unsupported attestation binding ${binding}`);
@@ -249,9 +269,7 @@ export async function verifyAttestation(
   const measurement = String(result.claims.launch_digest).toLowerCase();
   const allow = (policy.measurements ?? []).map((m) => m.toLowerCase());
   if (allow.length === 0) {
-    if (requireClusterIdentity) {
-      fail("measurement_denied", "cluster identity requires a non-empty measurement allowlist");
-    }
+    // Unreachable under requireClusterIdentity — rejected at entry.
     warnings.push("no measurement allowlist provided — launch digest was not checked");
   } else if (!allow.includes(measurement)) {
     fail("measurement_denied", `launch digest ${measurement} is not in the allowlist`, {
@@ -278,15 +296,15 @@ export async function verifyAttestation(
   // 7. Mesh identity proof or legacy certificate-only check.
   let cert: CertInfo | null = null;
   let identityBound = false;
-  if (binding === IDENTITY_BINDING_V2 && identityChain && bundle.identity_proof) {
-    await verifyMeshIdentityProof(
-      bundle.identity_proof,
-      expected,
-      identityChain.leaf,
-      identityChain.ca,
-    );
+  let keyAgreementContext: Uint8Array | undefined;
+  if (identity) {
+    await verifyMeshIdentityProof(identity.proof, expected, identity.chain.leaf, identity.chain.ca);
     identityBound = result.report_data_match === true;
-    cert = certInfo(identityChain);
+    // The proof-of-possession signature over the transcript verified above, so
+    // the v2 KDF context applies even when freshness was explicitly disabled —
+    // a v2 server derives with this same transcript.
+    keyAgreementContext = expected;
+    cert = certInfo(identity.chain);
   } else if (bundle.cds_cert_pem) {
     const blocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
     if (blocks.length === 0) {
@@ -317,7 +335,7 @@ export async function verifyAttestation(
     reportDataMatch: result.report_data_match,
     binding,
     identityBound,
-    keyAgreementContext: identityBound ? expected : undefined,
+    keyAgreementContext,
     sessionPubKey,
     cert,
     claims: result.claims,

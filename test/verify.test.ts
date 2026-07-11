@@ -12,6 +12,7 @@ import { C8sVerifyError } from "../src/errors.js";
 import { DEMO_MEASUREMENTS } from "../demo/config.js";
 import { buildBundle, loadFixtures } from "./helpers.js";
 import { base64ToBytes, bytesToBase64, bytesToBase64Url } from "../src/base64.js";
+import { certificateHashBase64Url, IDENTITY_BINDING_V2 } from "../src/identity.js";
 
 const POLICY: VerifyPolicy = {
   measurements: DEMO_MEASUREMENTS,
@@ -105,7 +106,7 @@ test("default policy rejects a legacy PQ bundle without cluster identity", async
 
 test("verifies the v2 mesh proof even when recorded evidence disables freshness", async () => {
   const nonce = generateNonce();
-  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  const { bundle, meshCaPem, transcript } = await buildBundle(nonce, { identity: true });
   const result = await verifyAttestation(bundle, nonce, {
     ...POLICY,
     meshCaPem,
@@ -113,6 +114,9 @@ test("verifies the v2 mesh proof even when recorded evidence disables freshness"
   assert.equal(result.binding, "over-encryption+mesh-identity-v2");
   assert.equal(result.identityBound, false);
   assert.ok(result.warnings.some((w) => w.includes("freshness binding not enforced")));
+  // The v2 KDF context is the verified transcript even without hardware
+  // freshness — the KDF is keyed on the protocol version, not on freshness.
+  assert.deepEqual(result.keyAgreementContext, transcript);
 });
 
 test("v2 rejects session-key substitution after the mesh leaf signs", async () => {
@@ -122,6 +126,133 @@ test("v2 rejects session-key substitution after the mesh leaf signs", async () =
   await assert.rejects(
     () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+// --- v2 policy gates (all fail before / independently of the WASM verifier) ---
+
+test("rejects cluster identity combined with disabled freshness", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  await assert.rejects(
+    () =>
+      verifyAttestation(bundle, nonce, {
+        measurements: DEMO_MEASUREMENTS,
+        requireFreshness: false,
+        meshCaPem,
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
+});
+
+test("v2 rejects an unexpected bundle version", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  bundle.version = "c8s-verify/v1";
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("v2 rejects a bundle missing its identity proof", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  delete bundle.identity_proof;
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("v2 rejects a bundle missing its certificate chain", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  delete bundle.cds_cert_pem;
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("v2 requires a mesh CA pinned out of band", async () => {
+  const nonce = generateNonce();
+  const { bundle } = await buildBundle(nonce, { identity: true });
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("rejects an unknown attestation binding", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  bundle.binding = "over-encryption+unknown-v3";
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "unsupported",
+  );
+});
+
+test("v2 rejects a proof naming an unpinned mesh CA", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  bundle.identity_proof!.mesh_ca_sha256 = bytesToBase64Url(new Uint8Array(32).fill(0x07));
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("v2 accepts padded base64url identity-proof fields", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  const pad = (s: string): string => s + "=".repeat((4 - (s.length % 4)) % 4);
+  bundle.identity_proof!.leaf_sha256 = pad(bundle.identity_proof!.leaf_sha256);
+  bundle.identity_proof!.mesh_ca_sha256 = pad(bundle.identity_proof!.mesh_ca_sha256);
+  bundle.identity_proof!.signature = pad(bundle.identity_proof!.signature);
+  const result = await verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem });
+  assert.equal(result.binding, IDENTITY_BINDING_V2);
+});
+
+test("v2 rejects a leaf that does not chain to the pinned mesh CA", async () => {
+  const nonce = generateNonce();
+  const { bundle } = await buildBundle(nonce, { identity: true });
+  // Pin the (non-CA) leaf as the anchor and point the proof at it so CA
+  // selection succeeds; the chain check must then reject leaf-signed-by-leaf.
+  const { leafPem, leafDer } = await loadFixtures();
+  bundle.identity_proof!.mesh_ca_sha256 = await certificateHashBase64Url(leafDer);
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem: leafPem }),
+    (e: unknown) =>
+      e instanceof C8sVerifyError && (e.code === "cert_chain" || e.code === "invalid_cert"),
+  );
+});
+
+test("cluster identity requires a non-empty measurement allowlist", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { identity: true });
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { measurements: [], meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
+});
+
+test("treats an empty-string binding as legacy v1", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  bundle.binding = ""; // zero-value marshaling from a Go server without omitempty
+  const r = await verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem });
+  assert.equal(r.binding, "over-encryption");
+});
+
+test("rejects a bundle with malformed base64url fields with a typed error", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  bundle.session_pubkey.mlkem768 = "!!not-base64url!!";
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...POLICY, meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
   );
 });
 

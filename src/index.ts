@@ -22,9 +22,11 @@ import { Channel, requestAAD, responseAAD, type WireRecord } from "./channel.js"
 import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
-import { IDENTITY_BINDING_V2 } from "./identity.js";
+import { BINDING_V1, IDENTITY_BINDING_V2 } from "./identity.js";
 
 export { C8sVerifyError } from "./errors.js";
+export { BINDING_V1, IDENTITY_BINDING_V2, IDENTITY_BUNDLE_VERSION } from "./identity.js";
+export type { MeshIdentityProof } from "./identity.js";
 export { verifyAttestation, verifyEvidence, expectedReportData } from "./verify.js";
 export type {
   VerifyPolicy,
@@ -168,10 +170,15 @@ export class C8sClient {
   async connect(): Promise<Session> {
     const nonce = generateNonce();
     const bundle = await this.fetchAttestation(nonce);
-    // The cds-attest sidecar no longer embeds the leaf in the bundle (it would
-    // go stale on LB cert rotation); pull the live one nginx serves statically
-    // so the chain-to-mesh-CA check in verifyAttestation can run.
-    if (!bundle.cds_cert_pem) {
+    // Legacy v1 only (allowlisted, so unknown future bindings never get the
+    // fallback): the cds-attest sidecar may omit the leaf from the bundle (it
+    // would go stale on LB cert rotation); pull the live one nginx serves
+    // statically so the chain-to-mesh-CA check in verifyAttestation can run.
+    // Identity-bound modes must carry their attestation-bound chain in the
+    // response itself, so a missing cds_cert_pem is left to fail verification.
+    // `||`, not `??`: an empty-string binding is legacy, matching verify.ts.
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+    if (!bundle.cds_cert_pem && (bundle.binding || BINDING_V1) === BINDING_V1) {
       const pem = await this.fetchCdsCert();
       if (pem) bundle.cds_cert_pem = pem;
     }

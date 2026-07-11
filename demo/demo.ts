@@ -107,6 +107,8 @@ async function run(): Promise<void> {
       result = await verifyAttestation(bundle, nonce, {
         measurements: DEMO_MEASUREMENTS,
         requireFreshness: DEMO_REQUIRE_FRESHNESS,
+        // Explicit legacy downgrade: the demo replays recorded evidence, which
+        // can never carry a fresh v2 identity-bound transcript.
         requireClusterIdentity: false,
         meshCaPem: pinnedCa,
       });
@@ -123,11 +125,11 @@ async function run(): Promise<void> {
         set("measure", "ok");
         set("binding", "bad", `✗ ${err.message}`);
       } else if (code === "nonce_mismatch") set("fetch", "bad", `✗ ${err.message}`);
-      else if (code.includes("cert")) {
+      else if (code === "identity_binding" || code.includes("cert")) {
         set("wasm", "ok");
         set("measure", "ok");
         set("cert", "bad", `✗ ${err.message}`);
-      }
+      } else set("fetch", "bad", `✗ ${code}: ${err.message}`);
       throw e;
     }
 
@@ -159,7 +161,11 @@ async function run(): Promise<void> {
 
     // 7. handshake
     set("handshake", "run");
-    const { key, handshake } = await clientKeyAgreement(result.sessionPubKey, nonce);
+    const { key, handshake } = await clientKeyAgreement(
+      result.sessionPubKey,
+      nonce,
+      result.keyAgreementContext,
+    );
     const hsRes = await fetch(`${PREFIX}/handshake`, {
       method: "POST",
       headers: { "content-type": "application/json" },

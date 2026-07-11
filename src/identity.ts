@@ -6,16 +6,21 @@ import {
   constantTimeEqual,
   utf8ToBytes,
 } from "./base64.js";
-import { fail } from "./errors.js";
+import { C8sVerifyError, fail } from "./errors.js";
+import { NONCE_BYTES } from "./nonce.js";
 import { verifyECDSASignature, type Certificate } from "./x509.js";
 import type { PublicHalves } from "./keyagreement.js";
 
+/** Legacy v1 binding: session keys attested, mesh identity checked separately. */
+export const BINDING_V1 = "over-encryption";
 export const IDENTITY_BINDING_V2 = "over-encryption+mesh-identity-v2";
+export const IDENTITY_BUNDLE_VERSION = "c8s-verify/v2";
 export const IDENTITY_PROOF_ALGORITHM = "ecdsa-sha384";
+/** SHA-384 transcript hash length; also the v2 HKDF context length. */
+export const IDENTITY_TRANSCRIPT_BYTES = 48;
 
 const TRANSCRIPT_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity/v2");
 const PROOF_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity-proof/v2");
-const IDENTITY_NONCE_BYTES = 32;
 
 export interface MeshIdentityProof {
   algorithm: string;
@@ -56,10 +61,10 @@ export async function identityTranscriptHash(
       `identity transcript ML-KEM key must be 1184 bytes, got ${pub.mlkem768.length}`,
     );
   }
-  if (nonce.length !== IDENTITY_NONCE_BYTES) {
+  if (nonce.length !== NONCE_BYTES) {
     fail(
       "identity_binding",
-      `identity-bound PQ requires a ${IDENTITY_NONCE_BYTES}-byte nonce, got ${nonce.length}`,
+      `identity-bound PQ requires a ${NONCE_BYTES}-byte nonce, got ${nonce.length}`,
     );
   }
   if (leafDer.length === 0 || caDer.length === 0) {
@@ -77,14 +82,43 @@ export async function identityTranscriptHash(
   return new Uint8Array(await subtle().digest("SHA-384", encoded));
 }
 
-export function identityProofMessage(transcriptHash: Uint8Array): Uint8Array {
-  if (transcriptHash.length !== 48) {
+/** Reject anything that is not a SHA-384 transcript hash. */
+export function assertTranscriptLength(transcriptHash: Uint8Array): void {
+  if (transcriptHash.length !== IDENTITY_TRANSCRIPT_BYTES) {
     fail(
       "identity_binding",
-      `identity transcript hash must be 48 bytes, got ${transcriptHash.length}`,
+      `identity transcript hash must be ${IDENTITY_TRANSCRIPT_BYTES} bytes, got ${transcriptHash.length}`,
     );
   }
+}
+
+export function identityProofMessage(transcriptHash: Uint8Array): Uint8Array {
+  assertTranscriptLength(transcriptHash);
   return concatBytes(lengthPrefixed(PROOF_DOMAIN), lengthPrefixed(transcriptHash));
+}
+
+function decodeProofField(value: string): Uint8Array {
+  try {
+    return base64UrlToBytes(value);
+  } catch (cause) {
+    fail("identity_binding", "mesh identity proof fields must be base64url", { cause });
+  }
+}
+
+/**
+ * Select the pinned CA the proof commits to, comparing decoded hash bytes so
+ * selection accepts exactly the encodings {@link verifyMeshIdentityProof}
+ * accepts. Returns undefined when the proof names none of the pinned CAs.
+ */
+export async function selectPinnedCA(
+  proof: MeshIdentityProof,
+  pinnedCADers: Uint8Array[],
+): Promise<Uint8Array | undefined> {
+  const want = decodeProofField(proof.mesh_ca_sha256);
+  for (const candidate of pinnedCADers) {
+    if (constantTimeEqual(await sha256(candidate), want)) return candidate;
+  }
+  return undefined;
 }
 
 /** Verify certificate fingerprints and proof of possession for a v2 transcript. */
@@ -98,31 +132,29 @@ export async function verifyMeshIdentityProof(
     fail("identity_binding", `unsupported mesh identity proof algorithm ${proof.algorithm}`);
   }
 
-  const wantLeafHash = await sha256(leaf.der);
-  const wantCAHash = await sha256(ca.der);
-  let gotLeafHash: Uint8Array;
-  let gotCAHash: Uint8Array;
-  let signature: Uint8Array;
-  try {
-    gotLeafHash = base64UrlToBytes(proof.leaf_sha256);
-    gotCAHash = base64UrlToBytes(proof.mesh_ca_sha256);
-    signature = base64UrlToBytes(proof.signature);
-  } catch (cause) {
-    fail("identity_binding", "mesh identity proof fields must be base64url", { cause });
-  }
-  if (!constantTimeEqual(gotLeafHash, wantLeafHash)) {
+  if (!constantTimeEqual(decodeProofField(proof.leaf_sha256), await sha256(leaf.der))) {
     fail("identity_binding", "mesh identity proof does not commit to the served leaf");
   }
-  if (!constantTimeEqual(gotCAHash, wantCAHash)) {
+  if (!constantTimeEqual(decodeProofField(proof.mesh_ca_sha256), await sha256(ca.der))) {
     fail("identity_binding", "mesh identity proof does not commit to the pinned mesh CA");
   }
 
-  const ok = await verifyECDSASignature(
-    leaf,
-    identityProofMessage(transcriptHash),
-    signature,
-    "SHA-384",
-  );
+  let ok: boolean;
+  try {
+    ok = await verifyECDSASignature(
+      leaf,
+      identityProofMessage(transcriptHash),
+      decodeProofField(proof.signature),
+      "SHA-384",
+    );
+  } catch (e) {
+    // ecdsaDerToRaw / curve checks throw invalid_cert; the certificate itself
+    // already verified, so surface a malformed proof under the precise code.
+    if (e instanceof C8sVerifyError && e.code === "invalid_cert") {
+      fail("identity_binding", "mesh identity proof signature is malformed", { cause: e });
+    }
+    throw e;
+  }
   if (!ok) {
     fail("identity_binding", "mesh identity proof-of-possession signature is invalid");
   }

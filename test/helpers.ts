@@ -2,7 +2,6 @@
 // mock LB does, so verification tests can run without an HTTP server.
 
 import { readFile } from "node:fs/promises";
-import { sign } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -15,13 +14,7 @@ import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js
 import type { AttestationBundle } from "../src/verify.js";
 import type { Evidence } from "../src/hcl.js";
 import { decodePEM } from "../src/pem.js";
-import {
-  certificateHashBase64Url,
-  IDENTITY_BINDING_V2,
-  IDENTITY_PROOF_ALGORITHM,
-  identityProofMessage,
-  identityTranscriptHash,
-} from "../src/identity.js";
+import { mintIdentityProof } from "../demo/mint-identity.js";
 
 // Run from source via tsx (see package.json); this file lives at test/, so the
 // repo root is one directory up (test/ -> repo root).
@@ -32,16 +25,40 @@ export interface Fixtures {
   meshCaPem: string;
   leafPem: string;
   leafKeyPem: string;
+  leafDer: Uint8Array;
+  caDer: Uint8Array;
 }
 
-export async function loadFixtures(): Promise<Fixtures> {
-  const evidence = JSON.parse(await readFile(join(FIX, "snp-evidence-genoa.json"), "utf8"));
-  return {
-    snpEvidence: (evidence.evidence ?? evidence) as Evidence,
-    meshCaPem: await readFile(join(FIX, "mesh-ca.crt"), "utf8"),
-    leafPem: await readFile(join(FIX, "cds-leaf.crt"), "utf8"),
-    leafKeyPem: await readFile(join(FIX, "cds-leaf.key"), "utf8"),
-  };
+let fixturesPromise: Promise<Fixtures> | undefined;
+
+/**
+ * Load the recorded fixtures once per process; the files are immutable and
+ * every consumer either treats them as read-only or deep-clones before
+ * mutating (see buildBundle). A failed load clears the cache so the next
+ * caller retries instead of replaying a stale rejection.
+ */
+export function loadFixtures(): Promise<Fixtures> {
+  fixturesPromise ??= (async () => {
+    const [evidenceJson, meshCaPem, leafPem, leafKeyPem] = await Promise.all([
+      readFile(join(FIX, "snp-evidence-genoa.json"), "utf8"),
+      readFile(join(FIX, "mesh-ca.crt"), "utf8"),
+      readFile(join(FIX, "cds-leaf.crt"), "utf8"),
+      readFile(join(FIX, "cds-leaf.key"), "utf8"),
+    ]);
+    const evidence = JSON.parse(evidenceJson);
+    return {
+      snpEvidence: (evidence.evidence ?? evidence) as Evidence,
+      meshCaPem,
+      leafPem,
+      leafKeyPem,
+      leafDer: decodePEM(leafPem, "CERTIFICATE")[0],
+      caDer: decodePEM(meshCaPem, "CERTIFICATE")[0],
+    };
+  })().catch((e: unknown) => {
+    fixturesPromise = undefined;
+    throw e;
+  });
+  return fixturesPromise;
 }
 
 export interface BuiltBundle {
@@ -49,6 +66,8 @@ export interface BuiltBundle {
   priv: ServerKeys;
   pub: PublicHalves;
   meshCaPem: string;
+  /** v2 transcript hash; set when built with identity: true. */
+  transcript?: Uint8Array;
 }
 
 /**
@@ -58,7 +77,7 @@ export async function buildBundle(
   nonce: Uint8Array,
   opts: { tamperReport?: boolean; identity?: boolean } = {},
 ): Promise<BuiltBundle> {
-  const { snpEvidence, meshCaPem, leafPem, leafKeyPem } = await loadFixtures();
+  const { snpEvidence, meshCaPem, leafPem, leafKeyPem, leafDer, caDer } = await loadFixtures();
   const { priv, pub } = await generateServerHybridKey();
 
   const evidence = JSON.parse(JSON.stringify(snpEvidence));
@@ -81,22 +100,9 @@ export async function buildBundle(
     },
   };
   if (opts.identity) {
-    const leafDer = decodePEM(leafPem, "CERTIFICATE")[0];
-    const caDer = decodePEM(meshCaPem, "CERTIFICATE")[0];
-    const transcript = await identityTranscriptHash(pub, nonce, leafDer, caDer);
-    bundle.version = "c8s-verify/v2";
-    bundle.binding = IDENTITY_BINDING_V2;
-    bundle.identity_proof = {
-      algorithm: IDENTITY_PROOF_ALGORITHM,
-      leaf_sha256: await certificateHashBase64Url(leafDer),
-      mesh_ca_sha256: await certificateHashBase64Url(caDer),
-      signature: bytesToBase64Url(
-        sign("sha384", identityProofMessage(transcript), {
-          key: leafKeyPem,
-          dsaEncoding: "der",
-        }),
-      ),
-    };
+    const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
+    Object.assign(bundle, minted.bundleFields);
+    return { bundle, priv, pub, meshCaPem, transcript: minted.transcript };
   }
   return { bundle, priv, pub, meshCaPem };
 }
