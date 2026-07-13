@@ -7,7 +7,9 @@ const PEM = "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n";
 
 type FetchHandler = (url: string, init?: unknown) => unknown;
 
-/** Build a client whose fetch records the URLs it is asked for. */
+/** Build a client whose fetch records the URLs it is asked for. These tests
+ *  exercise only fetchCdsCert (no attestation), so the insecure entry point —
+ *  which skips the measurement / mesh-CA pins — is the right constructor. */
 function clientWith(handler: FetchHandler, opts: Partial<C8sClientOptions> = {}) {
   const calls: string[] = [];
   const fetch = ((url: string, init?: unknown) => {
@@ -16,7 +18,7 @@ function clientWith(handler: FetchHandler, opts: Partial<C8sClientOptions> = {})
   }) as unknown as typeof globalThis.fetch;
   return {
     calls,
-    client: new C8sClient({ baseUrl: "https://lb.example", fetch, ...opts }),
+    client: C8sClient.insecure({ baseUrl: "https://lb.example", fetch, ...opts }),
   };
 }
 

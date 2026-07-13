@@ -105,6 +105,15 @@ const res = await session.fetch("/v1/chat", { method: "POST", body: prompt });
 console.log(res.text());
 ```
 
+Both `measurements` (the enclave's code identity) and `meshCaPem` (your cluster's
+identity) are **required** — the constructor throws if either is missing, because
+without them the flow would "succeed" against any genuine SNP enclave running any
+code and/or a proxy-supplied CA. For offline/bring-up use where you deliberately
+skip a pin, construct with `C8sClient.insecure({ ... })`: it waives whichever pin
+you omit (a supplied pin is still enforced) and re-surfaces each skipped check as a
+warning on `session.attestation.warnings`. It is not safe against a malicious
+TLS-terminating proxy — never use it in production.
+
 What is verified, and in what order: nonce echo → SEV-SNP signature + VCEK chain
 (WASM) → launch measurement ∈ allowlist → `report_data == SHA-384(session_pubkey‖nonce)`
 (freshness + key binding) → CDS cert chains to the pinned mesh CA. Any failure throws
