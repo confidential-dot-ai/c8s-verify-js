@@ -19,7 +19,7 @@ are bound to hardware attestation.
 Instead of putting attestation in the public TLS certificate, the LB exposes a
 challenge-response endpoint:
 
-- The client generates a 32-byte random nonce and requests v2 attestation.
+- The client generates a 32-byte random nonce and requests attestation.
 - The TEE returns fresh evidence committing the nonce, hybrid session keys, and
   mesh identity, plus proof that it holds the mesh leaf's private key.
 - After verifying the evidence, measurement, pinned CA, and identity proof, the
@@ -36,7 +36,7 @@ implementation forwards through C8s's in-cluster RA-TLS mesh, so its attested
 measurement and cluster identity are the browser's trust boundary. The C8s threat
 model documents the separate assumptions and limitations of that internal hop.
 
-## How v2 binds cluster identity
+## How the protocol binds cluster identity
 
 Today the client pins two things out of band: the **LB measurement** allowlist and the
 **mesh CA certificate** (see `meshCaPem` in the example below). It is reasonable to ask
@@ -54,12 +54,7 @@ end up with a confidential channel to a genuine-but-attacker-operated LB, forwar
 which is generated inside the CDS TEE; image hashes are not. So we have to pin *something*
 cluster-unique, and today that something is the mesh CA certificate.
 
-The legacy v1 protocol checked that a separately served leaf chained to the pinned
-mesh CA, but did not commit that leaf to the attested session key. A genuine
-attacker-operated LB could therefore copy the victim cluster's public leaf and CA
-bytes and satisfy both independent checks.
-
-V2 closes that gap in two ways:
+The protocol closes the copied-public-chain gap in two ways:
 
 - Hardware evidence commits to the session keys, client nonce, exact mesh leaf,
   and issuing CA in one domain-separated transcript.
@@ -88,7 +83,6 @@ const client = new C8sClient({
   baseUrl: "https://lb.example.com",
   measurements: ["<expected hex SHA-384 launch digest>"], // pinned out of band
   meshCaPem: pinnedMeshCaPem,                              // pinned CDS/mesh CA anchor
-  // requireClusterIdentity defaults to true and requests the v2 binding.
 });
 
 // Generates a nonce, fetches the LB attestation, verifies the SEV-SNP evidence,
@@ -103,17 +97,12 @@ const res = await session.fetch("/v1/chat", { method: "POST", body: prompt });
 console.log(res.text());
 ```
 
-What is verified, and in what order: nonce echo → response is v2 → served leaf
+What is verified, and in what order: nonce echo → response is identity-bound v1 → served leaf
 chains to a mesh CA pinned out of band → SEV-SNP signature + VCEK chain (WASM) →
 launch measurement ∈ a non-empty allowlist → `report_data` commits the session
 keys, nonce, leaf, and CA → leaf proof-of-possession signature. The same transcript
-is the v2 HKDF context. Any failure throws a typed `C8sVerifyError` and no channel
+is the HKDF context. Any failure throws a typed `C8sVerifyError` and no channel
 is established.
-
-Old servers can be used only with the explicit
-`requireClusterIdentity: false` compatibility downgrade. That accepts v1's
-session-to-TEE binding but cannot establish that the TEE belongs to the pinned
-cluster. `cdsCertPath` is the legacy fallback for a v1 bundle that omits its leaf.
 
 ### Lower-level: verifying bare evidence
 
@@ -173,9 +162,9 @@ browser-check` compiles a browser bundle first (`npm run build:demo`).
   PQ over-encryption channel, the mock LB, the browser demo, and the test suite.
 - **Implemented (server):** the matching c8s endpoints ship as the `c8s cds-attest`
   sidecar, fronted by the existing tls-lb nginx (chart flag `tlsLb.attest.enabled`):
-  it serves `/.well-known/c8s/attestation` + the over-encryption handshake, with
-  `cds-cert.pem`/`mesh-ca.pem` served statically by nginx. Go↔JS interop is verified
-  end to end (`c8s/pkg/overenc`, `c8s/internal/cmds/cdsattest`).
+  it serves `/.well-known/c8s/attestation` + the over-encryption handshake and
+  returns the exact identity chain in each bundle. Go↔JS interop is verified end
+  to end (`c8s/pkg/overenc`, `c8s/internal/cmds/cdsattest`).
 - **Pending (tracked separately):** the live `--attestation-service-url` binding on a
   real TEE node, routing over-encrypted *application* traffic through nginx to the
   sidecar (today the standalone sidecar handles it directly), and the `TEErminator`

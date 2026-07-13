@@ -34,7 +34,7 @@ async function fixtureProof(): Promise<{
   return { transcript, leaf, ca, proof };
 }
 
-test("v2 transcript matches the Go cross-language vector", async () => {
+test("v1 transcript matches the Go cross-language vector", async () => {
   const transcript = await identityTranscriptHash(
     { x25519: new Uint8Array(32).fill(0x11), mlkem768: new Uint8Array(1184).fill(0x22) },
     new Uint8Array(32).fill(0x33),
@@ -43,7 +43,7 @@ test("v2 transcript matches the Go cross-language vector", async () => {
   );
   assert.equal(
     bytesToHex(transcript),
-    "f6f10a6a95249c535ae3210248fa2c2fbe214744edffe53809795a877840731728175a35dd8091a1e15263190032b3f2",
+    "4ad70e2d4cdb8044527d82886a35ebdaee1f250883f2a789acea681bff8acc62401c4ccbfa633a02521af62f2f2e0d0f",
   );
 });
 

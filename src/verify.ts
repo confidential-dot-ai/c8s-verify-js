@@ -2,17 +2,15 @@
 // X.509 chain check, and turns their raw outputs into a pass/fail decision against
 // a caller-supplied policy (expected measurements, platform, freshness binding).
 
-import { subtle } from "./crypto-env.js";
 import { verifySnp, verifyAzSnp } from "./wasm-loader.js";
 import { verifyCertChain, type ChainResult } from "./x509.js";
 import { decodePEM } from "./pem.js";
-import { concatBytes, bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
+import { bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
 import { fail } from "./errors.js";
 import type { Evidence } from "./hcl.js";
 import {
-  BINDING_V1,
-  IDENTITY_BINDING_V2,
-  IDENTITY_BUNDLE_VERSION,
+  IDENTITY_BINDING,
+  PROTOCOL_VERSION,
   identityTranscriptHash,
   selectPinnedCA,
   verifyMeshIdentityProof,
@@ -26,10 +24,8 @@ export interface VerifyPolicy {
   platform?: string;
   /** default true: report_data must bind the selected session transcript */
   requireFreshness?: boolean;
-  /** default true: require the v2 mesh identity proof and all out-of-band pins */
-  requireClusterIdentity?: boolean;
-  /** pinned mesh CA; required by the default identity-bound v2 policy */
-  meshCaPem?: string;
+  /** mesh CA pinned out of band */
+  meshCaPem: string;
   /** validity reference time (default now) */
   at?: Date;
 }
@@ -45,11 +41,11 @@ export interface AttestationBundle {
   generation: string;
   nonce: string;
   evidence: Evidence;
-  cds_cert_pem?: string;
+  cds_cert_pem: string;
   ear?: string;
-  binding?: string;
+  binding: string;
   session_pubkey: SessionPubKeyB64;
-  identity_proof?: MeshIdentityProof;
+  identity_proof: MeshIdentityProof;
 }
 
 /** Claims block inside the WASM verifier's JSON result. */
@@ -85,31 +81,17 @@ export interface AttestationResult {
   reportVersion: number;
   reportDataMatch: boolean | null;
   binding: string;
-  /** true only when the v2 transcript is hardware-bound (report_data matched). */
+  /** true only when the identity transcript is hardware-bound (report_data matched). */
   identityBound: boolean;
   /**
-   * V2 transcript hash, used as the HKDF context whenever a v2 response was
-   * accepted — the KDF is keyed on the protocol version (see PROTOCOL.md), not
-   * on freshness. Hardware-bound only when {@link identityBound} is true.
+   * Verified identity transcript hash used as the HKDF context. Hardware-bound
+   * only when {@link identityBound} is true.
    */
-  keyAgreementContext?: Uint8Array;
+  keyAgreementContext: Uint8Array;
   sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array };
-  cert: CertInfo | null;
+  cert: CertInfo;
   claims: WasmClaims;
   warnings: string[];
-}
-
-/**
- * Compute the expected hardware report_data binding: SHA-384(x25519 || mlkem768 || nonce).
- * Returns the raw 48-byte digest (the verifier zero-pads to 64).
- */
-export async function expectedReportData(
-  x25519: Uint8Array,
-  mlkem768: Uint8Array,
-  nonce: Uint8Array,
-): Promise<Uint8Array> {
-  const digest = await subtle().digest("SHA-384", concatBytes(x25519, mlkem768, nonce));
-  return new Uint8Array(digest);
 }
 
 // az-snp's verifier (verify_az_snp) binds the freshness anchor in the verifier
@@ -129,6 +111,169 @@ function errMessage(e: unknown): string {
   return String((e as { message?: unknown })?.message ?? e);
 }
 
+interface PreparedIdentity {
+  chain: ChainResult;
+  proof: MeshIdentityProof;
+  transcript: Uint8Array;
+}
+
+function validatePolicy(policy: VerifyPolicy): void {
+  if (!policy || !Array.isArray(policy.measurements) || policy.measurements.length === 0) {
+    fail("invalid_request", "verification requires a non-empty measurement allowlist");
+  }
+  if (!policy.measurements.every((measurement) => typeof measurement === "string")) {
+    fail("invalid_request", "measurement allowlist entries must be strings");
+  }
+  if (typeof policy.meshCaPem !== "string" || policy.meshCaPem.trim() === "") {
+    fail("identity_binding", "verification requires meshCaPem pinned out of band");
+  }
+}
+
+function decodeSessionPublicKey(
+  bundle: AttestationBundle,
+  nonce: Uint8Array,
+): { x25519: Uint8Array; mlkem768: Uint8Array } {
+  if (
+    typeof bundle?.nonce !== "string" ||
+    typeof bundle?.session_pubkey?.x25519 !== "string" ||
+    typeof bundle?.session_pubkey?.mlkem768 !== "string"
+  ) {
+    fail("invalid_request", "attestation bundle is missing nonce or session_pubkey fields");
+  }
+
+  let echoed: Uint8Array;
+  try {
+    echoed = base64UrlToBytes(bundle.nonce);
+  } catch (cause) {
+    fail("invalid_request", "attestation bundle nonce is not base64url", { cause });
+  }
+  if (!constantTimeEqual(echoed, nonce)) {
+    fail("nonce_mismatch", "attestation bundle nonce does not match the nonce we sent");
+  }
+
+  try {
+    return {
+      x25519: base64UrlToBytes(bundle.session_pubkey.x25519),
+      mlkem768: base64UrlToBytes(bundle.session_pubkey.mlkem768),
+    };
+  } catch (cause) {
+    fail("invalid_request", "attestation bundle session_pubkey is not base64url", { cause });
+  }
+}
+
+function isMeshIdentityProof(proof: MeshIdentityProof | undefined): proof is MeshIdentityProof {
+  return (
+    proof !== undefined &&
+    typeof proof.algorithm === "string" &&
+    typeof proof.leaf_sha256 === "string" &&
+    typeof proof.mesh_ca_sha256 === "string" &&
+    typeof proof.signature === "string"
+  );
+}
+
+async function prepareIdentity(
+  bundle: AttestationBundle,
+  sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array },
+  nonce: Uint8Array,
+  policy: VerifyPolicy,
+): Promise<PreparedIdentity> {
+  if (bundle?.version !== PROTOCOL_VERSION) {
+    fail("identity_binding", `attestation response has unexpected version ${bundle?.version}`);
+  }
+  if (bundle.binding !== IDENTITY_BINDING) {
+    fail("identity_binding", `attestation response has unexpected binding ${bundle.binding}`);
+  }
+  if (!isMeshIdentityProof(bundle.identity_proof)) {
+    fail("identity_binding", "attestation response omitted or malformed identity_proof");
+  }
+  if (typeof bundle.cds_cert_pem !== "string" || bundle.cds_cert_pem.trim() === "") {
+    fail("identity_binding", "attestation response omitted cds_cert_pem");
+  }
+
+  const leafBlocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
+  const pinnedCAs = decodePEM(policy.meshCaPem, "CERTIFICATE");
+  if (leafBlocks.length === 0 || pinnedCAs.length === 0) {
+    fail("invalid_cert", "identity verification requires a leaf and pinned mesh CA");
+  }
+  const selectedCA = await selectPinnedCA(bundle.identity_proof, pinnedCAs);
+  if (!selectedCA) {
+    fail("identity_binding", "identity proof does not name any pinned mesh CA");
+  }
+  const chain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
+  const transcript = await identityTranscriptHash(
+    sessionPubKey,
+    nonce,
+    chain.leaf.der,
+    chain.ca.der,
+  );
+  return { chain, proof: bundle.identity_proof, transcript };
+}
+
+async function verifyHardwareAttestation(
+  bundle: AttestationBundle,
+  expected: Uint8Array,
+  wantPlatform: string,
+  requireFreshness: boolean,
+): Promise<WasmVerifyResult> {
+  const isAzSnp = wantPlatform === "az-snp";
+  const azSnpAnchor = requireFreshness ? expected : undefined;
+  let result: WasmVerifyResult;
+  try {
+    const out = isAzSnp
+      ? await verifyAzSnp(JSON.stringify(bundle.evidence), azSnpAnchor)
+      : await verifySnp(bundle.evidence, bundle.generation, expected);
+    result = JSON.parse(out) as WasmVerifyResult;
+  } catch (e) {
+    if (isAzSnp && requireFreshness && isFreshnessMismatch(e)) {
+      fail(
+        "report_data_mismatch",
+        "report_data does not bind this session transcript (stale or substituted evidence)",
+        { details: { expected: bytesToHex(expected) }, cause: e },
+      );
+    }
+    fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
+  }
+
+  if (result.signature_valid !== true) {
+    fail("verification_failed", "attestation signature is not valid");
+  }
+  if (result.platform !== wantPlatform) {
+    fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
+  }
+  return result;
+}
+
+function verifyMeasurement(result: WasmVerifyResult, allowlist: string[]): string {
+  const measurement = String(result.claims.launch_digest).toLowerCase();
+  const allowed = allowlist.map((entry) => entry.toLowerCase());
+  if (!allowed.includes(measurement)) {
+    fail("measurement_denied", `launch digest ${measurement} is not in the allowlist`, {
+      details: { measurement, allowed },
+    });
+  }
+  return measurement;
+}
+
+function verifyFreshness(
+  result: WasmVerifyResult,
+  expected: Uint8Array,
+  requireFreshness: boolean,
+  warnings: string[],
+): void {
+  if (result.report_data_match === true) return;
+  if (requireFreshness) {
+    fail(
+      "report_data_mismatch",
+      "report_data does not bind the expected session and identity transcript",
+      { details: { expected: bytesToHex(expected), got: result.claims.report_data } },
+    );
+  }
+  warnings.push(
+    "freshness binding not enforced (requireFreshness=false): hardware signature and " +
+      "measurement are verified, but report_data is not bound to this session transcript",
+  );
+}
+
 /**
  * Verify an attestation bundle end to end.
  *
@@ -140,192 +285,26 @@ export async function verifyAttestation(
   nonce: Uint8Array,
   policy: VerifyPolicy,
 ): Promise<AttestationResult> {
+  validatePolicy(policy);
   const warnings: string[] = [];
   const wantPlatform = policy.platform ?? "snp";
   const requireFreshness = policy.requireFreshness !== false;
-  const requireClusterIdentity = policy.requireClusterIdentity !== false;
-  if (requireClusterIdentity && !requireFreshness) {
-    fail("invalid_request", "cluster identity requires freshness enforcement");
-  }
-  if (requireClusterIdentity && (policy.measurements ?? []).length === 0) {
-    fail("invalid_request", "cluster identity requires a non-empty measurement allowlist");
-  }
-
-  if (
-    typeof bundle?.nonce !== "string" ||
-    typeof bundle?.session_pubkey?.x25519 !== "string" ||
-    typeof bundle?.session_pubkey?.mlkem768 !== "string"
-  ) {
-    fail("invalid_request", "attestation bundle is missing nonce or session_pubkey fields");
-  }
-
-  // 1. Nonce echo — cheap replay guard before any crypto.
-  let echoed: Uint8Array;
-  try {
-    echoed = base64UrlToBytes(bundle.nonce);
-  } catch (cause) {
-    fail("invalid_request", "attestation bundle nonce is not base64url", { cause });
-  }
-  if (!constantTimeEqual(echoed, nonce)) {
-    fail("nonce_mismatch", "attestation bundle nonce does not match the nonce we sent");
-  }
-
-  // 2. Session public key shape.
-  let sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array };
-  try {
-    sessionPubKey = {
-      x25519: base64UrlToBytes(bundle.session_pubkey.x25519),
-      mlkem768: base64UrlToBytes(bundle.session_pubkey.mlkem768),
-    };
-  } catch (cause) {
-    fail("invalid_request", "attestation bundle session_pubkey is not base64url", { cause });
-  }
-
-  // `||`, not `??`: an empty-string binding (zero-value marshaling) is legacy.
-  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
-  const binding = bundle.binding || BINDING_V1;
-  if (requireClusterIdentity && binding !== IDENTITY_BINDING_V2) {
-    fail(
-      "identity_binding",
-      `server returned ${binding}; ${IDENTITY_BINDING_V2} is required for cluster identity`,
-    );
-  }
-
-  // 3. Prepare the report_data expectation. V2 binds the hybrid keys and
-  // nonce to an exact mesh leaf and one of the caller's pinned mesh CAs.
-  let expected: Uint8Array;
-  let identity: { chain: ChainResult; proof: MeshIdentityProof } | null = null;
-  if (binding === IDENTITY_BINDING_V2) {
-    if (bundle.version !== IDENTITY_BUNDLE_VERSION) {
-      fail("identity_binding", `identity-bound response has unexpected version ${bundle.version}`);
-    }
-    if (!bundle.identity_proof) {
-      fail("identity_binding", "identity-bound response omitted identity_proof");
-    }
-    if (!bundle.cds_cert_pem) {
-      fail("identity_binding", "identity-bound response omitted cds_cert_pem");
-    }
-    if (!policy.meshCaPem) {
-      fail("identity_binding", "identity-bound verification requires meshCaPem pinned out of band");
-    }
-
-    const leafBlocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
-    const pinnedCAs = decodePEM(policy.meshCaPem, "CERTIFICATE");
-    if (leafBlocks.length === 0 || pinnedCAs.length === 0) {
-      fail("invalid_cert", "identity-bound verification requires a leaf and pinned mesh CA");
-    }
-    const selectedCA = await selectPinnedCA(bundle.identity_proof, pinnedCAs);
-    if (!selectedCA) {
-      fail("identity_binding", "identity proof does not name any pinned mesh CA");
-    }
-    const chain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
-    identity = { chain, proof: bundle.identity_proof };
-    expected = await identityTranscriptHash(sessionPubKey, nonce, chain.leaf.der, chain.ca.der);
-  } else if (binding === BINDING_V1) {
-    expected = await expectedReportData(sessionPubKey.x25519, sessionPubKey.mlkem768, nonce);
-  } else {
-    fail("unsupported", `unsupported attestation binding ${binding}`);
-  }
-
-  // 4. Hardware attestation via WASM. report_data binds the selected transcript.
-
-  // az-snp gets full verification (HCL report + vTPM quote), with `expected`
-  // checked against the TPM quote's extraData. Bare snp checks the SNP report
-  // only, with `expected` checked against report_data. Both return the same
-  // result shape, so the policy checks below are platform-agnostic.
-  const isAzSnp = wantPlatform === "az-snp";
-  // az-snp's verifier fails closed (throws) on a freshness mismatch, so in soft
-  // mode (requireFreshness=false) we omit the anchor to get a non-throwing
-  // result and warn below; bare snp returns a non-throwing bool either way.
-  const azSnpAnchor = requireFreshness ? expected : undefined;
-  let result: WasmVerifyResult;
-  try {
-    const out = isAzSnp
-      ? await verifyAzSnp(JSON.stringify(bundle.evidence), azSnpAnchor)
-      : await verifySnp(bundle.evidence, bundle.generation, expected);
-    result = JSON.parse(out) as WasmVerifyResult;
-  } catch (e) {
-    // az-snp fails closed on a freshness mismatch — surface it as the precise
-    // report_data_mismatch code rather than a generic verification_failed.
-    if (isAzSnp && requireFreshness && isFreshnessMismatch(e)) {
-      fail(
-        "report_data_mismatch",
-        "report_data does not bind this session transcript (stale or substituted evidence)",
-        { details: { expected: bytesToHex(expected) }, cause: e },
-      );
-    }
-    // Otherwise the WASM verifier threw on VCEK chain / report signature failure.
-    fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
-  }
-
-  if (result.signature_valid !== true) {
-    fail("verification_failed", "attestation signature is not valid");
-  }
-  if (result.platform !== wantPlatform) {
-    fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
-  }
-
-  // 5. Measurement allowlist (case-insensitive hex).
-  const measurement = String(result.claims.launch_digest).toLowerCase();
-  const allow = (policy.measurements ?? []).map((m) => m.toLowerCase());
-  if (allow.length === 0) {
-    // Unreachable under requireClusterIdentity — rejected at entry.
-    warnings.push("no measurement allowlist provided — launch digest was not checked");
-  } else if (!allow.includes(measurement)) {
-    fail("measurement_denied", `launch digest ${measurement} is not in the allowlist`, {
-      details: { measurement, allowed: allow },
-    });
-  }
-
-  // 6. Freshness / key binding.
-  if (result.report_data_match === true) {
-    // bound to our session key + nonce — strongest result.
-  } else if (requireFreshness) {
-    fail(
-      "report_data_mismatch",
-      "report_data does not bind the expected session and identity transcript",
-      { details: { expected: bytesToHex(expected), got: result.claims.report_data } },
-    );
-  } else {
-    warnings.push(
-      "freshness binding not enforced (requireFreshness=false): hardware signature and " +
-        "measurement are verified, but report_data is not bound to this session transcript",
-    );
-  }
-
-  // 7. Mesh identity proof or legacy certificate-only check.
-  let cert: CertInfo | null = null;
-  let identityBound = false;
-  let keyAgreementContext: Uint8Array | undefined;
-  if (identity) {
-    await verifyMeshIdentityProof(identity.proof, expected, identity.chain.leaf, identity.chain.ca);
-    identityBound = result.report_data_match === true;
-    // The proof-of-possession signature over the transcript verified above, so
-    // the v2 KDF context applies even when freshness was explicitly disabled —
-    // a v2 server derives with this same transcript.
-    keyAgreementContext = expected;
-    cert = certInfo(identity.chain);
-  } else if (bundle.cds_cert_pem) {
-    const blocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
-    if (blocks.length === 0) {
-      fail("invalid_cert", "cds_cert_pem contained no certificate");
-    }
-    const anchorPem = policy.meshCaPem ?? bundle.cds_cert_pem;
-    const anchorBlocks = decodePEM(anchorPem, "CERTIFICATE");
-    // Anchor is the last cert in the served chain (or the pinned mesh CA).
-    const caDer = anchorBlocks[anchorBlocks.length - 1];
-    const leafDer = blocks[0];
-    const chain = await verifyCertChain(leafDer, caDer, { at: policy.at });
-    if (!policy.meshCaPem) {
-      warnings.push(
-        "no pinned meshCaPem: the served cds_cert_pem was used as its own anchor — " +
-          "pin the mesh CA out of band for a stronger guarantee",
-      );
-    }
-    cert = certInfo(chain);
-  } else {
-    warnings.push("bundle did not include cds_cert_pem; CDS certificate was not verified");
-  }
+  const sessionPubKey = decodeSessionPublicKey(bundle, nonce);
+  const identity = await prepareIdentity(bundle, sessionPubKey, nonce, policy);
+  const result = await verifyHardwareAttestation(
+    bundle,
+    identity.transcript,
+    wantPlatform,
+    requireFreshness,
+  );
+  const measurement = verifyMeasurement(result, policy.measurements);
+  verifyFreshness(result, identity.transcript, requireFreshness, warnings);
+  await verifyMeshIdentityProof(
+    identity.proof,
+    identity.transcript,
+    identity.chain.leaf,
+    identity.chain.ca,
+  );
 
   return {
     ok: true,
@@ -333,11 +312,11 @@ export async function verifyAttestation(
     measurement,
     reportVersion: result.report_version,
     reportDataMatch: result.report_data_match,
-    binding,
-    identityBound,
-    keyAgreementContext,
+    binding: IDENTITY_BINDING,
+    identityBound: result.report_data_match === true,
+    keyAgreementContext: identity.transcript,
     sessionPubKey,
-    cert,
+    cert: certInfo(identity.chain),
     claims: result.claims,
     warnings,
   };
@@ -401,11 +380,14 @@ export async function verifyEvidence(
   if (!evidence || typeof evidence !== "object") {
     fail("invalid_request", "evidence object is required");
   }
+  if (!opts) {
+    fail("invalid_request", "verification options are required");
+  }
   const warnings: string[] = [];
   const wantPlatform = opts.platform ?? "snp";
   const isAzSnp = wantPlatform === "az-snp";
   // az-snp auto-detects the generation from the report CPUID; bare snp needs it.
-  if (!opts || (!isAzSnp && !opts.generation)) {
+  if (!isAzSnp && !opts.generation) {
     fail("invalid_request", 'generation is required ("milan" | "genoa" | "turin")');
   }
   const expected = opts.expectedReportData;

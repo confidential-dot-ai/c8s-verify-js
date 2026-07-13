@@ -1,10 +1,8 @@
-# c8s-verify wire protocol (`c8s-verify/v1` and `c8s-verify/v2`)
+# c8s-verify wire protocol (`c8s-verify/v1`)
 
 This document specifies the browser-facing attestation + over-encryption protocol
 between a JavaScript client (`c8s-verify-js`) and a C8s **Load Balancer (LB)**.
-It is the canonical contract. The Go LB endpoints implement v1 and v2, the JS
-client consumes both, and the recorded-evidence demo exercises the legacy v1
-compatibility path because a fixture cannot mint fresh v2 evidence.
+It is the canonical contract implemented by the Go LB and the JavaScript client.
 
 ## Terminology
 
@@ -22,14 +20,14 @@ TLS-terminating proxy may sit in front of the real LB. Verification is performed
 entirely on the returned payload:
 
 1. The LB returns **raw TEE evidence** (AMD SEV-SNP today) whose hardware `report_data`
-   binds the LB's per-session public key, the client's nonce, and—in v2—the exact
-   mesh leaf and issuing mesh CA.
+   binds the LB's per-session public key, the client's nonce, the exact mesh leaf,
+   and the issuing mesh CA.
 2. The client verifies the evidence **directly in the browser** with the
    `attestation-rs` verifier compiled to WASM (bundled AMD ARK/ASK roots, VCEK supplied
    inline — no network during verification).
-3. In v2, the client checks the measurement against its pinned allowlist, checks
-   that the served mesh leaf chains to a pinned **mesh CA**, and verifies a
-   per-session proof of possession made by that leaf key.
+3. The client checks the measurement against its pinned allowlist, checks that the
+   served mesh leaf chains to a pinned **mesh CA**, and verifies a per-session proof
+   of possession made by that leaf key.
 4. Only then does the client derive a **post-quantum hybrid over-encryption channel** to
    the attested per-session key, so all subsequent application traffic is end-to-end
    confidential to the LB's TEE regardless of the outer TLS terminator.
@@ -41,25 +39,18 @@ the backend pods the LB talks to.
 
 All under the `/.well-known/c8s/` namespace.
 
-### `GET /.well-known/c8s/cds-cert.pem`
-Returns `Content-Type: application/x-pem-file` and a mesh leaf/CA chain.
-Unauthenticated by design. Identity-bound v2 ignores this standalone discovery
-response and uses the exact chain in its attestation bundle; only legacy v1 uses
-this endpoint as a fallback.
-
 ### `GET /.well-known/c8s/jwks.json`  *(optional)*
 Returns the CDS EAR-signing JWKS (ES256, `kid` = RFC 7638 thumbprint), republished from
 the CDS, for the optional EAR-verification path.
 
-### `GET /.well-known/c8s/attestation?nonce=<b64url>&binding=<mode>`
-`nonce` is the client's fresh 32-byte random challenge, base64url (unpadded). The
-`binding` value contains a literal `+`, which query-string parsers decode as a
-space — clients MUST percent-encode it (`binding=over-encryption%2Bmesh-identity-v2`).
+### `GET /.well-known/c8s/attestation?nonce=<b64url>`
+
+`nonce` is the client's fresh 32-byte random challenge, base64url (unpadded).
 Response is `application/json`:
 
 ```jsonc
 {
-  "version": "c8s-verify/v2",
+  "version": "c8s-verify/v1",
   "platform": "snp",            // "snp" (bare metal) or "az-snp" (Azure vTPM); "tdx" reserved
   "generation": "genoa",        // AMD processor gen for the WASM verifier: milan|genoa|turin
   "nonce": "<echoed b64url>",   // MUST equal the request nonce
@@ -69,7 +60,7 @@ Response is `application/json`:
   },
   "cds_cert_pem": "-----BEGIN CERTIFICATE-----\n...", // exact mesh leaf + issuing CA
   "ear": "<optional CDS-issued EAR JWT>",
-  "binding": "over-encryption+mesh-identity-v2",
+  "binding": "over-encryption",
   "session_pubkey": {
     "x25519":   "<b64url 32-byte X25519 public key>",
     "mlkem768": "<b64url 1184-byte ML-KEM-768 encapsulation key>"
@@ -87,20 +78,12 @@ All `b64url` fields are **unpadded** base64url (RFC 4648 §5 without `=`); the
 `signature` is DER — a `SEQUENCE` spanning the whole value, holding exactly two
 positive `INTEGER`s without redundant sign padding.
 
-`binding=over-encryption+mesh-identity-v2` is the current, identity-bound mode and
-is requested by the client by default. Its `cds_cert_pem` and `identity_proof`
-fields are mandatory. The LB re-reads the TEE-held mesh leaf, private key, and CA
-for each request so certificate rotation cannot leave the bundle and proof on
-different credential generations.
+The `version`, `binding`, `cds_cert_pem`, and `identity_proof` fields are mandatory.
+The LB re-reads the TEE-held mesh leaf, private key, and CA for each request so
+certificate rotation cannot leave the bundle and proof on different credential
+generations. There is no legacy or downgrade binding.
 
-For compatibility, an absent binding (or `binding=over-encryption`) returns a
-`c8s-verify/v1` bundle. In v1, `cds_cert_pem` may be omitted and fetched from
-`GET /.well-known/cds-cert.pem`; the certificate-chain check is separate from
-the attestation. V1 proves that the channel terminates in an allowed TEE, but it
-does **not** prove that the attested session key belongs to the pinned cluster.
-Clients must explicitly set `requireClusterIdentity: false` to accept it.
-
-#### V2 report-data and mesh-identity binding
+#### Report-data and mesh-identity binding
 
 Define `LP(field) = uint32_be(len(field)) || field`, and:
 
@@ -108,7 +91,7 @@ Define `LP(field) = uint32_be(len(field)) || field`, and:
 leaf_hash = SHA-256(leaf_certificate_DER)
 ca_hash   = SHA-256(issuing_mesh_CA_DER)
 
-transcript = LP("c8s-verify/pq-mesh-identity/v2")
+transcript = LP("c8s-verify/pq-mesh-identity/v1")
           || LP(x25519_pub_raw(32))
           || LP(mlkem768_pub_raw(1184))
           || LP(nonce(32))
@@ -123,7 +106,7 @@ The LB also signs this domain-separated message with the private key for the
 committed leaf:
 
 ```
-proof_message = LP("c8s-verify/pq-mesh-identity-proof/v2")
+proof_message = LP("c8s-verify/pq-mesh-identity-proof/v1")
              || LP(transcript_hash)
 signature     = ECDSA-SHA384(leaf_private_key, proof_message)
 ```
@@ -138,15 +121,7 @@ victim leaf's private key.
 The identity proof is currently ECDSA, so cluster authentication is **classical**.
 The over-encryption key agreement remains X25519 + ML-KEM-768 hybrid: recorded
 traffic retains post-quantum confidentiality as long as ML-KEM-768 remains secure,
-but v2 does not claim post-quantum authentication.
-
-#### V1 report-data binding (legacy)
-
-V1 uses
-`SHA-384(x25519_pub_raw || mlkem768_pub_raw || nonce)`, zero-padded to the
-64-byte SNP `report_data` field. This proves freshness and binds the session key
-to the allowed TEE measurement, but does not bind the separately served mesh
-certificate.
+but the protocol does not claim post-quantum authentication.
 
 > Note: a live LB binds the session key into a fresh hardware report per session. The
 > demo/mock and the offline test fixtures use **recorded real evidence** with a fixed
@@ -173,8 +148,8 @@ data) plus a **vTPM quote**. The `evidence` object then has the attestation-rs
 }
 ```
 
-For az-snp the selected v1 or v2 binding **moves out of the SNP `report_data`
-into the vTPM quote's `extraData`**. The SNP `report_data` instead binds the AK to the TEE
+For az-snp the identity binding **moves out of the SNP `report_data` into the
+vTPM quote's `extraData`**. The SNP `report_data` instead binds the AK to the TEE
 (`report_data[..32] == SHA-256(runtime_data)`), and the quote, signed by that AK,
 carries the session binding. The client computes the binding specified above and
 passes it as `expected_report_data`; the verifier checks it against the quote's
@@ -251,8 +226,7 @@ Hybrid KEM = **X25519** (classical, WebCrypto) **+ ML-KEM-768** (post-quantum,
 2. Client generates ephemeral X25519 keypair; `x25519_ss = ECDH(client_x25519_priv, session_pubkey.x25519)`.
 3. Combined secret: `ikm = mlkem_ss (32B) || x25519_ss (32B)`.
 4. Derive the **AES-256-GCM** key:
-   - v2: `HKDF-SHA256(ikm, salt = transcript_hash, info = "c8s-verify/over-encryption/pq-mesh-identity/v2", L = 32)`
-   - v1: `HKDF-SHA256(ikm, salt = nonce, info = "c8s-verify/over-encryption/v1", L = 32)`
+   `HKDF-SHA256(ikm, salt = transcript_hash, info = "c8s-verify/over-encryption/pq-mesh-identity/v1", L = 32)`.
 5. **Handshake** — `POST /.well-known/c8s/handshake` with
    `{ "nonce": "<b64url>", "client_x25519": "<b64url 32B>", "mlkem_ct": "<b64url 1088B>" }`.
    The LB selects the pending session key by nonce, decapsulates + ECDHs to the same
@@ -301,7 +275,8 @@ The client MUST fail closed. Typed errors (mirroring c8s error codes) include:
 `invalid_request`, `nonce_mismatch`, `verification_failed` (signature/chain/JsError),
 `report_data_mismatch`, `measurement_denied`, `invalid_cert` / `cert_chain` (mesh leaf
 does not chain to the pinned CA or is expired), `identity_binding`, and `key_binding`.
-Any failure aborts before the over-encryption channel is established. The default
-policy also rejects empty measurement pins, a missing mesh-CA pin, v1 responses,
-and `requireFreshness=false`; `requireClusterIdentity: false` is the explicit
-legacy downgrade.
+Any failure aborts before the over-encryption channel is established. The policy
+rejects an empty measurement allowlist, a missing mesh-CA pin, or any version or
+binding other than the identity-bound v1 values above. Freshness enforcement
+defaults to true; the recorded-evidence demo explicitly disables it and reports
+that downgrade as a warning.

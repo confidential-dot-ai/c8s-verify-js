@@ -5,7 +5,7 @@
 // terminates inside the LB's enclave — so a malicious TLS-terminating proxy in
 // front of the LB cannot read or forge application traffic.
 //
-//   const client = new C8sClient({ baseUrl, measurements: [...] });
+//   const client = new C8sClient({ baseUrl, measurements: [...], meshCaPem });
 //   const session = await client.connect();
 //   console.log(session.attestation.measurement);
 //   const res = await session.fetch("/v1/chat", { method: "POST", body: "..." });
@@ -22,12 +22,11 @@ import { Channel, requestAAD, responseAAD, type WireRecord } from "./channel.js"
 import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
-import { BINDING_V1, IDENTITY_BINDING_V2 } from "./identity.js";
 
 export { C8sVerifyError } from "./errors.js";
-export { BINDING_V1, IDENTITY_BINDING_V2, IDENTITY_BUNDLE_VERSION } from "./identity.js";
+export { IDENTITY_BINDING, PROTOCOL_VERSION } from "./identity.js";
 export type { MeshIdentityProof } from "./identity.js";
-export { verifyAttestation, verifyEvidence, expectedReportData } from "./verify.js";
+export { verifyAttestation, verifyEvidence } from "./verify.js";
 export type {
   VerifyPolicy,
   AttestationBundle,
@@ -41,26 +40,16 @@ export { initVerifier, verifySnp, verifyAzSnp } from "./wasm-loader.js";
 export type { Evidence, SnpEvidence, AzSnpEvidence } from "./hcl.js";
 
 const WELL_KNOWN = "/.well-known/c8s";
-// The CDS leaf cert is served by nginx as a static discovery file (sibling of
-// mesh-ca.pem), NOT under the attest prefix. The cds-attest sidecar no longer
-// embeds it in the attestation bundle (it would freeze a copy that goes stale
-// when get-cert rotates the LB leaf); nginx serves the live cert here and
-// hot-reloads it on renewal, so the client fetches it from here when the bundle
-// omits it.
-const CDS_CERT_PATH = "/.well-known/cds-cert.pem";
 
 export interface C8sClientOptions {
   baseUrl: string;
-  measurements?: string[];
+  measurements: string[];
   platform?: string;
   requireFreshness?: boolean;
-  /** default true: require PQ session keys to be bound to the pinned mesh identity */
-  requireClusterIdentity?: boolean;
-  meshCaPem?: string;
+  meshCaPem: string;
   at?: Date;
   fetch?: typeof fetch;
   wellKnownPrefix?: string;
-  cdsCertPath?: string | null;
 }
 
 export interface RequestInit {
@@ -97,7 +86,6 @@ export class C8sClient {
   readonly prefix: string;
   readonly fetch: typeof fetch;
   readonly policy: VerifyPolicy;
-  readonly cdsCertPath: string | null;
 
   constructor(opts: C8sClientOptions) {
     if (!opts?.baseUrl) {
@@ -105,19 +93,15 @@ export class C8sClient {
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
-    // Where to fetch the CDS leaf cert when the bundle omits it. Pass null/""
-    // to disable (e.g. an offline bundle that carries its own cds_cert_pem).
-    this.cdsCertPath = opts.cdsCertPath === undefined ? CDS_CERT_PATH : opts.cdsCertPath;
     const f = opts.fetch ?? globalThis.fetch?.bind(globalThis);
     if (!f) {
       throw new C8sVerifyError("invalid_request", "no fetch implementation available");
     }
     this.fetch = f;
     this.policy = {
-      measurements: opts.measurements ?? [],
+      measurements: opts.measurements,
       platform: opts.platform,
       requireFreshness: opts.requireFreshness,
-      requireClusterIdentity: opts.requireClusterIdentity,
       meshCaPem: opts.meshCaPem,
       at: opts.at,
     };
@@ -132,9 +116,6 @@ export class C8sClient {
    */
   async fetchAttestation(nonce: Uint8Array): Promise<AttestationBundle> {
     const params = new URLSearchParams({ nonce: bytesToBase64Url(nonce) });
-    if (this.policy.requireClusterIdentity !== false) {
-      params.set("binding", IDENTITY_BINDING_V2);
-    }
     const url = `${this._url(this.prefix)}/attestation?${params.toString()}`;
     const res = await this.fetch(url, { headers: { accept: "application/json" } });
     if (!res.ok) {
@@ -144,49 +125,16 @@ export class C8sClient {
   }
 
   /**
-   * Fetch the statically-served CDS leaf cert (PEM) for legacy v1 responses.
-   * Best-effort: returns null on any network/HTTP error or non-PEM body. V2
-   * requires the exact attestation-bound chain in its response and never relies
-   * on this fallback.
-   */
-  async fetchCdsCert(): Promise<string | null> {
-    if (!this.cdsCertPath) return null;
-    try {
-      const res = await this.fetch(this._url(this.cdsCertPath), {
-        headers: { accept: "application/x-pem-file, text/plain" },
-      });
-      if (!res.ok) return null;
-      const pem = await res.text();
-      return pem.includes("BEGIN CERTIFICATE") ? pem : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
    * Run the full flow: fetch attestation, verify it, and establish the
    * over-encrypted channel.
    */
   async connect(): Promise<Session> {
     const nonce = generateNonce();
     const bundle = await this.fetchAttestation(nonce);
-    // Legacy v1 only (allowlisted, so unknown future bindings never get the
-    // fallback): the cds-attest sidecar may omit the leaf from the bundle (it
-    // would go stale on LB cert rotation); pull the live one nginx serves
-    // statically so the chain-to-mesh-CA check in verifyAttestation can run.
-    // Identity-bound modes must carry their attestation-bound chain in the
-    // response itself, so a missing cds_cert_pem is left to fail verification.
-    // `||`, not `??`: an empty-string binding is legacy, matching verify.ts.
-    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
-    if (!bundle.cds_cert_pem && (bundle.binding || BINDING_V1) === BINDING_V1) {
-      const pem = await this.fetchCdsCert();
-      if (pem) bundle.cds_cert_pem = pem;
-    }
     const attestation = await verifyAttestation(bundle, nonce, this.policy);
 
     const { key, handshake } = await clientKeyAgreement(
       attestation.sessionPubKey,
-      nonce,
       attestation.keyAgreementContext,
     );
 

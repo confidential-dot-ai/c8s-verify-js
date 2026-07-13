@@ -1,16 +1,12 @@
-// Mock C8s Load Balancer for the demo. Implements the c8s-verify/v1 and v2
-// contracts (see ../PROTOCOL.md) so the browser library can run the full flow
-// offline.
+// Mock C8s Load Balancer for the demo. Implements c8s-verify/v1 (see
+// ../PROTOCOL.md) so the browser library can run the full flow offline.
 //
 // TEST/DEMO ONLY. It mirrors c8s's own test/mock-cds: it serves REAL recorded
 // SNP hardware evidence (verified for real by the WASM verifier) but does not run
 // inside a TEE, so it cannot bind a live session key into a fresh hardware report.
-// Everything else — the PQ hybrid handshake, the v2 mesh identity proof, and the
+// Everything else — the PQ hybrid handshake, the mesh identity proof, and the
 // AES-256-GCM over-encryption channel — is real. Because the recorded report_data
-// can never match a fresh v2 transcript, a client can only accept the mock's v2
-// bundle with requireFreshness/requireClusterIdentity explicitly disabled; set
-// MOCK_BINDING=<binding> to serve that binding even when the client did not
-// request it.
+// can never match a fresh transcript, the demo explicitly disables freshness.
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -22,13 +18,11 @@ import {
   generateServerHybridKey,
   serverKeyAgreement,
   type ServerKeys,
-  type PublicHalves,
 } from "../src/keyagreement.js";
 import { Channel, requestAAD, responseAAD, type WireRecord } from "../src/channel.js";
 import { cborEncode, cborDecode, type CborValue } from "../src/cbor.js";
 import { bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8 } from "../src/base64.js";
 import { decodePEM } from "../src/pem.js";
-import { IDENTITY_BINDING_V2 } from "../src/identity.js";
 import { NONCE_BYTES } from "../src/nonce.js";
 import { mintIdentityProof } from "./mint-identity.js";
 
@@ -45,21 +39,15 @@ const snpEvidence = evidence.evidence ?? evidence; // tolerate wrapped or bare
 const meshCaPem = await readFile(join(FIX, "mesh-ca.crt"), "utf8");
 const leafPem = await readFile(join(FIX, "cds-leaf.crt"), "utf8");
 const leafKeyPem = await readFile(join(FIX, "cds-leaf.key"), "utf8");
-// Serve the leaf followed by the mesh CA so the client can chain leaf -> CA.
+// Bundle the leaf followed by the mesh CA so the client can chain leaf -> CA.
 const cdsCertPem = leafPem.trim() + "\n" + meshCaPem.trim() + "\n";
 const leafDer = decodePEM(leafPem, "CERTIFICATE")[0];
 const caDer = decodePEM(meshCaPem, "CERTIFICATE")[0];
-// Binding served regardless of the client's request (see header comment).
-// `||` so a set-but-empty env var falls through to the request param.
-// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
-const FORCED_BINDING = process.env.MOCK_BINDING || undefined;
 
 // ---- session state ----------------------------------------------------------
 interface PendingEntry {
   priv: ServerKeys;
-  pub: PublicHalves;
-  /** v2 transcript hash; set when the bundle was minted identity-bound. */
-  transcript?: Uint8Array;
+  transcript: Uint8Array;
   createdAt: number;
 }
 const pending = new Map<string, PendingEntry>();
@@ -128,21 +116,30 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const p = url.pathname;
 
-    if (req.method === "GET" && p === "/.well-known/c8s/cds-cert.pem") {
-      return text(res, 200, cdsCertPem, "application/x-pem-file");
-    }
-
     if (req.method === "GET" && p === "/.well-known/c8s/attestation") {
       sweep();
       const nonceB64 = url.searchParams.get("nonce");
       if (!nonceB64) return json(res, 400, { error: "invalid_request", message: "missing nonce" });
-      // Fresh per-session hybrid key. A real LB would also ask the hardware to
-      // bind the selected v1/v2 transcript into report_data; the recorded
-      // fixture cannot, so report_data_match is always false against the mock.
+      let nonce: Uint8Array;
+      try {
+        nonce = base64UrlToBytes(nonceB64);
+      } catch {
+        return json(res, 400, { error: "invalid_request", message: "nonce is not base64url" });
+      }
+      if (nonce.length !== NONCE_BYTES) {
+        return json(res, 400, {
+          error: "invalid_request",
+          message: `nonce must be ${NONCE_BYTES} bytes`,
+        });
+      }
+
+      // Fresh per-session hybrid key. A real LB asks the hardware to bind this
+      // identity transcript into report_data; the recorded fixture cannot, so
+      // report_data_match is always false against the mock.
       const { priv, pub } = await generateServerHybridKey();
-      const wantV2 = (FORCED_BINDING ?? url.searchParams.get("binding")) === IDENTITY_BINDING_V2;
+      const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
       const bundle: Record<string, unknown> = {
-        version: "c8s-verify/v1",
+        ...minted.bundleFields,
         platform: "snp",
         generation: "genoa",
         nonce: nonceB64,
@@ -153,25 +150,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
           mlkem768: bytesToBase64Url(pub.mlkem768),
         },
       };
-      let transcript: Uint8Array | undefined;
-      if (wantV2) {
-        let nonce: Uint8Array;
-        try {
-          nonce = base64UrlToBytes(nonceB64);
-        } catch {
-          return json(res, 400, { error: "invalid_request", message: "nonce is not base64url" });
-        }
-        if (nonce.length !== NONCE_BYTES) {
-          return json(res, 400, {
-            error: "invalid_request",
-            message: `v2 nonce must be ${NONCE_BYTES} bytes`,
-          });
-        }
-        const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
-        transcript = minted.transcript;
-        Object.assign(bundle, minted.bundleFields);
-      }
-      pending.set(nonceB64, { priv, pub, transcript, createdAt: Date.now() });
+      pending.set(nonceB64, { priv, transcript: minted.transcript, createdAt: Date.now() });
       return json(res, 200, bundle);
     }
 
@@ -181,14 +160,12 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       if (!entry)
         return json(res, 400, { error: "invalid_request", message: "unknown or expired nonce" });
       pending.delete(body.nonce);
-      const nonce = base64UrlToBytes(body.nonce);
       const key = await serverKeyAgreement(
         entry.priv,
         {
           clientX25519: base64UrlToBytes(body.client_x25519),
           mlkemCiphertext: base64UrlToBytes(body.mlkem_ct),
         },
-        nonce,
         entry.transcript,
       );
       const sessionId = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));

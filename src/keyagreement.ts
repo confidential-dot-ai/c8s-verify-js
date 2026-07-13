@@ -21,8 +21,7 @@ export const MLKEM768_EK_BYTES = 1184; // encapsulation (public) key
 export const MLKEM768_CT_BYTES = 1088; // ciphertext
 export const X25519_PUB_BYTES = 32;
 
-const HKDF_INFO_V1 = utf8ToBytes("c8s-verify/over-encryption/v1");
-const HKDF_INFO_IDENTITY = utf8ToBytes("c8s-verify/over-encryption/pq-mesh-identity/v2");
+const HKDF_INFO = utf8ToBytes("c8s-verify/over-encryption/pq-mesh-identity/v1");
 
 /** Raw public halves of the LB's hybrid key. */
 export interface PublicHalves {
@@ -47,29 +46,22 @@ function u8(b: ArrayBuffer | Uint8Array): Uint8Array {
 }
 
 /**
- * Derive the AES-256-GCM session key from the two shared secrets — the single
- * owner of the v1/v2 KDF selection (see PROTOCOL.md "Key agreement"): with an
- * identity transcript (v2) the transcript hash is the HKDF salt under the v2
- * info; otherwise (v1) the nonce is the salt under the v1 info.
+ * Derive the AES-256-GCM session key from the two shared secrets and the
+ * verified identity transcript (see PROTOCOL.md "Key agreement").
  * @param mlkemSecret 32-byte ML-KEM shared secret
  * @param x25519Secret 32-byte X25519 shared secret
- * @param nonce session nonce (v1 HKDF salt)
- * @param identityTranscript 48-byte v2 transcript hash (v2 HKDF salt)
+ * @param identityTranscript 48-byte identity transcript hash (HKDF salt)
  * @returns AES-256-GCM key (non-extractable)
  */
 async function deriveChannelKey(
   mlkemSecret: Uint8Array,
   x25519Secret: Uint8Array,
-  nonce: Uint8Array,
-  identityTranscript?: Uint8Array,
+  identityTranscript: Uint8Array,
 ): Promise<CryptoKey> {
-  const [salt, info] = identityTranscript
-    ? [identityTranscript, HKDF_INFO_IDENTITY]
-    : [nonce, HKDF_INFO_V1];
   const ikm = concatBytes(mlkemSecret, x25519Secret);
   const hkdfKey = await subtle().importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
   const bits = await subtle().deriveBits(
-    { name: "HKDF", hash: "SHA-256", salt, info },
+    { name: "HKDF", hash: "SHA-256", salt: identityTranscript, info: HKDF_INFO },
     hkdfKey,
     256,
   );
@@ -84,14 +76,13 @@ async function deriveChannelKey(
  * the session key.
  *
  * @param peerPub raw public halves
- * @param nonce session nonce
+ * @param identityTranscript verified identity transcript hash
  */
 export async function clientKeyAgreement(
   peerPub: PublicHalves,
-  nonce: Uint8Array,
-  identityTranscript?: Uint8Array,
+  identityTranscript: Uint8Array,
 ): Promise<{ key: CryptoKey; handshake: Handshake }> {
-  if (identityTranscript) assertTranscriptLength(identityTranscript);
+  assertTranscriptLength(identityTranscript);
   if (peerPub.mlkem768.length !== MLKEM768_EK_BYTES) {
     throw new C8sVerifyError(
       "key_binding",
@@ -121,7 +112,7 @@ export async function clientKeyAgreement(
     await subtle().deriveBits({ name: "X25519", public: peerX25519 }, clientPair.privateKey, 256),
   );
 
-  const key = await deriveChannelKey(u8(mlkemSecret), x25519Secret, nonce, identityTranscript);
+  const key = await deriveChannelKey(u8(mlkemSecret), x25519Secret, identityTranscript);
   return { key, handshake: { clientX25519, mlkemCiphertext: u8(mlkemCt) } };
 }
 
@@ -133,10 +124,9 @@ export async function clientKeyAgreement(
 export async function serverKeyAgreement(
   serverKeys: ServerKeys,
   handshake: Handshake,
-  nonce: Uint8Array,
-  identityTranscript?: Uint8Array,
+  identityTranscript: Uint8Array,
 ): Promise<CryptoKey> {
-  if (identityTranscript) assertTranscriptLength(identityTranscript);
+  assertTranscriptLength(identityTranscript);
   const mlkemSecret = u8(
     await mlkem.decapsulateBits(ML_KEM, serverKeys.mlkemPriv, handshake.mlkemCiphertext),
   );
@@ -150,7 +140,7 @@ export async function serverKeyAgreement(
   const x25519Secret = u8(
     await subtle().deriveBits({ name: "X25519", public: clientPub }, serverKeys.x25519Priv, 256),
   );
-  return deriveChannelKey(mlkemSecret, x25519Secret, nonce, identityTranscript);
+  return deriveChannelKey(mlkemSecret, x25519Secret, identityTranscript);
 }
 
 /**

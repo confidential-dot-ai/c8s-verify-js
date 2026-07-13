@@ -107,9 +107,6 @@ async function run(): Promise<void> {
       result = await verifyAttestation(bundle, nonce, {
         measurements: DEMO_MEASUREMENTS,
         requireFreshness: DEMO_REQUIRE_FRESHNESS,
-        // Explicit legacy downgrade: the demo replays recorded evidence, which
-        // can never carry a fresh v2 identity-bound transcript.
-        requireClusterIdentity: false,
         meshCaPem: pinnedCa,
       });
     } catch (e) {
@@ -124,12 +121,15 @@ async function run(): Promise<void> {
         set("wasm", "ok");
         set("measure", "ok");
         set("binding", "bad", `✗ ${err.message}`);
-      } else if (code === "nonce_mismatch") set("fetch", "bad", `✗ ${err.message}`);
-      else if (code === "identity_binding" || code.includes("cert")) {
+      } else if (code === "nonce_mismatch") {
+        set("fetch", "bad", `✗ ${err.message}`);
+      } else if (code === "identity_binding" || code.includes("cert")) {
         set("wasm", "ok");
         set("measure", "ok");
         set("cert", "bad", `✗ ${err.message}`);
-      } else set("fetch", "bad", `✗ ${code}: ${err.message}`);
+      } else {
+        set("fetch", "bad", `✗ ${code}: ${err.message}`);
+      }
       throw e;
     }
 
@@ -141,29 +141,28 @@ async function run(): Promise<void> {
     set("measure", "ok", `launch_digest ∈ allowlist\n${result.measurement}`);
 
     if (result.reportDataMatch === true) {
-      set("binding", "ok", "report_data = SHA-384(session_pubkey ‖ nonce) ✓ live-bound");
+      set("binding", "ok", "report_data = identity transcript ✓ live-bound");
     } else {
       set(
         "binding",
         "warn",
         "report_data not bound to this session (recorded fixture).\n" +
-          "A live TEE LB binds SHA-384(session_pubkey ‖ nonce); signature + measurement are still real.",
+          "The hardware signature, measurement, certificate chain, and identity proof are still real.",
       );
     }
 
     set(
       "cert",
       "ok",
-      `leaf CN=${result.cert!.subjectCN}  issuer CN=${result.cert!.issuerCN}\n` +
-        `leaf sha256=${result.cert!.sha256.slice(0, 32)}…\n` +
-        `mesh-CA sha256=${result.cert!.caSha256.slice(0, 32)}… (pinned)`,
+      `leaf CN=${result.cert.subjectCN}  issuer CN=${result.cert.issuerCN}\n` +
+        `leaf sha256=${result.cert.sha256.slice(0, 32)}…\n` +
+        `mesh-CA sha256=${result.cert.caSha256.slice(0, 32)}… (pinned)`,
     );
 
     // 7. handshake
     set("handshake", "run");
     const { key, handshake } = await clientKeyAgreement(
       result.sessionPubKey,
-      nonce,
       result.keyAgreementContext,
     );
     const hsRes = await fetch(`${PREFIX}/handshake`, {

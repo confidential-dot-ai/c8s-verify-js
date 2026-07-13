@@ -66,8 +66,7 @@ export interface BuiltBundle {
   priv: ServerKeys;
   pub: PublicHalves;
   meshCaPem: string;
-  /** v2 transcript hash; set when built with identity: true. */
-  transcript?: Uint8Array;
+  transcript: Uint8Array;
 }
 
 /**
@@ -75,7 +74,7 @@ export interface BuiltBundle {
  */
 export async function buildBundle(
   nonce: Uint8Array,
-  opts: { tamperReport?: boolean; identity?: boolean } = {},
+  opts: { tamperReport?: boolean } = {},
 ): Promise<BuiltBundle> {
   const { snpEvidence, meshCaPem, leafPem, leafKeyPem, leafDer, caDer } = await loadFixtures();
   const { priv, pub } = await generateServerHybridKey();
@@ -87,8 +86,9 @@ export async function buildBundle(
     evidence.attestation_report = bytesToBase64(rep);
   }
 
+  const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
   const bundle: AttestationBundle = {
-    version: "c8s-verify/v1",
+    ...minted.bundleFields,
     platform: "snp",
     generation: "genoa",
     nonce: bytesToBase64Url(nonce),
@@ -99,10 +99,5 @@ export async function buildBundle(
       mlkem768: bytesToBase64Url(pub.mlkem768),
     },
   };
-  if (opts.identity) {
-    const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
-    Object.assign(bundle, minted.bundleFields);
-    return { bundle, priv, pub, meshCaPem, transcript: minted.transcript };
-  }
-  return { bundle, priv, pub, meshCaPem };
+  return { bundle, priv, pub, meshCaPem, transcript: minted.transcript };
 }

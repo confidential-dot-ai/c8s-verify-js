@@ -16,24 +16,18 @@ function captureFetch(urls: string[]): typeof fetch {
   };
 }
 
-test("fetchAttestation requests the v2 identity binding by default", async () => {
-  const urls: string[] = [];
-  const client = new C8sClient({ baseUrl: "http://lb.test", fetch: captureFetch(urls) });
-  await client.fetchAttestation(generateNonce());
-  const url = new URL(urls[0]);
-  assert.equal(url.pathname, "/.well-known/c8s/attestation");
-  assert.equal(url.searchParams.get("binding"), "over-encryption+mesh-identity-v2");
-  // 32-byte nonce is 43 chars of unpadded base64url.
-  assert.equal(url.searchParams.get("nonce")?.length, 43);
-});
-
-test("fetchAttestation omits the binding param on explicit legacy downgrade", async () => {
+test("fetchAttestation requests the current protocol without version negotiation", async () => {
   const urls: string[] = [];
   const client = new C8sClient({
     baseUrl: "http://lb.test",
-    requireClusterIdentity: false,
+    measurements: ["measurement"],
+    meshCaPem: "pinned CA",
     fetch: captureFetch(urls),
   });
   await client.fetchAttestation(generateNonce());
-  assert.equal(new URL(urls[0]).searchParams.get("binding"), null);
+  const url = new URL(urls[0]);
+  assert.equal(url.pathname, "/.well-known/c8s/attestation");
+  assert.equal(url.searchParams.get("binding"), null);
+  // 32-byte nonce is 43 chars of unpadded base64url.
+  assert.equal(url.searchParams.get("nonce")?.length, 43);
 });

@@ -11,16 +11,14 @@ import { NONCE_BYTES } from "./nonce.js";
 import { verifyECDSASignature, type Certificate } from "./x509.js";
 import type { PublicHalves } from "./keyagreement.js";
 
-/** Legacy v1 binding: session keys attested, mesh identity checked separately. */
-export const BINDING_V1 = "over-encryption";
-export const IDENTITY_BINDING_V2 = "over-encryption+mesh-identity-v2";
-export const IDENTITY_BUNDLE_VERSION = "c8s-verify/v2";
+export const PROTOCOL_VERSION = "c8s-verify/v1";
+export const IDENTITY_BINDING = "over-encryption";
 export const IDENTITY_PROOF_ALGORITHM = "ecdsa-sha384";
-/** SHA-384 transcript hash length; also the v2 HKDF context length. */
+/** SHA-384 transcript hash length; also the v1 HKDF context length. */
 export const IDENTITY_TRANSCRIPT_BYTES = 48;
 
-const TRANSCRIPT_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity/v2");
-const PROOF_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity-proof/v2");
+const TRANSCRIPT_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity/v1");
+const PROOF_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity-proof/v1");
 
 export interface MeshIdentityProof {
   algorithm: string;
@@ -41,7 +39,7 @@ async function sha256(input: Uint8Array): Promise<Uint8Array> {
 }
 
 /**
- * Compute the v2 report_data transcript shared with c8s/pkg/overenc.
+ * Compute the v1 report_data transcript shared with c8s/pkg/overenc.
  */
 export async function identityTranscriptHash(
   pub: PublicHalves,
@@ -121,7 +119,7 @@ export async function selectPinnedCA(
   return undefined;
 }
 
-/** Verify certificate fingerprints and proof of possession for a v2 transcript. */
+/** Verify certificate fingerprints and proof of possession for a v1 transcript. */
 export async function verifyMeshIdentityProof(
   proof: MeshIdentityProof,
   transcriptHash: Uint8Array,
