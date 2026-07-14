@@ -24,7 +24,7 @@ import { cborEncode, cborDecode, type CborValue } from "../src/cbor.js";
 import { bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8 } from "../src/base64.js";
 import { decodePEM } from "../src/pem.js";
 import { NONCE_BYTES } from "../src/nonce.js";
-import { mintIdentityProof } from "./mint-identity.js";
+import { mintIdentityProof } from "../test/mint-identity.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Run from source via tsx; this file lives at demo/, so the repo root — the

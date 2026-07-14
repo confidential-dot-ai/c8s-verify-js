@@ -14,7 +14,7 @@ import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js
 import type { AttestationBundle } from "../src/verify.js";
 import type { Evidence } from "../src/hcl.js";
 import { decodePEM } from "../src/pem.js";
-import { mintIdentityProof } from "../demo/mint-identity.js";
+import { mintIdentityProof } from "./mint-identity.js";
 
 // Run from source via tsx (see package.json); this file lives at test/, so the
 // repo root is one directory up (test/ -> repo root).

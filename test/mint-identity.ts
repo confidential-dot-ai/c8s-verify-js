@@ -1,7 +1,7 @@
 // Node-side minting of the mesh identity proof — the server half of the
-// protocol (see ../PROTOCOL.md), shared by the mock LB and the test fixtures so
-// e2e and unit tests validate the same wire shape. Uses node:crypto signing, so
-// it must never be imported from src/ (browser code only verifies).
+// protocol (see ../PROTOCOL.md), shared by the tests and the demo mock LB so
+// both validate the same wire shape. Uses node:crypto signing, so it must
+// never be imported from src/ (browser code only verifies).
 
 import { sign } from "node:crypto";
 

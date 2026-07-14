@@ -12,7 +12,7 @@ import { decodePEM } from "../src/pem.js";
 import { parseCertificate } from "../src/x509.js";
 import { bytesToBase64Url, bytesToHex } from "../src/base64.js";
 import { C8sVerifyError } from "../src/errors.js";
-import { mintIdentityProof } from "../demo/mint-identity.js";
+import { mintIdentityProof } from "./mint-identity.js";
 import { loadFixtures } from "./helpers.js";
 
 async function fixtureProof(): Promise<{
