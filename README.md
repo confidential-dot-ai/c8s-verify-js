@@ -32,7 +32,7 @@ cannot read or forge the inner traffic.
 
 ## Transitive trust
 
-The browser verifies the LB rather than every backend pod. The expected LB
+The browser verifies the LB rather than every backend pod. The attested LB
 implementation forwards through C8s's in-cluster RA-TLS mesh, so its attested
 measurement and cluster identity are the browser's trust boundary. The C8s threat
 model documents the separate assumptions and limitations of that internal hop.
