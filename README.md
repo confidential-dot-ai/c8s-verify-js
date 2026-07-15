@@ -23,7 +23,7 @@ challenge-response endpoint:
 - The TEE returns fresh evidence committing the nonce, hybrid session keys, and
   mesh identity, plus proof that it holds the mesh leaf's private key.
 - After verifying the evidence, measurement, pinned CA, and identity proof, the
-  client completes X25519 + ML-KEM-768 key agreement.
+  client completes an hybrid quantum-resistant key agreement.
 
 Application traffic then travels inside both ordinary TLS and the attested
 AES-256-GCM channel. A malicious outer TLS terminator can relay the exchange but
