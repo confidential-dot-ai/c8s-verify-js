@@ -68,13 +68,14 @@ export async function identityTranscriptHash(
     fail("identity_binding", "identity transcript requires leaf and CA certificates");
   }
 
+  // Most-stable fields first so a signer can reuse the hash state across sessions.
   const encoded = concatBytes(
     lengthPrefixed(TRANSCRIPT_DOMAIN),
+    lengthPrefixed(await sha256(caDer)),
+    lengthPrefixed(await sha256(leafDer)),
     lengthPrefixed(pub.x25519),
     lengthPrefixed(pub.mlkem768),
     lengthPrefixed(nonce),
-    lengthPrefixed(await sha256(leafDer)),
-    lengthPrefixed(await sha256(caDer)),
   );
   return new Uint8Array(await subtle().digest("SHA-384", encoded));
 }
