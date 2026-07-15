@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 
 import {
-  identityProofMessage,
   identityTranscriptHash,
   verifyMeshIdentityProof,
   type MeshIdentityProof,
@@ -55,7 +54,7 @@ test("verifies proof of possession by the committed mesh leaf", async () => {
 test("rejects a copied public leaf signed by an attacker key", async () => {
   const { proof, transcript, leaf, ca } = await fixtureProof();
   const attacker = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-  const forged = sign("sha384", identityProofMessage(transcript), {
+  const forged = sign("sha384", transcript, {
     key: attacker.privateKey,
     dsaEncoding: "der",
   });

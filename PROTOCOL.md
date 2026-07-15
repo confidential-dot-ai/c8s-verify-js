@@ -104,13 +104,12 @@ report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
 Most-stable fields come first so an implementation can reuse the hash state up
 to the per-session fields.
 
-The LB also signs this domain-separated message with the private key for the
-committed leaf:
+The LB also signs the transcript hash with the private key for the committed
+leaf; the transcript's leading version tag already domain-separates it, so no
+second tag is applied:
 
 ```
-proof_message = LP("c8s-verify/pq-mesh-identity-proof/v1")
-             || LP(transcript_hash)
-signature     = ECDSA-SHA384(leaf_private_key, proof_message)
+signature = ECDSA-SHA384(leaf_private_key, transcript_hash)
 ```
 
 The client verifies the hardware evidence against `transcript_hash`, the launch

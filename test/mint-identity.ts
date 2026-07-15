@@ -10,7 +10,6 @@ import {
   certificateHashBase64Url,
   IDENTITY_PROOF_ALGORITHM,
   PROTOCOL_VERSION,
-  identityProofMessage,
   identityTranscriptHash,
   type MeshIdentityProof,
 } from "../src/identity.js";
@@ -45,7 +44,7 @@ export async function mintIdentityProof(
     leaf_sha256: await certificateHashBase64Url(leafDer),
     mesh_ca_sha256: await certificateHashBase64Url(caDer),
     signature: bytesToBase64Url(
-      sign("sha384", identityProofMessage(transcript), {
+      sign("sha384", transcript, {
         key: leafKeyPem,
         dsaEncoding: "der",
       }),

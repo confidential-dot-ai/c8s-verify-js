@@ -17,7 +17,6 @@ export const IDENTITY_PROOF_ALGORITHM = "ecdsa-sha384";
 export const IDENTITY_TRANSCRIPT_BYTES = 48;
 
 const TRANSCRIPT_DOMAIN = utf8ToBytes(PROTOCOL_VERSION);
-const PROOF_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity-proof/v1");
 
 export interface MeshIdentityProof {
   algorithm: string;
@@ -90,11 +89,6 @@ export function assertTranscriptLength(transcriptHash: Uint8Array): void {
   }
 }
 
-export function identityProofMessage(transcriptHash: Uint8Array): Uint8Array {
-  assertTranscriptLength(transcriptHash);
-  return concatBytes(lengthPrefixed(PROOF_DOMAIN), lengthPrefixed(transcriptHash));
-}
-
 function decodeProofField(value: string): Uint8Array {
   try {
     return base64UrlToBytes(value);
@@ -126,6 +120,7 @@ export async function verifyMeshIdentityProof(
   leaf: Certificate,
   ca: Certificate,
 ): Promise<void> {
+  assertTranscriptLength(transcriptHash);
   if (proof.algorithm !== IDENTITY_PROOF_ALGORITHM) {
     fail("identity_binding", `unsupported mesh identity proof algorithm ${proof.algorithm}`);
   }
@@ -137,11 +132,12 @@ export async function verifyMeshIdentityProof(
     fail("identity_binding", "mesh identity proof does not commit to the pinned mesh CA");
   }
 
+  // The transcript's leading version tag domain-separates this signature.
   let ok: boolean;
   try {
     ok = await verifyECDSASignature(
       leaf,
-      identityProofMessage(transcriptHash),
+      transcriptHash,
       decodeProofField(proof.signature),
       "SHA-384",
     );
