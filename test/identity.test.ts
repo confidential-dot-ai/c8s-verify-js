@@ -43,7 +43,7 @@ test("v1 transcript matches the Go cross-language vector", async () => {
   );
   assert.equal(
     bytesToHex(transcript),
-    "4ad70e2d4cdb8044527d82886a35ebdaee1f250883f2a789acea681bff8acc62401c4ccbfa633a02521af62f2f2e0d0f",
+    "ee5bd763a62f0ee89a2205b5d91482965735e12078e5fcf43afbf63d8f5ff0a964521cacf9f1ad7f8f65dccb5bbedada",
   );
 });
 

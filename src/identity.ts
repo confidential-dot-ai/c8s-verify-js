@@ -16,7 +16,7 @@ export const IDENTITY_PROOF_ALGORITHM = "ecdsa-sha384";
 /** SHA-384 transcript hash length; also the v1 HKDF context length. */
 export const IDENTITY_TRANSCRIPT_BYTES = 48;
 
-const TRANSCRIPT_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity/v1");
+const TRANSCRIPT_DOMAIN = utf8ToBytes(PROTOCOL_VERSION);
 const PROOF_DOMAIN = utf8ToBytes("c8s-verify/pq-mesh-identity-proof/v1");
 
 export interface MeshIdentityProof {

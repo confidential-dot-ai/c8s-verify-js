@@ -90,7 +90,7 @@ Define `LP(field) = uint32_be(len(field)) || field`, and:
 leaf_hash = SHA-256(leaf_certificate_DER)
 ca_hash   = SHA-256(issuing_mesh_CA_DER)
 
-transcript = LP("c8s-verify/pq-mesh-identity/v1")
+transcript = LP("c8s-verify/v1")
           || LP(x25519_pub_raw(32))
           || LP(mlkem768_pub_raw(1184))
           || LP(nonce(32))
