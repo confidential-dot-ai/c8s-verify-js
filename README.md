@@ -164,8 +164,9 @@ browser-check` compiles a browser bundle first (`npm run build:demo`).
 - **Implemented (server):** the matching c8s endpoints ship as the `c8s cds-attest`
   sidecar, fronted by the existing tls-lb nginx (chart flag `tlsLb.attest.enabled`):
   it serves `/.well-known/c8s/attestation` + the over-encryption handshake and
-  returns the exact identity chain in each bundle. Go↔JS interop is verified end
-  to end (`c8s/pkg/overenc`, `c8s/internal/cmds/cdsattest`).
+  returns the exact identity chain in each bundle; a bundle is fetched once per
+  session, so the chain does not ride every application request. Go↔JS interop
+  is verified end to end (`c8s/pkg/overenc`, `c8s/internal/cmds/cdsattest`).
 - **Pending (tracked separately):** the live `--attestation-service-url` binding on a
   real TEE node, routing over-encrypted *application* traffic through nginx to the
   sidecar (today the standalone sidecar handles it directly), and the `TEErminator`
