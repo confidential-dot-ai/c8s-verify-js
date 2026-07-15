@@ -20,8 +20,9 @@ Instead of putting attestation in the public TLS certificate, the LB exposes a
 challenge-response endpoint:
 
 - The client generates a 32-byte random nonce and requests attestation.
-- The TEE returns fresh evidence committing the nonce, hybrid session keys, and
-  mesh identity, plus proof that it holds the mesh leaf's private key.
+- The LB's TEE returns fresh evidence committing the nonce, hybrid session keys,
+  and its own mesh identity (each LB holds its own CDS-issued leaf), plus proof
+  that it holds that leaf's private key.
 - After verifying the evidence, measurement, pinned CA, and identity proof, the
   client completes X25519 + ML-KEM-768 key agreement.
 
