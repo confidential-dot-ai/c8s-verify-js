@@ -24,7 +24,7 @@ challenge-response endpoint:
   and its own mesh identity (each LB holds its own CDS-issued leaf), plus proof
   that it holds that leaf's private key.
 - After verifying the evidence, measurement, pinned CA, and identity proof, the
-  client completes X25519 + ML-KEM-768 key agreement.
+  client completes a hybrid quantum-resistant key agreement.
 
 Application traffic then travels inside both ordinary TLS and the attested
 AES-256-GCM channel. A malicious outer TLS terminator can relay the exchange but
