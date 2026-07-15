@@ -92,11 +92,11 @@ leaf_hash = SHA-256(leaf_certificate_DER)
 ca_hash   = SHA-256(issuing_mesh_CA_DER)
 
 transcript = LP("c8s-verify/pq-mesh-identity/v1")
+          || LP(ca_hash(32))
+          || LP(leaf_hash(32))
           || LP(x25519_pub_raw(32))
           || LP(mlkem768_pub_raw(1184))
           || LP(nonce(32))
-          || LP(leaf_hash(32))
-          || LP(ca_hash(32))
 
 transcript_hash = SHA-384(transcript)
 report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
