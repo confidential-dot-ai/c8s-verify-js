@@ -227,7 +227,7 @@ Hybrid KEM = **X25519** (classical, WebCrypto) **+ ML-KEM-768** (post-quantum,
 2. Client generates ephemeral X25519 keypair; `x25519_ss = ECDH(client_x25519_priv, session_pubkey.x25519)`.
 3. Combined secret: `ikm = mlkem_ss (32B) || x25519_ss (32B)`.
 4. Derive the **AES-256-GCM** key:
-   `HKDF-SHA256(ikm, salt = transcript_hash, info = "c8s-verify/over-encryption/pq-mesh-identity/v1", L = 32)`.
+   `HKDF-SHA256(ikm, salt = transcript_hash, info = "c8s-verify/v1/over-encryption", L = 32)`.
 5. **Handshake** — `POST /.well-known/c8s/handshake` with
    `{ "nonce": "<b64url>", "client_x25519": "<b64url 32B>", "mlkem_ct": "<b64url 1088B>" }`.
    The LB selects the pending session key by nonce, decapsulates + ECDHs to the same

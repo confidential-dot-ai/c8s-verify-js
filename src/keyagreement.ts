@@ -21,7 +21,7 @@ export const MLKEM768_EK_BYTES = 1184; // encapsulation (public) key
 export const MLKEM768_CT_BYTES = 1088; // ciphertext
 export const X25519_PUB_BYTES = 32;
 
-const HKDF_INFO = utf8ToBytes("c8s-verify/over-encryption/pq-mesh-identity/v1");
+const HKDF_INFO = utf8ToBytes("c8s-verify/v1/over-encryption");
 
 /** Raw public halves of the LB's hybrid key. */
 export interface PublicHalves {
