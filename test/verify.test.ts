@@ -13,7 +13,7 @@ import { C8sVerifyError } from "../src/errors.js";
 import { DEMO_MEASUREMENTS } from "../demo/config.js";
 import { buildBundle, loadFixtures } from "./helpers.js";
 import { base64ToBytes, bytesToBase64, bytesToBase64Url } from "../src/base64.js";
-import { certificateHashBase64Url, IDENTITY_BINDING } from "../src/identity.js";
+import { certificateHashBase64Url } from "../src/identity.js";
 
 function policy(meshCaPem: string, overrides: Partial<VerifyPolicy> = {}): VerifyPolicy {
   return { measurements: DEMO_MEASUREMENTS, requireFreshness: false, meshCaPem, ...overrides };
@@ -87,7 +87,6 @@ test("verifies the mesh proof even when recorded evidence disables freshness", a
   const nonce = generateNonce();
   const { bundle, meshCaPem, transcript } = await buildBundle(nonce);
   const result = await verifyAttestation(bundle, nonce, policy(meshCaPem));
-  assert.equal(result.binding, IDENTITY_BINDING);
   assert.equal(result.identityBound, false);
   assert.ok(result.warnings.some((w) => w.includes("freshness binding not enforced")));
   // The KDF context is the verified transcript even without hardware freshness.
@@ -145,16 +144,6 @@ test("requires a mesh CA pinned out of band", async () => {
   );
 });
 
-test("rejects an unknown attestation binding", async () => {
-  const nonce = generateNonce();
-  const { bundle, meshCaPem } = await buildBundle(nonce);
-  bundle.binding = "over-encryption+unknown-v3";
-  await assert.rejects(
-    () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
-    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
-  );
-});
-
 test("rejects a proof naming an unpinned mesh CA", async () => {
   const nonce = generateNonce();
   const { bundle, meshCaPem } = await buildBundle(nonce);
@@ -173,7 +162,7 @@ test("accepts padded base64url identity-proof fields", async () => {
   bundle.identity_proof.mesh_ca_sha256 = pad(bundle.identity_proof.mesh_ca_sha256);
   bundle.identity_proof.signature = pad(bundle.identity_proof.signature);
   const result = await verifyAttestation(bundle, nonce, policy(meshCaPem));
-  assert.equal(result.binding, IDENTITY_BINDING);
+  assert.equal(result.ok, true);
 });
 
 test("rejects a leaf that does not chain to the pinned mesh CA", async () => {

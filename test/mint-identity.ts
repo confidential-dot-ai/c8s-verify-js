@@ -8,7 +8,6 @@ import { sign } from "node:crypto";
 import { bytesToBase64Url } from "../src/base64.js";
 import {
   certificateHashBase64Url,
-  IDENTITY_BINDING,
   IDENTITY_PROOF_ALGORITHM,
   PROTOCOL_VERSION,
   identityProofMessage,
@@ -19,7 +18,6 @@ import type { PublicHalves } from "../src/keyagreement.js";
 
 export interface IdentityBundleFields {
   version: string;
-  binding: string;
   identity_proof: MeshIdentityProof;
 }
 
@@ -58,7 +56,6 @@ export async function mintIdentityProof(
     proof,
     bundleFields: {
       version: PROTOCOL_VERSION,
-      binding: IDENTITY_BINDING,
       identity_proof: proof,
     },
   };

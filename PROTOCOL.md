@@ -60,7 +60,6 @@ Response is `application/json`:
   },
   "cds_cert_pem": "-----BEGIN CERTIFICATE-----\n...", // exact mesh leaf + issuing CA
   "ear": "<optional CDS-issued EAR JWT>",
-  "binding": "over-encryption",
   "session_pubkey": {
     "x25519":   "<b64url 32-byte X25519 public key>",
     "mlkem768": "<b64url 1184-byte ML-KEM-768 encapsulation key>"
@@ -78,10 +77,10 @@ All `b64url` fields are **unpadded** base64url (RFC 4648 §5 without `=`); the
 `signature` is DER — a `SEQUENCE` spanning the whole value, holding exactly two
 positive `INTEGER`s without redundant sign padding.
 
-The `version`, `binding`, `cds_cert_pem`, and `identity_proof` fields are mandatory.
+The `version`, `cds_cert_pem`, and `identity_proof` fields are mandatory.
 The LB re-reads the TEE-held mesh leaf, private key, and CA for each request so
 certificate rotation cannot leave the bundle and proof on different credential
-generations. There is no legacy or downgrade binding.
+generations. There is no legacy or downgrade path.
 
 #### Report-data and mesh-identity binding
 
@@ -276,7 +275,7 @@ The client MUST fail closed. Typed errors (mirroring c8s error codes) include:
 `report_data_mismatch`, `measurement_denied`, `invalid_cert` / `cert_chain` (mesh leaf
 does not chain to the pinned CA or is expired), `identity_binding`, and `key_binding`.
 Any failure aborts before the over-encryption channel is established. The policy
-rejects an empty measurement allowlist, a missing mesh-CA pin, or any version or
-binding other than the identity-bound v1 values above. Freshness enforcement
-defaults to true; the recorded-evidence demo explicitly disables it and reports
-that downgrade as a warning.
+rejects an empty measurement allowlist, a missing mesh-CA pin, or any version
+other than `c8s-verify/v1`. Freshness enforcement defaults to true; the
+recorded-evidence demo explicitly disables it and reports that downgrade as a
+warning.

@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { C8sClient } from "../src/index.js";
-import { IDENTITY_BINDING } from "../src/identity.js";
 import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "../demo/config.js";
 import { loadFixtures } from "./helpers.js";
 
@@ -48,7 +47,6 @@ test("end-to-end: identity-bound attestation and transcript-keyed channel", asyn
     const session = await client.connect();
     assert.equal(session.attestation.platform, "snp");
     assert.equal(session.attestation.measurement, DEMO_MEASUREMENTS[0]);
-    assert.equal(session.attestation.binding, IDENTITY_BINDING);
     assert.equal(session.attestation.identityBound, false); // recorded evidence
     assert.equal(session.attestation.keyAgreementContext.length, 48);
     assert.equal(session.attestation.cert.subjectCN, "lb.demo.c8s.local");

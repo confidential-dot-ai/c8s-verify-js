@@ -9,7 +9,6 @@ import { bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
 import { fail } from "./errors.js";
 import type { Evidence } from "./hcl.js";
 import {
-  IDENTITY_BINDING,
   PROTOCOL_VERSION,
   identityTranscriptHash,
   selectPinnedCA,
@@ -43,7 +42,6 @@ export interface AttestationBundle {
   evidence: Evidence;
   cds_cert_pem: string;
   ear?: string;
-  binding: string;
   session_pubkey: SessionPubKeyB64;
   identity_proof: MeshIdentityProof;
 }
@@ -80,7 +78,6 @@ export interface AttestationResult {
   measurement: string;
   reportVersion: number;
   reportDataMatch: boolean | null;
-  binding: string;
   /** true only when the identity transcript is hardware-bound (report_data matched). */
   identityBound: boolean;
   /**
@@ -179,9 +176,6 @@ async function prepareIdentity(
 ): Promise<PreparedIdentity> {
   if (bundle?.version !== PROTOCOL_VERSION) {
     fail("identity_binding", `attestation response has unexpected version ${bundle?.version}`);
-  }
-  if (bundle.binding !== IDENTITY_BINDING) {
-    fail("identity_binding", `attestation response has unexpected binding ${bundle.binding}`);
   }
   if (!isMeshIdentityProof(bundle.identity_proof)) {
     fail("identity_binding", "attestation response omitted or malformed identity_proof");
@@ -312,7 +306,6 @@ export async function verifyAttestation(
     measurement,
     reportVersion: result.report_version,
     reportDataMatch: result.report_data_match,
-    binding: IDENTITY_BINDING,
     identityBound: result.report_data_match === true,
     keyAgreementContext: identity.transcript,
     sessionPubKey,

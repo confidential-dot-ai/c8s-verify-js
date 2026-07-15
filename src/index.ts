@@ -24,7 +24,7 @@ import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
 
 export { C8sVerifyError } from "./errors.js";
-export { IDENTITY_BINDING, PROTOCOL_VERSION } from "./identity.js";
+export { PROTOCOL_VERSION } from "./identity.js";
 export type { MeshIdentityProof } from "./identity.js";
 export { verifyAttestation, verifyEvidence } from "./verify.js";
 export type {

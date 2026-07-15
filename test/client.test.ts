@@ -27,7 +27,7 @@ test("fetchAttestation requests the current protocol without version negotiation
   await client.fetchAttestation(generateNonce());
   const url = new URL(urls[0]);
   assert.equal(url.pathname, "/.well-known/c8s/attestation");
-  assert.equal(url.searchParams.get("binding"), null);
+  assert.deepEqual([...url.searchParams.keys()], ["nonce"]);
   // 32-byte nonce is 43 chars of unpadded base64url.
   assert.equal(url.searchParams.get("nonce")?.length, 43);
 });

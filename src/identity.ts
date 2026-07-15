@@ -12,7 +12,6 @@ import { verifyECDSASignature, type Certificate } from "./x509.js";
 import type { PublicHalves } from "./keyagreement.js";
 
 export const PROTOCOL_VERSION = "c8s-verify/v1";
-export const IDENTITY_BINDING = "over-encryption";
 export const IDENTITY_PROOF_ALGORITHM = "ecdsa-sha384";
 /** SHA-384 transcript hash length; also the v1 HKDF context length. */
 export const IDENTITY_TRANSCRIPT_BYTES = 48;
