@@ -4,10 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Called by release.yml on tag pushes so a release is gated on the exact same
+  # checks, and publishes the same `wasm` artifact the tests ran against.
+  workflow_call:
 
 # The verifier WASM is generated from attestation-rs at a pinned commit — the
 # in-tree `vendor/attestation-rs` submodule gitlink (see src/wasm/README.md) — and
 # is not committed. Build it once here and share it with the test jobs as an artifact.
+# NOTE: release.yml downloads the `wasm` artifact by name — keep them in sync.
 
 jobs:
   build-wasm:

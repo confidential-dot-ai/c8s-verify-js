@@ -1,0 +1,99 @@
+name: Release
+
+# Publish to npm and create a GitHub release when a semver tag is pushed:
+#
+#   git tag v1.2.3       # stable  → npm dist-tag `latest`
+#   git tag v1.2.3-rc1   # preview → npm dist-tag `next`, GitHub prerelease
+#   git push origin <tag>
+#
+# The tag must match the version in package.json (and package-lock.json) — the
+# version-guard job fails the release otherwise. Tests run via test.yml, and the
+# published package embeds the exact WASM verifier artifact the tests ran against.
+#
+# Publishing needs the `NPM_TOKEN` repository secret: an npm granular access
+# token with read/write on the c8s-verify package. `--provenance` additionally
+# requires this repository to be public and `repository.url` in package.json to
+# point at it.
+
+on:
+  push:
+    # v-prefixed semver only (v1.2.3, v1.2.3-rc1). The [0-9] keeps unrelated
+    # v-tags (e.g. `verify-fix`) from triggering; version-guard then enforces
+    # strict semver and loudly rejects near-misses like `v1.2`.
+    tags: ["v[0-9]*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version-guard:
+    name: Tag matches package version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag is semver and equals package.json/package-lock.json version
+        run: |
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -qE "$semver"; then
+            echo "::error::tag '$GITHUB_REF_NAME' is not a v-prefixed semver version (expected e.g. v1.2.3 or v1.2.3-rc1)"
+            exit 1
+          fi
+          pkg="$(node -p 'require("./package.json").version')"
+          lock="$(node -p 'require("./package-lock.json").version')"
+          if [ "v$pkg" != "$GITHUB_REF_NAME" ] || [ "v$lock" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::version mismatch: tag=$GITHUB_REF_NAME package.json=$pkg package-lock.json=$lock — bump the version (npm version) before tagging"
+            exit 1
+          fi
+
+  test:
+    name: Test
+    needs: version-guard
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    name: Publish npm package & GitHub release
+    needs: [version-guard, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # npm --provenance attestation
+    steps:
+      - uses: actions/checkout@v4
+      # The WASM verifier built and tested in the test workflow (same run) —
+      # publish those exact bytes rather than rebuilding.
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm
+          path: src/wasm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run build
+      - name: Pack release tarball
+        run: npm pack
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Pre-releases (any `-` suffix) publish under the `next` dist-tag so
+          # `npm install c8s-verify` never resolves to an RC.
+          case "$version" in
+            *-*) dist_tag=next ;;
+            *) dist_tag=latest ;;
+          esac
+          echo "publishing c8s-verify@$version with dist-tag '$dist_tag'"
+          npm publish --provenance --access public --tag "$dist_tag"
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          args=(--verify-tag --title "c8s-verify $GITHUB_REF_NAME" --generate-notes)
+          case "$version" in
+            *-*) args+=(--prerelease) ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" "c8s-verify-$version.tgz" "${args[@]}"
