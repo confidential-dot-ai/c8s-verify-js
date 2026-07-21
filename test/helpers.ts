@@ -13,6 +13,8 @@ import {
 import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js";
 import type { AttestationBundle } from "../src/verify.js";
 import type { Evidence } from "../src/hcl.js";
+import { decodePEM } from "../src/pem.js";
+import { mintIdentityProof } from "./mint-identity.js";
 
 // Run from source via tsx (see package.json); this file lives at test/, so the
 // repo root is one directory up (test/ -> repo root).
@@ -22,15 +24,41 @@ export interface Fixtures {
   snpEvidence: Evidence;
   meshCaPem: string;
   leafPem: string;
+  leafKeyPem: string;
+  leafDer: Uint8Array;
+  caDer: Uint8Array;
 }
 
-export async function loadFixtures(): Promise<Fixtures> {
-  const evidence = JSON.parse(await readFile(join(FIX, "snp-evidence-genoa.json"), "utf8"));
-  return {
-    snpEvidence: (evidence.evidence ?? evidence) as Evidence,
-    meshCaPem: await readFile(join(FIX, "mesh-ca.crt"), "utf8"),
-    leafPem: await readFile(join(FIX, "cds-leaf.crt"), "utf8"),
-  };
+let fixturesPromise: Promise<Fixtures> | undefined;
+
+/**
+ * Load the recorded fixtures once per process; the files are immutable and
+ * every consumer either treats them as read-only or deep-clones before
+ * mutating (see buildBundle). A failed load clears the cache so the next
+ * caller retries instead of replaying a stale rejection.
+ */
+export function loadFixtures(): Promise<Fixtures> {
+  fixturesPromise ??= (async () => {
+    const [evidenceJson, meshCaPem, leafPem, leafKeyPem] = await Promise.all([
+      readFile(join(FIX, "snp-evidence-genoa.json"), "utf8"),
+      readFile(join(FIX, "mesh-ca.crt"), "utf8"),
+      readFile(join(FIX, "cds-leaf.crt"), "utf8"),
+      readFile(join(FIX, "cds-leaf.key"), "utf8"),
+    ]);
+    const evidence = JSON.parse(evidenceJson);
+    return {
+      snpEvidence: (evidence.evidence ?? evidence) as Evidence,
+      meshCaPem,
+      leafPem,
+      leafKeyPem,
+      leafDer: decodePEM(leafPem, "CERTIFICATE")[0],
+      caDer: decodePEM(meshCaPem, "CERTIFICATE")[0],
+    };
+  })().catch((e: unknown) => {
+    fixturesPromise = undefined;
+    throw e;
+  });
+  return fixturesPromise;
 }
 
 export interface BuiltBundle {
@@ -38,6 +66,7 @@ export interface BuiltBundle {
   priv: ServerKeys;
   pub: PublicHalves;
   meshCaPem: string;
+  transcript: Uint8Array;
 }
 
 /**
@@ -47,7 +76,7 @@ export async function buildBundle(
   nonce: Uint8Array,
   opts: { tamperReport?: boolean } = {},
 ): Promise<BuiltBundle> {
-  const { snpEvidence, meshCaPem, leafPem } = await loadFixtures();
+  const { snpEvidence, meshCaPem, leafPem, leafKeyPem, leafDer, caDer } = await loadFixtures();
   const { priv, pub } = await generateServerHybridKey();
 
   const evidence = JSON.parse(JSON.stringify(snpEvidence));
@@ -57,8 +86,9 @@ export async function buildBundle(
     evidence.attestation_report = bytesToBase64(rep);
   }
 
+  const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
   const bundle: AttestationBundle = {
-    version: "c8s-verify/v1",
+    ...minted.bundleFields,
     platform: "snp",
     generation: "genoa",
     nonce: bytesToBase64Url(nonce),
@@ -69,5 +99,5 @@ export async function buildBundle(
       mlkem768: bytesToBase64Url(pub.mlkem768),
     },
   };
-  return { bundle, priv, pub, meshCaPem };
+  return { bundle, priv, pub, meshCaPem, transcript: minted.transcript };
 }

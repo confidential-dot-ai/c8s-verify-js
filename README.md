@@ -1,41 +1,50 @@
 # C8s Verification in Javascript
 
-This repo provides all the tools required to verify that a given API, or workload is effectively running in a C8s trusted execution backed cluster.
+This library lets a browser verify that an API is running in an expected C8s
+trusted execution environment and establish an encrypted channel to it.
 
 ## Background
 
-Sadly, raTLS (Remote Attestation TLS) was designed primarily for backend-to-backend (or machine-to-machine) communication. In those scenarios, you control the client (e.g., a Python script, a Go binary) and can configure it to pause the TLS handshake, extract the custom X.509 extension containing the attestation report, verify the hardware signature, and then complete the handshake.
+RA-TLS (Remote Attestation TLS) is designed primarily for machine-to-machine
+communication. A native client can inspect a custom X.509 extension, verify its
+attestation report, and then complete the TLS handshake.
 
 Browsers simply do not expose APIs to do this.
 
-Instead, we need to establish a secure channel with a remote enclave in a verifiable way within the existing connection we have with a given API or workload. This is done by relying on over-encryption with keys that are attested to have been securely generated in a secure enclave.
+This library instead establishes an over-encrypted channel whose session keys
+are bound to hardware attestation.
 
 ## Our design
 
-Instead of putting the attestation in the TLS certificate, you serve it via a standard HTTPS API endpoint through a classical challenge-response mechanism:
+Instead of putting attestation in the public TLS certificate, the LB exposes a
+challenge-response endpoint:
 
-- The Challenge: The JavaScript client generates a cryptographically secure random nonce and sends it to the LB: `GET /attestation?nonce=<random_string>`
-- The Response: The TEE of the LB includes the client's nonce and its ephemeral public key, asks the hardware to generate a fresh attestation report binding both, and returns the report to the browser as a JSON payload.
-- The Key Agreement: the user can now proceed with a key agreement mechanism using their own, locally generated keypair and the attested public key of the LB.
+- The client generates a 32-byte random nonce and requests attestation.
+- The LB's TEE returns fresh evidence committing the nonce, hybrid session keys,
+  and its own mesh identity (each LB holds its own CDS-issued leaf), plus proof
+  that it holds that leaf's private key.
+- After verifying the evidence, measurement, pinned CA, and identity proof, the
+  client completes a hybrid quantum-resistant key agreement.
 
-All future communication will now proceed over a doubly-encrypted channel: TLS is used to connect to the LB, and the shared key established above is used to ensure communication to the LB goes to a secure enclave rather than a malicious TLS terminating proxy in front of the real LB, relaying the attestation reports back to the user.
+Application traffic then travels inside both ordinary TLS and the attested
+AES-256-GCM channel. A malicious outer TLS terminator can relay the exchange but
+cannot read or forge the inner traffic.
 
-## On the transitivity of Trust
+## Transitive trust
 
-Trust can be transitive in some cases, this is one such cases: as soon as an attested LB has been contacted, the user can be assured that LB will only talk to other attested pods, through raTLS.
+The browser verifies the LB rather than every backend pod. The attested LB
+implementation forwards through C8s's in-cluster RA-TLS mesh, so its attested
+measurement and cluster identity are the browser's trust boundary. The C8s threat
+model documents the separate assumptions and limitations of that internal hop.
 
-This is because both the Load Balancer and the Certificate Delivery Service are open source Confidential.AI products, meaning anyone can verify their code, and their images and trust they are unable to do anything but what they have been designed for, and that includes only talking to other attested pods within a C8s cluster.
-
-Since the LB certificates chains to the CDS CA certifcate and so do all other pods within a given cluster, relying on either the LB or the CDS as a single point of trust to establish trust in the other components of the cluster does not impact the threat model of C8s.
-
-## Why we pin the mesh CA certificate (for now)
+## How the protocol binds cluster identity
 
 Today the client pins two things out of band: the **LB measurement** allowlist and the
 **mesh CA certificate** (see `meshCaPem` in the example below). It is reasonable to ask
 why we pin a certificate at all, rather than simply pinning the known-good image hashes
 of the CDS and LB and letting attestation carry the rest.
 
-The reason is cluster identity. The CDS and LB images are open source and reproducible —
+The reason is cluster identity. The CDS and LB images are open source and reproducible—
 that is what makes them auditable, but it also means a valid measurement only proves
 *"a genuine instance of the audited code, on real AMD silicon"*, not *"my cluster"*. An
 attacker can stand up their own genuine LB enclave (same image, valid measurement, real
@@ -46,30 +55,18 @@ end up with a confidential channel to a genuine-but-attacker-operated LB, forwar
 which is generated inside the CDS TEE; image hashes are not. So we have to pin *something*
 cluster-unique, and today that something is the mesh CA certificate.
 
-## Where we're headed: a measurement-driven anchor
+The protocol closes the copied-public-chain gap in two ways:
 
-Pinning a certificate is operationally awkward (rotation, expiry), and the cluster-unique
-value does not actually have to be a PEM — it only has to be a hash we can attest. The
-planned direction is:
+- Hardware evidence commits to the session keys, client nonce, exact mesh leaf,
+  and issuing CA in one domain-separated transcript.
+- The mesh leaf signs that transcript, proving possession of the corresponding
+  private key. Copying the public certificate chain is no longer sufficient.
 
-1. **Bind the LB leaf into the attestation.** Extend the LB's `report_data` (or
-   `init_data`) to commit to its mesh-CA-issued leaf certificate, e.g.
-   `SHA-384(session_pubkey ‖ nonce ‖ leaf_spki)`, so that "chains to my mesh CA" is welded
-   to "this is the enclave that produced the session key" rather than being a separate,
-   independently-served check.
-2. **Move the cluster-unique anchor into measured config.** Instead of a pinned PEM, pin
-   the **CDS measurement plus a per-cluster identity** carried in the CDS's attested
-   `init_data` / `host_data` (this could be the mesh CA SPKI hash itself).
-3. **Fetch the certificate dynamically.** The LB returns its own evidence *and* a CDS
-   attestation binding the current mesh CA public key; the client verifies the CDS
-   measurement + config, trusts the freshly fetched mesh CA, and checks the (now
-   attestation-bound) LB leaf chains to it.
-
-The result is a "verify attestation, then fetch the right certificate" flow with **no
-pinned certificate** and free cert rotation — the only pinned values are hashes. The key
-constraint we cannot remove is that exactly one of those hashes must encode a
-cluster-unique identity, because the images alone are deliberately fungible across
-deployments.
+The identity signature is ECDSA, so authentication is currently classical. The
+channel key combines X25519 and ML-KEM-768; its recorded-traffic confidentiality
+is post-quantum as long as ML-KEM-768 remains secure. A future measurement-driven
+anchor may replace the pinned CA certificate, but it must still commit to a
+cluster-unique value.
 
 ## Library
 
@@ -91,15 +88,11 @@ const client = new C8sClient({
   baseUrl: "https://lb.example.com",
   measurements: ["<expected hex SHA-384 launch digest>"], // pinned out of band
   meshCaPem: pinnedMeshCaPem,                              // pinned CDS/mesh CA anchor
-  // cdsCertPath defaults to "/.well-known/cds-cert.pem": when the attestation
-  // bundle omits cds_cert_pem (nginx serves the leaf statically), the client
-  // fetches it from there and chains it to meshCaPem. Set to null to disable.
 });
 
 // Generates a nonce, fetches the LB attestation, verifies the SEV-SNP evidence,
-// the measurement, the report_data binding and the CDS certificate chain (the
-// leaf comes from the bundle, or is fetched from cdsCertPath when absent), then
-// runs the X25519+ML-KEM-768 handshake and derives the AES-256-GCM channel.
+// measurement, identity-bound report_data, pinned mesh certificate chain, and
+// leaf proof of possession, then runs the X25519+ML-KEM-768 handshake.
 const session = await client.connect();
 console.log(session.attestation.measurement, session.attestation.cert.sha256);
 
@@ -109,15 +102,17 @@ const res = await session.fetch("/v1/chat", { method: "POST", body: prompt });
 console.log(res.text());
 ```
 
-What is verified, and in what order: nonce echo → SEV-SNP signature + VCEK chain
-(WASM) → launch measurement ∈ allowlist → `report_data == SHA-384(session_pubkey‖nonce)`
-(freshness + key binding) → CDS cert chains to the pinned mesh CA. Any failure throws
-a typed `C8sVerifyError` and no channel is established (fail closed).
+What is verified, and in what order: nonce echo → response is identity-bound v1 → served leaf
+chains to a mesh CA pinned out of band → SEV-SNP signature + VCEK chain (WASM) →
+launch measurement ∈ a non-empty allowlist → `report_data` commits the session
+keys, nonce, leaf, and CA → leaf proof-of-possession signature. The same transcript
+is the HKDF context. Any failure throws a typed `C8sVerifyError` and no channel
+is established.
 
 ### Lower-level: verifying bare evidence
 
 If you obtain SNP evidence through your own transport (e.g. a discovery document)
-rather than the `c8s-verify/v1` challenge-response bundle, use `verifyEvidence`.
+rather than a c8s-verify challenge-response bundle, use `verifyEvidence`.
 It runs the same hardware verification + measurement/platform checks, and — when
 you pass `expectedReportData` — the `report_data` binding, but requires no bundle,
 nonce, session key, or CDS certificate (do any cluster-identity / mesh-CA chaining
@@ -172,9 +167,10 @@ browser-check` compiles a browser bundle first (`npm run build:demo`).
   PQ over-encryption channel, the mock LB, the browser demo, and the test suite.
 - **Implemented (server):** the matching c8s endpoints ship as the `c8s cds-attest`
   sidecar, fronted by the existing tls-lb nginx (chart flag `tlsLb.attest.enabled`):
-  it serves `/.well-known/c8s/attestation` + the over-encryption handshake, with
-  `cds-cert.pem`/`mesh-ca.pem` served statically by nginx. Go↔JS interop is verified
-  end to end (`c8s/pkg/overenc`, `c8s/internal/cmds/cdsattest`).
+  it serves `/.well-known/c8s/attestation` + the over-encryption handshake and
+  returns the exact identity chain in each bundle; a bundle is fetched once per
+  session, so the chain does not ride every application request. Go↔JS interop
+  is verified end to end (`c8s/pkg/overenc`, `c8s/internal/cmds/cdsattest`).
 - **Pending (tracked separately):** the live `--attestation-service-url` binding on a
   real TEE node, routing over-encrypted *application* traffic through nginx to the
   sidecar (today the standalone sidecar handles it directly), and the `TEErminator`

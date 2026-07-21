@@ -6,6 +6,6 @@ export const DEMO_MEASUREMENTS: string[] = [
 export const DEMO_GENERATION = "genoa";
 export const DEMO_PLATFORM = "snp";
 // The recorded fixture's report_data is a fixed test string, so it cannot bind a
-// live session key+nonce. A real TEE LB binds SHA-384(session_pubkey||nonce); the
-// demo therefore runs with freshness enforcement downgraded to a warning.
+// live identity transcript. A real TEE LB binds the transcript hash; the demo
+// therefore runs with freshness enforcement downgraded to a warning.
 export const DEMO_REQUIRE_FRESHNESS = false;

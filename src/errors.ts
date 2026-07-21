@@ -10,6 +10,7 @@ export type C8sErrorCode =
   | "measurement_denied"
   | "invalid_cert"
   | "cert_chain"
+  | "identity_binding"
   | "key_binding"
   | "channel_error"
   | "unsupported";

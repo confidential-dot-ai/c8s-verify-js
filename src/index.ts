@@ -5,7 +5,7 @@
 // terminates inside the LB's enclave — so a malicious TLS-terminating proxy in
 // front of the LB cannot read or forge application traffic.
 //
-//   const client = new C8sClient({ baseUrl, measurements: [...] });
+//   const client = new C8sClient({ baseUrl, measurements: [...], meshCaPem });
 //   const session = await client.connect();
 //   console.log(session.attestation.measurement);
 //   const res = await session.fetch("/v1/chat", { method: "POST", body: "..." });
@@ -24,7 +24,9 @@ import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
 
 export { C8sVerifyError } from "./errors.js";
-export { verifyAttestation, verifyEvidence, expectedReportData } from "./verify.js";
+export { PROTOCOL_VERSION } from "./identity.js";
+export type { MeshIdentityProof } from "./identity.js";
+export { verifyAttestation, verifyEvidence } from "./verify.js";
 export type {
   VerifyPolicy,
   AttestationBundle,
@@ -38,24 +40,16 @@ export { initVerifier, verifySnp, verifyAzSnp } from "./wasm-loader.js";
 export type { Evidence, SnpEvidence, AzSnpEvidence } from "./hcl.js";
 
 const WELL_KNOWN = "/.well-known/c8s";
-// The CDS leaf cert is served by nginx as a static discovery file (sibling of
-// mesh-ca.pem), NOT under the attest prefix. The cds-attest sidecar no longer
-// embeds it in the attestation bundle (it would freeze a copy that goes stale
-// when get-cert rotates the LB leaf); nginx serves the live cert here and
-// hot-reloads it on renewal, so the client fetches it from here when the bundle
-// omits it.
-const CDS_CERT_PATH = "/.well-known/cds-cert.pem";
 
 export interface C8sClientOptions {
   baseUrl: string;
-  measurements?: string[];
+  measurements: string[];
   platform?: string;
   requireFreshness?: boolean;
-  meshCaPem?: string;
+  meshCaPem: string;
   at?: Date;
   fetch?: typeof fetch;
   wellKnownPrefix?: string;
-  cdsCertPath?: string | null;
 }
 
 export interface RequestInit {
@@ -92,7 +86,6 @@ export class C8sClient {
   readonly prefix: string;
   readonly fetch: typeof fetch;
   readonly policy: VerifyPolicy;
-  readonly cdsCertPath: string | null;
 
   constructor(opts: C8sClientOptions) {
     if (!opts?.baseUrl) {
@@ -100,16 +93,13 @@ export class C8sClient {
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
-    // Where to fetch the CDS leaf cert when the bundle omits it. Pass null/""
-    // to disable (e.g. an offline bundle that carries its own cds_cert_pem).
-    this.cdsCertPath = opts.cdsCertPath === undefined ? CDS_CERT_PATH : opts.cdsCertPath;
     const f = opts.fetch ?? globalThis.fetch?.bind(globalThis);
     if (!f) {
       throw new C8sVerifyError("invalid_request", "no fetch implementation available");
     }
     this.fetch = f;
     this.policy = {
-      measurements: opts.measurements ?? [],
+      measurements: opts.measurements,
       platform: opts.platform,
       requireFreshness: opts.requireFreshness,
       meshCaPem: opts.meshCaPem,
@@ -125,32 +115,13 @@ export class C8sClient {
    * Fetch the LB attestation bundle for a fresh nonce.
    */
   async fetchAttestation(nonce: Uint8Array): Promise<AttestationBundle> {
-    const url = `${this._url(this.prefix)}/attestation?nonce=${bytesToBase64Url(nonce)}`;
+    const params = new URLSearchParams({ nonce: bytesToBase64Url(nonce) });
+    const url = `${this._url(this.prefix)}/attestation?${params.toString()}`;
     const res = await this.fetch(url, { headers: { accept: "application/json" } });
     if (!res.ok) {
       fail("verification_failed", `attestation endpoint returned HTTP ${res.status}`);
     }
     return (await res.json()) as AttestationBundle;
-  }
-
-  /**
-   * Fetch the statically-served CDS leaf cert (PEM). Best-effort: returns null
-   * on any network/HTTP error or non-PEM body so connect() degrades to the
-   * "cert not verified" warning instead of failing closed. The cert's trust is
-   * the pinned mesh CA it chains to, so fetching it over the plain hop is safe.
-   */
-  async fetchCdsCert(): Promise<string | null> {
-    if (!this.cdsCertPath) return null;
-    try {
-      const res = await this.fetch(this._url(this.cdsCertPath), {
-        headers: { accept: "application/x-pem-file, text/plain" },
-      });
-      if (!res.ok) return null;
-      const pem = await res.text();
-      return pem.includes("BEGIN CERTIFICATE") ? pem : null;
-    } catch {
-      return null;
-    }
   }
 
   /**
@@ -160,16 +131,12 @@ export class C8sClient {
   async connect(): Promise<Session> {
     const nonce = generateNonce();
     const bundle = await this.fetchAttestation(nonce);
-    // The cds-attest sidecar no longer embeds the leaf in the bundle (it would
-    // go stale on LB cert rotation); pull the live one nginx serves statically
-    // so the chain-to-mesh-CA check in verifyAttestation can run.
-    if (!bundle.cds_cert_pem) {
-      const pem = await this.fetchCdsCert();
-      if (pem) bundle.cds_cert_pem = pem;
-    }
     const attestation = await verifyAttestation(bundle, nonce, this.policy);
 
-    const { key, handshake } = await clientKeyAgreement(attestation.sessionPubKey, nonce);
+    const { key, handshake } = await clientKeyAgreement(
+      attestation.sessionPubKey,
+      attestation.keyAgreementContext,
+    );
 
     // Register the channel with the LB; it derives the identical key.
     const hsRes = await this.fetch(`${this._url(this.prefix)}/handshake`, {
