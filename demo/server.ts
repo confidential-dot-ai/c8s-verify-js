@@ -129,7 +129,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       if (nonce.length !== NONCE_BYTES) {
         return json(res, 400, {
           error: "invalid_request",
-          message: `nonce must be ${NONCE_BYTES} bytes`,
+          message: `nonce must be ${NONCE_BYTES} bytes, got ${nonce.length}`,
         });
       }
 
