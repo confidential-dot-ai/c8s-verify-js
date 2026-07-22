@@ -3,7 +3,7 @@
 // a caller-supplied policy (expected measurements, platform, freshness binding).
 
 import { subtle } from "./crypto-env.js";
-import { verifySnp, verifyAzSnp } from "./wasm-loader.js";
+import { verifySnp, verifyAzSnp, verifyAzTdx } from "./wasm-loader.js";
 import { verifyCertChain } from "./x509.js";
 import { decodePEM } from "./pem.js";
 import { concatBytes, bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
@@ -51,7 +51,8 @@ export interface WasmVerifyResult {
   signature_valid: boolean;
   platform: string;
   generation?: string;
-  report_version: number;
+  // Present for snp/az-snp; az-tdx has no SNP report version.
+  report_version?: number;
   report_data_match: boolean | null;
   collateral_verified?: boolean;
   claims: WasmClaims;
@@ -137,25 +138,29 @@ export async function verifyAttestation(
   // 3. Hardware attestation via WASM. report_data binds the session key + nonce.
   const expected = await expectedReportData(sessionPubKey.x25519, sessionPubKey.mlkem768, nonce);
 
-  // az-snp gets full verification (HCL report + vTPM quote), with `expected`
-  // checked against the TPM quote's extraData. Bare snp checks the SNP report
-  // only, with `expected` checked against report_data. Both return the same
-  // result shape, so the policy checks below are platform-agnostic.
+  // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
+  // + vTPM quote + hardware quote), with `expected` checked against the TPM
+  // quote's extraData. Bare snp checks the SNP report only, with `expected`
+  // checked against report_data. All return the same result shape, so the policy
+  // checks below are platform-agnostic.
   const isAzSnp = wantPlatform === "az-snp";
-  // az-snp's verifier fails closed (throws) on a freshness mismatch, so in soft
+  const isAzTdx = wantPlatform === "az-tdx";
+  const isVtpm = isAzSnp || isAzTdx;
+  // The vTPM verifiers fail closed (throw) on a freshness mismatch, so in soft
   // mode (requireFreshness=false) we omit the anchor to get a non-throwing
   // result and warn below; bare snp returns a non-throwing bool either way.
-  const azSnpAnchor = requireFreshness ? expected : undefined;
+  const vtpmAnchor = requireFreshness ? expected : undefined;
   let result: WasmVerifyResult;
   try {
-    const out = isAzSnp
-      ? await verifyAzSnp(JSON.stringify(bundle.evidence), azSnpAnchor)
-      : await verifySnp(bundle.evidence, bundle.generation, expected);
+    let out: string;
+    if (isAzSnp) out = await verifyAzSnp(JSON.stringify(bundle.evidence), vtpmAnchor);
+    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(bundle.evidence), vtpmAnchor);
+    else out = await verifySnp(bundle.evidence, bundle.generation, expected);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
-    // az-snp fails closed on a freshness mismatch — surface it as the precise
-    // report_data_mismatch code rather than a generic verification_failed.
-    if (isAzSnp && requireFreshness && isFreshnessMismatch(e)) {
+    // The vTPM verifiers fail closed on a freshness mismatch — surface it as the
+    // precise report_data_mismatch code rather than a generic verification_failed.
+    if (isVtpm && requireFreshness && isFreshnessMismatch(e)) {
       fail(
         "report_data_mismatch",
         "report_data does not bind this session's key and nonce (stale or substituted evidence)",
@@ -234,7 +239,7 @@ export async function verifyAttestation(
     ok: true,
     platform: result.platform,
     measurement,
-    reportVersion: result.report_version,
+    reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
     sessionPubKey,
     cert,
@@ -294,8 +299,10 @@ export async function verifyEvidence(
   const warnings: string[] = [];
   const wantPlatform = opts.platform ?? "snp";
   const isAzSnp = wantPlatform === "az-snp";
-  // az-snp auto-detects the generation from the report CPUID; bare snp needs it.
-  if (!opts || (!isAzSnp && !opts.generation)) {
+  const isAzTdx = wantPlatform === "az-tdx";
+  const isVtpm = isAzSnp || isAzTdx;
+  // The vTPM platforms auto-detect the generation from the report; bare snp needs it.
+  if (!opts || (!isVtpm && !opts.generation)) {
     fail("invalid_request", 'generation is required ("milan" | "genoa" | "turin")');
   }
   const expected = opts.expectedReportData;
@@ -303,15 +310,16 @@ export async function verifyEvidence(
   // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
   let result: WasmVerifyResult;
   try {
-    const out = isAzSnp
-      ? await verifyAzSnp(JSON.stringify(evidence), expected)
-      : await verifySnp(evidence, opts.generation!, expected);
+    let out: string;
+    if (isAzSnp) out = await verifyAzSnp(JSON.stringify(evidence), expected);
+    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected);
+    else out = await verifySnp(evidence, opts.generation!, expected);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
-    // az-snp fails closed (throws) on a freshness mismatch when an anchor is
-    // supplied — map it to the precise report_data_mismatch code instead of the
-    // generic verification_failed used for chain/signature failures.
-    if (isAzSnp && expected !== undefined && isFreshnessMismatch(e)) {
+    // The vTPM verifiers fail closed (throw) on a freshness mismatch when an
+    // anchor is supplied — map it to the precise report_data_mismatch code
+    // instead of the generic verification_failed used for chain/signature failures.
+    if (isVtpm && expected !== undefined && isFreshnessMismatch(e)) {
       fail(
         "report_data_mismatch",
         "report_data does not match the expected binding (stale or substituted evidence)",
@@ -358,7 +366,7 @@ export async function verifyEvidence(
     ok: true,
     platform: result.platform,
     measurement,
-    reportVersion: result.report_version,
+    reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
     claims: result.claims,
     warnings,

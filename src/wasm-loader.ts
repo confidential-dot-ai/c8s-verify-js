@@ -2,7 +2,12 @@
 // Works in the browser (fetch the .wasm by URL) and in Node (read the file bytes,
 // since Node's fetch does not support file:// URLs). Initialised once and cached.
 
-import initWasm, { verify_snp, verify_az_snp, type InitInput } from "./wasm/attestation_wasm.js";
+import initWasm, {
+  verify_snp,
+  verify_az_snp,
+  verify_az_tdx,
+  type InitInput,
+} from "./wasm/attestation_wasm.js";
 import { toWasmEvidence, type Evidence } from "./hcl.js";
 
 const WASM_URL = new URL("./wasm/attestation_wasm_bg.wasm", import.meta.url);
@@ -72,4 +77,28 @@ export async function verifyAzSnp(
 ): Promise<string> {
   await initVerifier();
   return verify_az_snp(evidenceJson, expectedReportData, expectedInitDataHash);
+}
+
+/**
+ * Call the az-tdx verifier: full Azure TDX verification. Like {@link verifyAzSnp},
+ * the evidence is passed through unwrapped — the HCL report, TD quote, and vTPM
+ * quote are verified together. The freshness anchor (`expectedReportData`) is
+ * checked against the TPM quote's extraData (the TD quote's report_data instead
+ * binds the vTPM AK). The measurement surfaces as `claims.launch_digest` = hex(MRTD).
+ *
+ * The underlying WASM export is async (the shared az-tdx core is async for its
+ * optional DCAP collateral provider, which is skipped here), so this awaits it.
+ *
+ * @param evidenceJson az-tdx evidence: { version, tpm_quote, hcl_report, td_quote }
+ * @param expectedReportData raw bytes the TPM quote extraData must equal
+ * @param expectedInitDataHash 32-byte hash to bind against PCR[8]
+ * @returns verification result JSON (or throws on any failure)
+ */
+export async function verifyAzTdx(
+  evidenceJson: string,
+  expectedReportData?: Uint8Array,
+  expectedInitDataHash?: Uint8Array,
+): Promise<string> {
+  await initVerifier();
+  return verify_az_tdx(evidenceJson, expectedReportData, expectedInitDataHash);
 }

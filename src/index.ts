@@ -34,8 +34,8 @@ export type {
   CertInfo,
 } from "./verify.js";
 export { generateNonce } from "./nonce.js";
-export { initVerifier, verifySnp, verifyAzSnp } from "./wasm-loader.js";
-export type { Evidence, SnpEvidence, AzSnpEvidence } from "./hcl.js";
+export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx } from "./wasm-loader.js";
+export type { Evidence, SnpEvidence, AzSnpEvidence, AzTdxEvidence } from "./hcl.js";
 
 const WELL_KNOWN = "/.well-known/c8s";
 // The CDS leaf cert is served by nginx as a static discovery file (sibling of
