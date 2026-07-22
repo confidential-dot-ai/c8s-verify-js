@@ -80,6 +80,69 @@ test("rejects when the pinned anchor is the wrong cert", async () => {
   );
 });
 
+test("fails closed when no measurement allowlist is provided", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  await assert.rejects(
+    () =>
+      verifyAttestation(bundle, nonce, { measurements: [], requireFreshness: false, meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "measurement_denied",
+  );
+});
+
+test("allowAnyMeasurement downgrades the empty allowlist to a warning", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const r = await verifyAttestation(bundle, nonce, {
+    measurements: [],
+    requireFreshness: false,
+    meshCaPem,
+    allowAnyMeasurement: true,
+  });
+  assert.equal(r.ok, true);
+  assert.ok(r.warnings.some((w) => w.includes("launch digest was not checked")));
+});
+
+test("fails closed when no mesh CA is pinned", async () => {
+  const nonce = generateNonce();
+  const { bundle } = await buildBundle(nonce);
+  await assert.rejects(
+    () =>
+      verifyAttestation(bundle, nonce, {
+        measurements: DEMO_MEASUREMENTS,
+        requireFreshness: false,
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_cert",
+  );
+});
+
+test("allowUnpinnedMeshCa self-anchors the served cert with a warning", async () => {
+  const nonce = generateNonce();
+  const { bundle } = await buildBundle(nonce);
+  const r = await verifyAttestation(bundle, nonce, {
+    measurements: DEMO_MEASUREMENTS,
+    requireFreshness: false,
+    allowUnpinnedMeshCa: true,
+  });
+  assert.equal(r.ok, true);
+  assert.ok(r.warnings.some((w) => w.includes("its own anchor")));
+});
+
+test("fails closed when a mesh CA is pinned but the bundle carries no cert", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  delete bundle.cds_cert_pem;
+  await assert.rejects(
+    () =>
+      verifyAttestation(bundle, nonce, {
+        measurements: DEMO_MEASUREMENTS,
+        requireFreshness: false,
+        meshCaPem,
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_cert",
+  );
+});
+
 test("expectedReportData is a 48-byte SHA-384 digest", async () => {
   const d = await expectedReportData(new Uint8Array(32), new Uint8Array(1184), new Uint8Array(32));
   assert.equal(d.length, 48);

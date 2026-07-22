@@ -17,10 +17,22 @@ export interface VerifyPolicy {
   platform?: string;
   /** default true: report_data must bind session key+nonce */
   requireFreshness?: boolean;
-  /** pinned CA; if omitted, bundle.cds_cert_pem is the anchor */
+  /** pinned mesh CA (PEM). Omit only together with allowUnpinnedMeshCa (insecure). */
   meshCaPem?: string;
   /** validity reference time (default now) */
   at?: Date;
+  /**
+   * Opt out of the launch-measurement check when `measurements` is empty.
+   * Default false → an empty allowlist FAILS CLOSED. Insecure when set: accepts
+   * any genuine SNP enclave running any code.
+   */
+  allowAnyMeasurement?: boolean;
+  /**
+   * Opt out of pinning the mesh CA. Default false → a missing `meshCaPem` FAILS
+   * CLOSED. Insecure when set: the served cds_cert_pem is self-anchored, so a
+   * malicious proxy can present its own CA.
+   */
+  allowUnpinnedMeshCa?: boolean;
 }
 
 export interface SessionPubKeyB64 {
@@ -122,6 +134,29 @@ export async function verifyAttestation(
   const warnings: string[] = [];
   const wantPlatform = policy.platform ?? "snp";
   const requireFreshness = policy.requireFreshness !== false;
+  const allowAnyMeasurement = policy.allowAnyMeasurement === true;
+  const allowUnpinnedMeshCa = policy.allowUnpinnedMeshCa === true;
+  const allow = (policy.measurements ?? []).map((m) => m.toLowerCase());
+
+  // 0. Refuse an insecure policy before touching the (attacker-controlled)
+  // bundle. `measurements` pins the enclave's code identity and `meshCaPem`
+  // pins your cluster identity; waiving either takes an explicit opt-out.
+  // See docs/decisions/2026-07-13-fail-closed-identity-pins.md.
+  if (allow.length === 0 && !allowAnyMeasurement) {
+    fail(
+      "measurement_denied",
+      "no measurement allowlist provided: refusing to accept an unverified launch digest " +
+        "(set allowAnyMeasurement to override — insecure: accepts any genuine SNP enclave " +
+        "running any code)",
+    );
+  }
+  if (!policy.meshCaPem && !allowUnpinnedMeshCa) {
+    fail(
+      "invalid_cert",
+      "no pinned meshCaPem: refusing to self-anchor the served CDS cert (set " +
+        "allowUnpinnedMeshCa to override — insecure: a malicious proxy can present its own CA)",
+    );
+  }
 
   // 1. Nonce echo — cheap replay guard before any crypto.
   const echoed = base64UrlToBytes(bundle.nonce);
@@ -178,11 +213,13 @@ export async function verifyAttestation(
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
 
-  // 4. Measurement allowlist (case-insensitive hex).
+  // 4. Measurement allowlist (case-insensitive hex). An empty allowlist only
+  // reaches here when allowAnyMeasurement was set (guarded above at step 0).
   const measurement = String(result.claims.launch_digest).toLowerCase();
-  const allow = (policy.measurements ?? []).map((m) => m.toLowerCase());
   if (allow.length === 0) {
-    warnings.push("no measurement allowlist provided — launch digest was not checked");
+    warnings.push(
+      "no measurement allowlist provided — launch digest was not checked (allowAnyMeasurement)",
+    );
   } else if (!allow.includes(measurement)) {
     fail("measurement_denied", `launch digest ${measurement} is not in the allowlist`, {
       details: { measurement, allowed: allow },
@@ -220,8 +257,8 @@ export async function verifyAttestation(
     const chain = await verifyCertChain(leafDer, caDer, { at: policy.at });
     if (!policy.meshCaPem) {
       warnings.push(
-        "no pinned meshCaPem: the served cds_cert_pem was used as its own anchor — " +
-          "pin the mesh CA out of band for a stronger guarantee",
+        "no pinned meshCaPem: the served cds_cert_pem was used as its own anchor " +
+          "(allowUnpinnedMeshCa) — insecure; pin the mesh CA out of band",
       );
     }
     cert = {
@@ -231,8 +268,18 @@ export async function verifyAttestation(
       caSha256: chain.caSha256,
       notAfter: chain.leaf.notAfter.toISOString(),
     };
+  } else if (policy.meshCaPem) {
+    // A CA was pinned but there is no leaf to chain to it, so cluster identity
+    // cannot be confirmed — fail closed rather than returning cert: null.
+    fail(
+      "invalid_cert",
+      "bundle did not include cds_cert_pem and none was fetched: cannot verify the CDS " +
+        "cert chains to the pinned mesh CA",
+    );
   } else {
-    warnings.push("bundle did not include cds_cert_pem; CDS certificate was not verified");
+    warnings.push(
+      "bundle did not include cds_cert_pem; CDS certificate was not verified (allowUnpinnedMeshCa)",
+    );
   }
 
   return {

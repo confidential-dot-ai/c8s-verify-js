@@ -5,7 +5,7 @@
 // terminates inside the LB's enclave — so a malicious TLS-terminating proxy in
 // front of the LB cannot read or forge application traffic.
 //
-//   const client = new C8sClient({ baseUrl, measurements: [...] });
+//   const client = new C8sClient({ baseUrl, measurements: [...], meshCaPem });
 //   const session = await client.connect();
 //   console.log(session.attestation.measurement);
 //   const res = await session.fetch("/v1/chat", { method: "POST", body: "..." });
@@ -48,15 +48,35 @@ const CDS_CERT_PATH = "/.well-known/cds-cert.pem";
 
 export interface C8sClientOptions {
   baseUrl: string;
-  measurements?: string[];
+  /**
+   * Pinned launch-measurement allowlist (hex SHA-384) — the enclave's code
+   * identity. Required and non-empty. To run without it, use
+   * {@link C8sClient.insecure}.
+   */
+  measurements: string[];
+  /**
+   * Pinned mesh CA (PEM) — your cluster's identity. Required. To run without
+   * it, use {@link C8sClient.insecure}.
+   */
+  meshCaPem: string;
   platform?: string;
   requireFreshness?: boolean;
-  meshCaPem?: string;
   at?: Date;
   fetch?: typeof fetch;
   wellKnownPrefix?: string;
   cdsCertPath?: string | null;
 }
+
+/**
+ * Options for {@link C8sClient.insecure}. Either pin may be omitted; each pin
+ * you omit is WAIVED, and every waived check is re-surfaced as a warning on
+ * `session.attestation.warnings`. Not safe against a malicious TLS-terminating
+ * proxy — offline demo / early bring-up only.
+ */
+export type InsecureClientOptions = Omit<C8sClientOptions, "measurements" | "meshCaPem"> & {
+  measurements?: string[];
+  meshCaPem?: string;
+};
 
 export interface RequestInit {
   method?: string;
@@ -94,10 +114,46 @@ export class C8sClient {
   readonly policy: VerifyPolicy;
   readonly cdsCertPath: string | null;
 
+  /**
+   * Construct a client that FAILS CLOSED: it requires a non-empty measurement
+   * allowlist (the enclave's code identity) and a pinned mesh CA (your cluster
+   * identity). Omit either and construction throws. For the deliberately
+   * degraded offline / bring-up mode, use {@link C8sClient.insecure}.
+   */
   constructor(opts: C8sClientOptions) {
     if (!opts?.baseUrl) {
       throw new C8sVerifyError("invalid_request", "baseUrl is required");
     }
+
+    // The insecure waivers ride on the options object but are intentionally not
+    // part of the public C8sClientOptions type: only C8sClient.insecure() sets
+    // them, so the strict path is the only default and every opt-out is an
+    // explicit, greppable C8sClient.insecure(...) call site.
+    const waive = opts as C8sClientOptions & {
+      allowAnyMeasurement?: boolean;
+      allowUnpinnedMeshCa?: boolean;
+    };
+    const measurements = opts.measurements ?? [];
+    const allowAnyMeasurement = waive.allowAnyMeasurement === true;
+    const allowUnpinnedMeshCa = waive.allowUnpinnedMeshCa === true;
+
+    if (measurements.length === 0 && !allowAnyMeasurement) {
+      throw new C8sVerifyError(
+        "invalid_request",
+        "measurements is required and must be non-empty — it pins the enclave's launch " +
+          "measurement (its code identity). To run without it use C8sClient.insecure() " +
+          "(insecure: accepts any genuine SNP enclave running any code).",
+      );
+    }
+    if (!opts.meshCaPem && !allowUnpinnedMeshCa) {
+      throw new C8sVerifyError(
+        "invalid_request",
+        "meshCaPem is required — it pins your cluster's mesh CA (its cluster identity). " +
+          "To run without it use C8sClient.insecure() (insecure: a malicious proxy can " +
+          "present its own CA).",
+      );
+    }
+
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
     // Where to fetch the CDS leaf cert when the bundle omits it. Pass null/""
@@ -109,12 +165,35 @@ export class C8sClient {
     }
     this.fetch = f;
     this.policy = {
-      measurements: opts.measurements ?? [],
+      measurements,
       platform: opts.platform,
       requireFreshness: opts.requireFreshness,
       meshCaPem: opts.meshCaPem,
       at: opts.at,
+      allowAnyMeasurement,
+      allowUnpinnedMeshCa,
     };
+  }
+
+  /**
+   * Deliberately-degraded client that SKIPS whichever pin you omit — the launch
+   * measurement (code identity) and/or the mesh CA (cluster identity). A pin you
+   * DO pass is still enforced; each pin you omit is waived and re-surfaced as a
+   * warning on `session.attestation.warnings`.
+   *
+   * NOT safe against a malicious TLS-terminating proxy: with no pinned
+   * measurement you accept any genuine SNP enclave running any code, and with no
+   * pinned mesh CA a proxy can present its own CA. Offline demo / early bring-up
+   * only — never production.
+   */
+  static insecure(opts: InsecureClientOptions): C8sClient {
+    const measurements = opts.measurements ?? [];
+    return new C8sClient({
+      ...opts,
+      measurements,
+      allowAnyMeasurement: measurements.length === 0,
+      allowUnpinnedMeshCa: !opts.meshCaPem,
+    } as unknown as C8sClientOptions);
   }
 
   private _url(path: string): string {

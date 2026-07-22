@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 import { C8sClient } from "../src/index.js";
 import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "../demo/config.js";
+import { loadFixtures } from "./helpers.js";
 
 // Run from source via tsx; the repo root is one directory up (test/ -> root),
 // and the mock LB server is a TypeScript source run through the tsx loader.
@@ -33,9 +34,11 @@ test("end-to-end: connect, verify, and over-encrypted echo", async () => {
   const port = 8900 + Math.floor(Math.random() * 200);
   const server = await startServer(port);
   try {
+    const { meshCaPem } = await loadFixtures();
     const client = new C8sClient({
       baseUrl: `http://localhost:${port}`,
       measurements: DEMO_MEASUREMENTS,
+      meshCaPem,
       requireFreshness: DEMO_REQUIRE_FRESHNESS,
     });
     const session = await client.connect();
