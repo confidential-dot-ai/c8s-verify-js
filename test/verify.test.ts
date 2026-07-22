@@ -133,10 +133,9 @@ test("verifyEvidence enforces an explicit report_data binding", async () => {
   );
 });
 
-test("verifyEvidence requires a generation", async () => {
+test("verifyEvidence needs no generation (auto-detected from the report)", async () => {
   const { snpEvidence } = await loadFixtures();
-  await assert.rejects(
-    () => verifyEvidence(snpEvidence, { measurements: DEMO_MEASUREMENTS }),
-    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
-  );
+  const res = await verifyEvidence(snpEvidence, { measurements: DEMO_MEASUREMENTS });
+  assert.equal(res.ok, true);
+  assert.equal(res.platform, "snp");
 });
