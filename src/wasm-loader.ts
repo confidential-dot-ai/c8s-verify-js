@@ -6,6 +6,7 @@ import initWasm, {
   verify_snp,
   verify_az_snp,
   verify_az_tdx,
+  verify_tdx,
   type InitInput,
 } from "./wasm/attestation_wasm.js";
 import { toWasmEvidence, type Evidence } from "./hcl.js";
@@ -101,4 +102,33 @@ export async function verifyAzTdx(
 ): Promise<string> {
   await initVerifier();
   return verify_az_tdx(evidenceJson, expectedReportData, expectedInitDataHash);
+}
+
+/**
+ * Call the bare-metal tdx verifier: direct Intel TDX DCAP verification with no
+ * vTPM in the path. The TD quote signature and the full DCAP chain (PCK chain
+ * to the pinned Intel SGX Root CA, QE report signature and binding) are
+ * verified in WASM, debug TDs are rejected, and — when the evidence carries a
+ * `cc_eventlog` — the CCEL is replayed against RTMR0–3, failing closed on any
+ * divergence. Unlike the vTPM platforms, the freshness anchor
+ * (`expectedReportData`) is checked directly against the TD quote's 64-byte
+ * `report_data` (zero-padded, constant-time). The measurement surfaces as
+ * `claims.launch_digest` = hex(MRTD).
+ *
+ * The processor generation is irrelevant for TDX, so no generation argument is
+ * needed. DCAP collateral checks (PCK CRL, TCB status, TD-QE identity) need an
+ * async provider and are skipped in WASM: `collateral_verified` stays `false`.
+ *
+ * @param evidenceJson tdx evidence: { quote, cc_eventlog? } (base64 std)
+ * @param expectedReportData raw bytes the TD quote report_data must equal
+ * @param expectedInitDataHash bytes to bind against MRCONFIGID
+ * @returns verification result JSON (or throws on any failure)
+ */
+export async function verifyTdx(
+  evidenceJson: string,
+  expectedReportData?: Uint8Array,
+  expectedInitDataHash?: Uint8Array,
+): Promise<string> {
+  await initVerifier();
+  return verify_tdx(evidenceJson, expectedReportData, expectedInitDataHash);
 }

@@ -48,8 +48,14 @@ export interface AzTdxEvidence {
   td_quote?: string;
 }
 
+/** Bare-metal Intel TDX (tdx) DCAP evidence: raw TD quote + optional CC event log. */
+export interface TdxEvidence {
+  quote: string;
+  cc_eventlog?: string;
+}
+
 /** Any evidence shape the verifier layer can accept. */
-export type Evidence = SnpEvidence | AzSnpEvidence | AzTdxEvidence;
+export type Evidence = SnpEvidence | AzSnpEvidence | AzTdxEvidence | TdxEvidence;
 
 const HCL_MAGIC = 0x414c4348; // "HCLA", little-endian u32 at offset 0
 const HCL_HEADER_SIZE = 32; // signature, version, report_size, request_type, status, reserved[3]
