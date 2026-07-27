@@ -2,7 +2,7 @@
 // X.509 chain check, and turns their raw outputs into a pass/fail decision against
 // a caller-supplied policy (expected measurements, platform, freshness binding).
 
-import { verifySnp, verifyAzSnp } from "./wasm-loader.js";
+import { verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
 import { verifyCertChain, type ChainResult } from "./x509.js";
 import { decodePEM } from "./pem.js";
 import { bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
@@ -19,7 +19,7 @@ import {
 export interface VerifyPolicy {
   /** accepted launch digests (hex sha-384) */
   measurements: string[];
-  /** default "snp" */
+  /** default "snp"; also "az-snp" | "az-tdx" | "tdx" (bare-metal Intel TDX) */
   platform?: string;
   /** default true: report_data must bind the selected session transcript */
   requireFreshness?: boolean;
@@ -58,7 +58,8 @@ export interface WasmVerifyResult {
   signature_valid: boolean;
   platform: string;
   generation?: string;
-  report_version: number;
+  // Present for snp/az-snp; az-tdx has no SNP report version.
+  report_version?: number;
   report_data_match: boolean | null;
   collateral_verified?: boolean;
   claims: WasmClaims;
@@ -91,13 +92,13 @@ export interface AttestationResult {
   warnings: string[];
 }
 
-// az-snp's verifier (verify_az_snp) binds the freshness anchor in the verifier
-// core and FAILS CLOSED — it throws on a mismatch rather than returning a
-// non-throwing report_data_match=false (which is what bare `verify_snp` does).
-// Recognize that specific failure by message so the policy layer can surface it
-// as the precise `report_data_mismatch` code instead of a generic
-// `verification_failed`, and so the soft (requireFreshness=false) path can tell
-// a freshness mismatch apart from a real hardware/signature failure.
+// The vTPM (az-snp, az-tdx) and bare-tdx verifiers bind the freshness anchor in
+// the verifier core and FAIL CLOSED — they throw on a mismatch rather than
+// returning a non-throwing report_data_match=false (which is what bare
+// `verify_snp` does). Recognize that specific failure by message so the policy
+// layer can surface it as the precise `report_data_mismatch` code instead of a
+// generic `verification_failed`, and so the soft (requireFreshness=false) path
+// can tell a freshness mismatch apart from a real hardware/signature failure.
 function isFreshnessMismatch(e: unknown): boolean {
   const msg = String((e as { message?: unknown })?.message ?? e);
   return /report_data mismatch|TPM nonce (length )?mismatch/i.test(msg);
@@ -209,16 +210,30 @@ async function verifyHardwareAttestation(
   wantPlatform: string,
   requireFreshness: boolean,
 ): Promise<WasmVerifyResult> {
+  // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
+  // + vTPM quote + hardware quote), with the transcript checked against the TPM
+  // quote's extraData. Bare tdx verifies the TD quote + DCAP chain directly,
+  // and bare snp the SNP report only, each checking the transcript against the
+  // quote's report_data. All return the same result shape, so the policy checks
+  // stay platform-agnostic.
   const isAzSnp = wantPlatform === "az-snp";
-  const azSnpAnchor = requireFreshness ? expected : undefined;
+  const isAzTdx = wantPlatform === "az-tdx";
+  const isTdx = wantPlatform === "tdx";
+  // These verifiers fail closed (throw) on a freshness mismatch, so in soft
+  // mode (requireFreshness=false) we omit the anchor to get a non-throwing
+  // result and warn later; bare snp returns a non-throwing bool either way.
+  const failsClosedOnMismatch = isAzSnp || isAzTdx || isTdx;
+  const hardAnchor = requireFreshness ? expected : undefined;
   let result: WasmVerifyResult;
   try {
-    const out = isAzSnp
-      ? await verifyAzSnp(JSON.stringify(bundle.evidence), azSnpAnchor)
-      : await verifySnp(bundle.evidence, bundle.generation, expected);
+    let out: string;
+    if (isAzSnp) out = await verifyAzSnp(JSON.stringify(bundle.evidence), hardAnchor);
+    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor);
+    else if (isTdx) out = await verifyTdx(JSON.stringify(bundle.evidence), hardAnchor);
+    else out = await verifySnp(bundle.evidence, bundle.generation, expected);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
-    if (isAzSnp && requireFreshness && isFreshnessMismatch(e)) {
+    if (failsClosedOnMismatch && requireFreshness && isFreshnessMismatch(e)) {
       fail(
         "report_data_mismatch",
         "report_data does not bind this session transcript (stale or substituted evidence)",
@@ -304,7 +319,7 @@ export async function verifyAttestation(
     ok: true,
     platform: result.platform,
     measurement,
-    reportVersion: result.report_version,
+    reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
     identityBound: result.report_data_match === true,
     keyAgreementContext: identity.transcript,
@@ -328,18 +343,22 @@ function certInfo(chain: ChainResult): CertInfo {
 export interface VerifyEvidenceOptions {
   /**
    * "milan" | "genoa" | "turin"; required for "snp", ignored for "az-snp"
-   * (auto-detected from CPUID)
+   * (auto-detected from CPUID) and the TDX platforms
    */
   generation?: string;
   /** accepted launch digests (hex sha-384); empty = warn only */
   measurements?: string[];
   /**
    * raw bytes the freshness anchor must equal (e.g. SHA-384(pubkey ‖ nonce));
-   * when provided, a mismatch fails closed. For "snp" this is the SNP
-   * report_data; for "az-snp" it is the vTPM quote's extraData.
+   * when provided, a mismatch fails closed. For "snp" and "tdx" this is the
+   * hardware quote's report_data; for "az-snp"/"az-tdx" it is the vTPM
+   * quote's extraData.
    */
   expectedReportData?: Uint8Array;
-  /** default "snp"; set "az-snp" for full Azure vTPM verification */
+  /**
+   * default "snp"; set "az-snp"/"az-tdx" for full Azure vTPM verification, or
+   * "tdx" for bare-metal Intel TDX DCAP evidence
+   */
   platform?: string;
 }
 
@@ -379,8 +398,12 @@ export async function verifyEvidence(
   const warnings: string[] = [];
   const wantPlatform = opts.platform ?? "snp";
   const isAzSnp = wantPlatform === "az-snp";
-  // az-snp auto-detects the generation from the report CPUID; bare snp needs it.
-  if (!isAzSnp && !opts.generation) {
+  const isAzTdx = wantPlatform === "az-tdx";
+  const isTdx = wantPlatform === "tdx";
+  const isVtpm = isAzSnp || isAzTdx;
+  // The vTPM platforms auto-detect the generation from the report, and TDX has
+  // no generation concept; bare snp needs it.
+  if (!isVtpm && !isTdx && !opts.generation) {
     fail("invalid_request", 'generation is required ("milan" | "genoa" | "turin")');
   }
   const expected = opts.expectedReportData;
@@ -388,15 +411,17 @@ export async function verifyEvidence(
   // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
   let result: WasmVerifyResult;
   try {
-    const out = isAzSnp
-      ? await verifyAzSnp(JSON.stringify(evidence), expected)
-      : await verifySnp(evidence, opts.generation!, expected);
+    let out: string;
+    if (isAzSnp) out = await verifyAzSnp(JSON.stringify(evidence), expected);
+    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected);
+    else if (isTdx) out = await verifyTdx(JSON.stringify(evidence), expected);
+    else out = await verifySnp(evidence, opts.generation!, expected);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
-    // az-snp fails closed (throws) on a freshness mismatch when an anchor is
-    // supplied — map it to the precise report_data_mismatch code instead of the
-    // generic verification_failed used for chain/signature failures.
-    if (isAzSnp && expected !== undefined && isFreshnessMismatch(e)) {
+    // The vTPM/tdx verifiers fail closed (throw) on a freshness mismatch when an
+    // anchor is supplied — map it to the precise report_data_mismatch code
+    // instead of the generic verification_failed used for chain/signature failures.
+    if ((isVtpm || isTdx) && expected !== undefined && isFreshnessMismatch(e)) {
       fail(
         "report_data_mismatch",
         "report_data does not match the expected binding (stale or substituted evidence)",
@@ -443,7 +468,7 @@ export async function verifyEvidence(
     ok: true,
     platform: result.platform,
     measurement,
-    reportVersion: result.report_version,
+    reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
     claims: result.claims,
     warnings,
