@@ -72,8 +72,9 @@ cluster-unique value.
 
 `c8s-verify` is a zero-build ES-module library (browser + Node ≥ 20). Verification
 of the LB's hardware evidence runs in your browser via the
-[`attestation-rs`](https://github.com/confidential-dot-ai/attestation-rs) AMD SEV-SNP
-verifier compiled to WebAssembly (bundled AMD ARK/ASK roots, no network). The only
+[`attestation-rs`](https://github.com/confidential-dot-ai/attestation-rs) TEE
+verifier compiled to WebAssembly — AMD SEV-SNP and Intel TDX, bare metal or
+Azure vTPM-wrapped (bundled AMD/Intel trust roots, no network). The only
 runtime dependency is [`mlkem-wasm`](https://github.com/dchest/mlkem-wasm) for
 ML-KEM-768. The exact wire formats are specified in [`PROTOCOL.md`](./PROTOCOL.md).
 
@@ -90,7 +91,7 @@ const client = new C8sClient({
   meshCaPem: pinnedMeshCaPem,                              // pinned CDS/mesh CA anchor
 });
 
-// Generates a nonce, fetches the LB attestation, verifies the SEV-SNP evidence,
+// Generates a nonce, fetches the LB attestation, verifies the TEE evidence,
 // measurement, identity-bound report_data, pinned mesh certificate chain, and
 // leaf proof of possession, then runs the X25519+ML-KEM-768 handshake.
 const session = await client.connect();
@@ -102,8 +103,16 @@ const res = await session.fetch("/v1/chat", { method: "POST", body: prompt });
 console.log(res.text());
 ```
 
+Attestation and the handshake run **once per session**, not per request: the
+`Session` holds the derived AES-256-GCM channel and its LB session id, and
+every `session.fetch` reuses them. The LB keeps the session for its
+`--session-ttl` idle window (default 5 minutes, refreshed on use); after it
+expires a tunnel request fails with a typed `channel_error` (HTTP 401), and the
+embedding app re-runs `client.connect()` to attest a fresh session.
+
 What is verified, and in what order: nonce echo → response is identity-bound v1 → served leaf
-chains to a mesh CA pinned out of band → SEV-SNP signature + VCEK chain (WASM) →
+chains to a mesh CA pinned out of band → hardware signature + certificate chain
+(WASM; SEV-SNP VCEK or TDX DCAP, per the policy `platform`) →
 launch measurement ∈ a non-empty allowlist → `report_data` commits the session
 keys, nonce, leaf, and CA → leaf proof-of-possession signature. The same transcript
 is the HKDF context. Any failure throws a typed `C8sVerifyError` and no channel
@@ -111,12 +120,14 @@ is established.
 
 ### Lower-level: verifying bare evidence
 
-If you obtain SNP evidence through your own transport (e.g. a discovery document)
-rather than a c8s-verify challenge-response bundle, use `verifyEvidence`.
+If you obtain TEE evidence through your own transport (e.g. a discovery document)
+rather than a c8s-verify challenge-response bundle, use `verifyEvidence`
+(`platform`: `"snp"` | `"az-snp"` | `"az-tdx"` | `"tdx"`).
 It runs the same hardware verification + measurement/platform checks, and — when
 you pass `expectedReportData` — the `report_data` binding, but requires no bundle,
 nonce, session key, or CDS certificate (do any cluster-identity / mesh-CA chaining
-yourself). The raw WASM entrypoint `verifySnp` is also exported for full control.
+yourself). The raw WASM entrypoints (`verifySnp`, `verifyAzSnp`, `verifyAzTdx`,
+`verifyTdx`) are also exported for full control.
 
 ```js
 import { verifyEvidence } from "c8s-verify";
