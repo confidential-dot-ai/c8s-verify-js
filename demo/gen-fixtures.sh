@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generate deterministic demo fixtures with openssl so the demo runs fully offline:
 #   - a self-signed mesh CA (EC P-384 / ecdsa-with-SHA384), mirroring the c8s mesh CA
-#   - a CDS leaf cert (EC P-256) signed by that CA, served as cds-cert.pem
+#   - a CDS leaf cert (EC P-256) signed by that CA, bundled with attestation
 # Also copies a real recorded SNP evidence fixture from attestation-rs so the WASM
 # verifier has genuine hardware-signed evidence to verify.
 #

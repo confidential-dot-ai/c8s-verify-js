@@ -1,5 +1,5 @@
 // Fresh challenge nonce generation. The nonce binds the attestation evidence to
-// this session: the LB's hardware report_data is SHA-384(session_pubkey || nonce),
+// this session: the LB's hardware report_data commits to the session transcript,
 // so a verifier that recomputes it rejects replayed reports.
 
 import { randomBytes } from "./crypto-env.js";

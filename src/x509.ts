@@ -19,7 +19,7 @@ const OID = {
 
 const CURVE_BY_OID: Record<string, string> = { [OID.P256]: "P-256", [OID.P384]: "P-384" };
 const CURVE_SIZE: Record<string, number> = { "P-256": 32, "P-384": 48 };
-const SIG_ALG: Record<string, string> = {
+const SIG_ALG: Record<string, "SHA-256" | "SHA-384"> = {
   [OID.ECDSA_SHA256]: "SHA-256",
   [OID.ECDSA_SHA384]: "SHA-384",
 };
@@ -129,26 +129,57 @@ export function parseCertificate(der: Uint8Array): Certificate {
 
 /**
  * Convert a DER ECDSA signature (SEQUENCE{r,s}) to raw r||s for WebCrypto.
+ * Strict content rules: the SEQUENCE must span the whole buffer and hold
+ * exactly two positive INTEGERs without redundant sign padding. (Length
+ * octets are bounds-checked by the DER reader but not checked for
+ * minimality, so encoding uniqueness is not fully guaranteed.)
  * @param der DER signature
  * @param size curve component size in bytes
  */
 function ecdsaDerToRaw(der: Uint8Array, size: number): Uint8Array {
   const seq = readTLV(der, 0);
-  const [r, s] = readChildren(der, seq);
-  if (!r || !s || r.tag !== TAG.INTEGER || s.tag !== TAG.INTEGER) {
+  if (seq.tag !== TAG.SEQUENCE || seq.end !== der.length) {
+    throw new C8sVerifyError("invalid_cert", "malformed ECDSA signature");
+  }
+  const ints = readChildren(der, seq);
+  if (ints.length !== 2 || ints.some((n) => n.tag !== TAG.INTEGER)) {
     throw new C8sVerifyError("invalid_cert", "malformed ECDSA signature");
   }
   const out = new Uint8Array(size * 2);
   const place = (int: Uint8Array, off: number): void => {
     let v = int;
-    // Strip a leading 0x00 sign byte; left-pad to `size`.
-    if (v.length > size && v[0] === 0x00) v = v.subarray(v.length - size);
+    if (v.length === 0 || (v[0] & 0x80) !== 0) {
+      throw new C8sVerifyError("invalid_cert", "ECDSA integer is empty or negative");
+    }
+    // A leading 0x00 is only valid DER when it clears a would-be sign bit.
+    if (v[0] === 0x00 && v.length > 1) {
+      if ((v[1] & 0x80) === 0) {
+        throw new C8sVerifyError("invalid_cert", "non-minimal ECDSA integer encoding");
+      }
+      v = v.subarray(1);
+    }
     if (v.length > size) throw new C8sVerifyError("invalid_cert", "ECDSA integer too large");
     out.set(v, off + (size - v.length));
   };
-  place(r.content, 0);
-  place(s.content, size);
+  place(ints[0].content, 0);
+  place(ints[1].content, size);
   return out;
+}
+
+/** Verify an ASN.1 DER ECDSA signature with a certificate public key. */
+export async function verifyECDSASignature(
+  cert: Certificate,
+  message: Uint8Array,
+  signatureDER: Uint8Array,
+  hash: "SHA-256" | "SHA-384",
+): Promise<boolean> {
+  const size = CURVE_SIZE[cert.spkiCurve ?? ""];
+  if (!size) {
+    throw new C8sVerifyError("invalid_cert", "unsupported EC curve for signature verification");
+  }
+  const key = await importPublicKey(cert);
+  const signature = ecdsaDerToRaw(signatureDER, size);
+  return subtle().verify({ name: "ECDSA", hash }, key, signature, message);
 }
 
 /**
@@ -207,14 +238,13 @@ export async function verifySignedBy(
   if (!hash) {
     throw new C8sVerifyError("cert_chain", `unsupported signature algorithm ${child.sigAlgOID}`);
   }
-  const size = CURVE_SIZE[issuer.spkiCurve ?? ""];
-  if (!size) {
+  // Pre-checked here so an unsupported CA curve reports as cert_chain rather
+  // than verifyECDSASignature's generic invalid_cert.
+  if (!CURVE_SIZE[issuer.spkiCurve ?? ""]) {
     throw new C8sVerifyError("cert_chain", "unsupported CA key curve");
   }
 
-  const caKey = await importPublicKey(issuer);
-  const rawSig = ecdsaDerToRaw(child.signatureDER, size);
-  const ok = await subtle().verify({ name: "ECDSA", hash }, caKey, rawSig, child.tbs);
+  const ok = await verifyECDSASignature(issuer, child.tbs, child.signatureDER, hash);
   if (!ok) {
     throw new C8sVerifyError("cert_chain", "certificate signature does not verify against CA");
   }

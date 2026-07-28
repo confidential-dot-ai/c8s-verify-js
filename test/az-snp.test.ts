@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { verifySnp, verifyAzSnp } from "../src/wasm-loader.js";
-import { verifyEvidence, expectedReportData } from "../src/verify.js";
+import { verifyEvidence } from "../src/verify.js";
 import { snpReportFromHcl } from "../src/hcl.js";
-import { base64UrlToBytes } from "../src/base64.js";
+import { base64UrlToBytes, concatBytes } from "../src/base64.js";
+import { subtle } from "../src/crypto-env.js";
 import { C8sVerifyError } from "../src/errors.js";
 import type { Evidence, AzSnpEvidence } from "../src/hcl.js";
 
@@ -190,16 +191,21 @@ test("verifyEvidence(platform:az-snp) rejects tampered evidence (HW signature fa
   );
 });
 
-// A REAL c8s LB bundle (full c8s-verify/v1 shape) captured from a live cluster.
+// A real pre-release c8s LB bundle captured from a live cluster.
 // Unlike the coco fixture's 9-byte ASCII nonce, its vTPM quote binds the
 // production 48-byte freshness anchor SHA-384(x25519 ‖ mlkem768 ‖ nonce), so this
-// exercises the actual over-encryption binding shape end to end.
-test("verifyEvidence(platform:az-snp) verifies a real LB bundle's production freshness anchor", async () => {
+// exercises a production-sized quote freshness anchor end to end.
+test("verifyEvidence(platform:az-snp) verifies a captured LB freshness anchor", async () => {
   const bundle = JSON.parse(await readFile(join(FIX, "az-snp-bundle.json"), "utf8"));
-  const expected = await expectedReportData(
-    base64UrlToBytes(bundle.session_pubkey.x25519),
-    base64UrlToBytes(bundle.session_pubkey.mlkem768),
-    base64UrlToBytes(bundle.nonce),
+  const expected = new Uint8Array(
+    await subtle().digest(
+      "SHA-384",
+      concatBytes(
+        base64UrlToBytes(bundle.session_pubkey.x25519),
+        base64UrlToBytes(bundle.session_pubkey.mlkem768),
+        base64UrlToBytes(bundle.nonce),
+      ),
+    ),
   );
 
   const res = await verifyEvidence(bundle.evidence, {
