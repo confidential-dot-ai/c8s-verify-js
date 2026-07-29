@@ -161,6 +161,33 @@ test("accepts the matching RTMR[3]", async () => {
   assert.equal(id.launchDigest, MRTD);
 });
 
+// An unpinned attestation is not a weaker check but a different one: it answers
+// "is this a genuine TEE" while the caller believes it answered "is this MY
+// cluster's CDS". The images are reproducible, so anyone can satisfy the former
+// — and the mesh CA and allowlist derived from such an identity belong to a
+// cluster the caller never chose. verifyAttestation has always refused this.
+test("refuses to attest CDS without a measurement allowlist", async () => {
+  const pem = await cdsIdentity();
+  for (const [name, policy] of [
+    ["absent", { at: AT }],
+    ["empty", { measurements: [], at: AT }],
+    ["blank entries", { measurements: ["", "   "], at: AT }],
+  ] as const) {
+    await assert.rejects(
+      attestCDSIdentity(pem, policy as never),
+      isError("invalid_request", "measurements allowlist"),
+      `${name} allowlist must be refused`,
+    );
+  }
+});
+
+test("refuses a measurement allowlist holding non-strings", async () => {
+  await assert.rejects(
+    attestCDSIdentity(await cdsIdentity(), { measurements: [MRTD, 42] } as never),
+    isError("invalid_request", "must be strings"),
+  );
+});
+
 // An empty pin used to be falsy and so silently disabled the check — the exact
 // "configured but enforcing nothing" state this library refuses everywhere else.
 test("refuses an empty expectedRtmr3 rather than silently dropping the pin", async () => {

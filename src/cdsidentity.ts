@@ -97,11 +97,16 @@ export interface CDSIdentity {
 /** What the caller pins when attesting CDS. */
 export interface CDSPolicy {
   /**
-   * Accepted hex launch measurements. Empty accepts any genuine TEE, which
-   * proves the CA came from real confidential hardware but NOT from your
-   * cluster.
+   * Accepted hex launch measurements. Required and non-empty.
+   *
+   * Without it, attestation proves "a genuine TEE running something" — the
+   * c8s images are reproducible and open source, so anyone can stand up an
+   * instance and be attested. An unpinned CDS identity therefore vouches for a
+   * mesh CA and an allowlist belonging to a cluster you have never heard of,
+   * which reads exactly like success. verifyAttestation has refused an empty
+   * allowlist since it existed; this is the same rule.
    */
-  measurements?: string[];
+  measurements: string[];
   /** Expected TDX RTMR[3] as 96 hex chars — pins the deployment, not just the image. */
   expectedRtmr3?: string;
   /**
@@ -134,6 +139,36 @@ const isSentinel = (d: Uint8Array): boolean => d.every((b) => b === 0);
 
 /** Message of a thrown value, without assuming it is an Error. */
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message ?? e);
+
+/**
+ * Normalise the measurement allowlist, refusing an empty one.
+ *
+ * An unpinned attestation is not a weaker check, it is a different check: it
+ * answers "is this a genuine TEE" when the caller believes it answered "is this
+ * MY cluster's CDS". Since the images are reproducible, anyone can satisfy the
+ * former, and the mesh CA and allowlist derived from such an identity belong to
+ * a cluster the caller never chose. verifyAttestation has always refused an
+ * empty allowlist; a trust root has no business being laxer than the thing it
+ * anchors.
+ */
+function requireMeasurements(policy: CDSPolicy): string[] {
+  if (!policy || !Array.isArray(policy.measurements)) {
+    fail("invalid_request", "attesting CDS requires a measurements allowlist");
+  }
+  if (policy.measurements.some((m) => typeof m !== "string")) {
+    fail("invalid_request", "measurement allowlist entries must be strings");
+  }
+  const allowed = policy.measurements.map((m) => m.trim().toLowerCase()).filter(Boolean);
+  if (allowed.length === 0) {
+    fail(
+      "invalid_request",
+      "attesting CDS requires a non-empty measurements allowlist: without one this proves the " +
+        "certificate came from some genuine TEE, not from your cluster — the c8s images are " +
+        "reproducible, so anyone can stand up an instance that passes",
+    );
+  }
+  return allowed;
+}
 
 /** True when the claims actually carry this digest (not the "unset" sentinel). */
 export const hasDigest = (d: Uint8Array): boolean =>
@@ -168,8 +203,10 @@ export function cdsIdentityPEM(doc: DiscoveryDocument): string {
  */
 export async function attestCDSIdentity(
   certPEM: string | Uint8Array,
-  policy: CDSPolicy = {},
+  policy: CDSPolicy,
 ): Promise<CDSIdentity> {
+  const allowed = requireMeasurements(policy);
+
   // decodeOnePEM, not decodePEM(...)[0]: a discovery document shipping a bundle
   // would otherwise have its first certificate attested and the rest silently
   // dropped, and "which one did we actually verify?" is not a question a trust
@@ -315,12 +352,11 @@ export async function attestCDSIdentity(
   }
 
   const launchDigest = String(result.claims.launch_digest).toLowerCase();
-  const allowed = (policy.measurements ?? []).map((m) => m.trim().toLowerCase()).filter(Boolean);
-  if (allowed.length > 0 && !allowed.includes(launchDigest)) {
+  if (!allowed.includes(launchDigest)) {
     fail(
       "cds_identity_denied",
       `cds_identity launch measurement ${launchDigest} is not in the allowlist`,
-      { details: { measurement: launchDigest } },
+      { details: { measurement: launchDigest, allowed } },
     );
   }
 
