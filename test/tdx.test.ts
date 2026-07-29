@@ -137,3 +137,91 @@ test('verifyEvidence platform:"tdx" maps a stale anchor to report_data_mismatch'
     (e: unknown) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
   );
 });
+
+// RTMR[3] of the TD that produced the fixture. Unlike MRTD, this register is
+// extended after launch — on a c8s node with the operator public key bound at
+// boot — so it identifies a specific deployment rather than a build. Pinning it
+// is what separates "a genuine instance of the audited image" (which anyone can
+// stand up, since the image is reproducible) from "this operator's cluster".
+const TDX_RTMR3 =
+  "21df104d732e863ffd57be4311de7ac2721b29550bc482ec1d2e85d572bfcb9c669b7f498d5910f9ba5a795209f215a6";
+
+test('verifyEvidence platform:"tdx" accepts a matching RTMR[3] pin', async () => {
+  const { evidence } = await tdxBundle();
+  const res = await verifyEvidence(evidence, {
+    platform: "tdx",
+    measurements: [TDX_MRTD],
+    expectedRtmr3: TDX_RTMR3,
+  });
+  assert.equal(res.ok, true);
+  assert.equal((res.claims.platform_data as Record<string, unknown>).rtmr_3, TDX_RTMR3);
+});
+
+test('verifyEvidence platform:"tdx" denies a wrong RTMR[3] pin', async () => {
+  const { evidence } = await tdxBundle();
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "tdx",
+      measurements: [TDX_MRTD],
+      expectedRtmr3: "ff".repeat(48),
+    }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
+  );
+});
+
+// The pin must survive a correct measurement: a matching MRTD says the right
+// code booted, and must not be allowed to stand in for deployment identity.
+test('verifyEvidence platform:"tdx" denies a wrong RTMR[3] even when MRTD matches', async () => {
+  const { evidence } = await tdxBundle();
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "tdx",
+      measurements: [TDX_MRTD],
+      expectedRtmr3: TDX_RTMR3.slice(0, 94) + "00",
+    }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
+  );
+});
+
+// The register is TDX-only and the verifier consults it only on the TDX path,
+// so a pin combined with any other platform must be refused up front rather
+// than silently dropped — a pin that looks configured and enforces nothing is
+// worse than no pin.
+test("verifyEvidence refuses an RTMR[3] pin on a non-TDX platform", async () => {
+  const { evidence } = await tdxBundle();
+  for (const platform of ["snp", "az-snp", "az-tdx"]) {
+    await assert.rejects(
+      verifyEvidence(evidence, {
+        platform,
+        generation: "milan",
+        measurements: [TDX_MRTD],
+        expectedRtmr3: TDX_RTMR3,
+      }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      `platform ${platform} must refuse the pin`,
+    );
+  }
+});
+
+test("verifyEvidence refuses a malformed RTMR[3] pin", async () => {
+  const { evidence } = await tdxBundle();
+  for (const bad of ["", "deadbeef", "z".repeat(96), TDX_RTMR3.slice(0, 95)]) {
+    await assert.rejects(
+      verifyEvidence(evidence, {
+        platform: "tdx",
+        measurements: [TDX_MRTD],
+        expectedRtmr3: bad,
+      }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      `pin ${JSON.stringify(bad)} must be refused`,
+    );
+  }
+});
+
+// Omitting the pin must stay valid: existing callers keep working, and the
+// result then carries no rtmr3_match at all.
+test('verifyEvidence platform:"tdx" without a pin does not check RTMR[3]', async () => {
+  const { evidence } = await tdxBundle();
+  const res = await verifyEvidence(evidence, { platform: "tdx", measurements: [TDX_MRTD] });
+  assert.equal(res.ok, true);
+});

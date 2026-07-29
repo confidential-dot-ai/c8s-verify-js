@@ -8,6 +8,7 @@ export type C8sErrorCode =
   | "verification_failed"
   | "report_data_mismatch"
   | "measurement_denied"
+  | "rtmr3_denied"
   | "invalid_cert"
   | "cert_chain"
   | "identity_binding"

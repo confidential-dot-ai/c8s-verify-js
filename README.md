@@ -53,7 +53,27 @@ nonce) and proxy you to it. Every measurement and freshness check passes — you
 end up with a confidential channel to a genuine-but-attacker-operated LB, forwarding to
 *their* backend pods. The one value that is unique per cluster is the **mesh CA key**,
 which is generated inside the CDS TEE; image hashes are not. So we have to pin *something*
-cluster-unique, and today that something is the mesh CA certificate.
+cluster-unique, and the mesh CA certificate is one such value.
+
+On Intel TDX there is a second, better one: **RTMR[3]**, pinned via
+`expectedRtmr3`. It is a runtime measurement register, extended after launch —
+on a c8s node, with the operator public key bound at boot, and with any
+per-workload measurements chained on top. That makes it cluster-unique for the
+same reason the mesh CA key is, but with two advantages:
+
+| | mesh CA pin | RTMR[3] pin |
+|---|---|---|
+| cluster-unique | yes | yes |
+| survives a reinstall | **no** — regenerated inside the CDS TEE | **yes** |
+| survives an image rebuild | no | yes |
+| publishable in advance | awkward: it must first be observed | yes — derived offline from a public key |
+
+So the mesh CA has to be re-pinned every time the cluster is reinstalled,
+whereas the operator key is chosen by the operator and can be published ahead of
+time (the expected register value is `SHA-384(0x00*48 ‖ SHA-384(pubkey))`).
+Pinning both is strictly stronger than either alone; `expectedRtmr3` is optional
+only for backwards compatibility, and SNP has no equivalent register, so it is
+rejected on any platform other than `"tdx"` rather than silently ignored.
 
 The protocol closes the copied-public-chain gap in two ways:
 
@@ -89,6 +109,11 @@ const client = new C8sClient({
   baseUrl: "https://lb.example.com",
   measurements: ["<expected hex SHA-384 launch digest>"], // pinned out of band
   meshCaPem: pinnedMeshCaPem,                              // pinned CDS/mesh CA anchor
+  // Intel TDX only. Pins the deployment, not just the build: RTMR[3] carries the
+  // operator key bound at launch, so a genuine-but-someone-else's cluster running
+  // the same audited image is rejected. SHA-384(0x00*48 ‖ SHA-384(operator pubkey)).
+  platform: "tdx",
+  expectedRtmr3: "<expected hex SHA-384 RTMR[3]>",
 });
 
 // Generates a nonce, fetches the LB attestation, verifies the TEE evidence,

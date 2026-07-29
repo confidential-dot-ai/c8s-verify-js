@@ -27,6 +27,26 @@ export interface VerifyPolicy {
   meshCaPem: string;
   /** validity reference time (default now) */
   at?: Date;
+  /**
+   * Expected TDX RTMR[3] (96 hex chars), pinned out of band. Optional.
+   *
+   * `measurements` pins the *code*, but the c8s images are open source and
+   * reproducible, so a valid launch digest only proves "a genuine instance of
+   * the audited build on real silicon" — which an attacker can also stand up
+   * and proxy you to. RTMR[3] is extended after launch with the operator key
+   * bound at boot (and any per-workload measurements chained onto it), so it
+   * is unique to a deployment. Pinning it is what makes the verdict "this
+   * operator's cluster" rather than "some genuine cluster".
+   *
+   * Complements `meshCaPem`, which is also cluster-unique but is regenerated
+   * inside the CDS TEE on every install; the operator key survives reinstalls
+   * and image rebuilds, so it can be published in advance.
+   *
+   * TDX only — the register does not exist on SNP, and the verifier consults
+   * it only on the TDX path. Combining it with any other platform is rejected
+   * rather than silently ignored.
+   */
+  expectedRtmr3?: string;
 }
 
 export interface SessionPubKeyB64 {
@@ -62,6 +82,12 @@ export interface WasmVerifyResult {
   report_version?: number;
   report_data_match: boolean | null;
   collateral_verified?: boolean;
+  /**
+   * RTMR[3] comparison result, present only when a pin was supplied. The
+   * verifier core omits the field entirely when it never performed the
+   * comparison, so `undefined` means "not checked" — never "fine".
+   */
+  rtmr3_match?: boolean | null;
   claims: WasmClaims;
 }
 
@@ -109,6 +135,24 @@ function errMessage(e: unknown): string {
   return String((e as { message?: unknown })?.message ?? e);
 }
 
+/** The TDX verifier reports the registers under claims.platform_data. */
+function rtmr3FromClaims(result: WasmVerifyResult): string {
+  const pd = result.claims.platform_data as Record<string, unknown> | undefined;
+  const rtmr3 = pd?.rtmr_3;
+  return typeof rtmr3 === "string" ? rtmr3 : "";
+}
+
+/**
+ * The TDX verifier throws on an RTMR[3] mismatch (it fails closed rather than
+ * only reporting), so recognise that specific throw and surface it as
+ * rtmr3_denied instead of the generic verification_failed used for chain and
+ * signature failures. A caller distinguishing "wrong cluster" from "broken
+ * evidence" needs the codes to differ.
+ */
+function isRtmr3Mismatch(e: unknown): boolean {
+  return /RTMR\[3\] does not match/i.test(errMessage(e));
+}
+
 interface PreparedIdentity {
   chain: ChainResult;
   proof: MeshIdentityProof;
@@ -125,6 +169,31 @@ function validatePolicy(policy: VerifyPolicy): void {
   if (typeof policy.meshCaPem !== "string" || policy.meshCaPem.trim() === "") {
     fail("identity_binding", "verification requires meshCaPem pinned out of band");
   }
+  if (policy.expectedRtmr3 !== undefined) {
+    // Reject here rather than at verification time: a pin the verifier would
+    // silently drop is worse than no pin, because the caller believes it is
+    // enforcing deployment identity.
+    const platform = policy.platform ?? "snp";
+    if (platform !== "tdx") {
+      fail(
+        "invalid_request",
+        `expectedRtmr3 requires platform "tdx" (got ${JSON.stringify(platform)}): the runtime measurement register is TDX-only, so the pin could not be enforced`,
+      );
+    }
+    if (
+      typeof policy.expectedRtmr3 !== "string" ||
+      !/^[0-9a-fA-F]{96}$/.test(policy.expectedRtmr3)
+    ) {
+      fail("invalid_request", "expectedRtmr3 must be 96 hex characters (48 bytes, SHA-384)");
+    }
+  }
+}
+
+/** Decode a 96-hex-char RTMR[3] pin. Callers validate the shape first. */
+function decodeRtmr3(hex: string): Uint8Array {
+  const out = new Uint8Array(48);
+  for (let i = 0; i < 48; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
 }
 
 function decodeSessionPublicKey(
@@ -209,6 +278,7 @@ async function verifyHardwareAttestation(
   expected: Uint8Array,
   wantPlatform: string,
   requireFreshness: boolean,
+  expectedRtmr3?: Uint8Array,
 ): Promise<WasmVerifyResult> {
   // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
   // + vTPM quote + hardware quote), with the transcript checked against the TPM
@@ -229,7 +299,8 @@ async function verifyHardwareAttestation(
     let out: string;
     if (isAzSnp) out = await verifyAzSnp(JSON.stringify(bundle.evidence), hardAnchor);
     else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor);
-    else if (isTdx) out = await verifyTdx(JSON.stringify(bundle.evidence), hardAnchor);
+    else if (isTdx)
+      out = await verifyTdx(JSON.stringify(bundle.evidence), hardAnchor, undefined, expectedRtmr3);
     else out = await verifySnp(bundle.evidence, bundle.generation, expected);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
@@ -240,6 +311,13 @@ async function verifyHardwareAttestation(
         { details: { expected: bytesToHex(expected) }, cause: e },
       );
     }
+    if (expectedRtmr3 !== undefined && isRtmr3Mismatch(e)) {
+      fail(
+        "rtmr3_denied",
+        "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from",
+        { details: { expected: bytesToHex(expectedRtmr3) }, cause: e },
+      );
+    }
     fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
 
@@ -248,6 +326,26 @@ async function verifyHardwareAttestation(
   }
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
+  }
+  // The WASM entry point already throws on a mismatch, but do not rely on that
+  // alone: the verifier core only *records* the comparison, and an older or
+  // substituted verifier build that ignored the argument would return a
+  // perfectly valid-looking result with the field absent. Require an explicit
+  // true — `undefined` means the comparison never ran, which is a failure, not
+  // an absence.
+  if (expectedRtmr3 !== undefined && result.rtmr3_match !== true) {
+    fail(
+      "rtmr3_denied",
+      result.rtmr3_match === false
+        ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
+        : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
+      {
+        details: {
+          expected: bytesToHex(expectedRtmr3),
+          got: rtmr3FromClaims(result),
+        },
+      },
+    );
   }
   return result;
 }
@@ -305,6 +403,7 @@ export async function verifyAttestation(
     identity.transcript,
     wantPlatform,
     requireFreshness,
+    policy.expectedRtmr3 === undefined ? undefined : decodeRtmr3(policy.expectedRtmr3),
   );
   const measurement = verifyMeasurement(result, policy.measurements);
   verifyFreshness(result, identity.transcript, requireFreshness, warnings);
@@ -360,6 +459,13 @@ export interface VerifyEvidenceOptions {
    * "tdx" for bare-metal Intel TDX DCAP evidence
    */
   platform?: string;
+  /**
+   * expected TDX RTMR[3] (96 hex chars), pinned out of band; a mismatch fails
+   * closed. Where `measurements` pins the build, this pins the deployment —
+   * RTMR[3] carries the operator key bound at launch, which a reproducible
+   * image digest cannot. Requires `platform: "tdx"`.
+   */
+  expectedRtmr3?: string;
 }
 
 export interface EvidenceResult {
@@ -406,6 +512,19 @@ export async function verifyEvidence(
   if (!isVtpm && !isTdx && !opts.generation) {
     fail("invalid_request", 'generation is required ("milan" | "genoa" | "turin")');
   }
+  let wantRtmr3: Uint8Array | undefined;
+  if (opts.expectedRtmr3 !== undefined) {
+    if (!isTdx) {
+      fail(
+        "invalid_request",
+        `expectedRtmr3 requires platform "tdx" (got ${JSON.stringify(wantPlatform)}): the runtime measurement register is TDX-only, so the pin could not be enforced`,
+      );
+    }
+    if (typeof opts.expectedRtmr3 !== "string" || !/^[0-9a-fA-F]{96}$/.test(opts.expectedRtmr3)) {
+      fail("invalid_request", "expectedRtmr3 must be 96 hex characters (48 bytes, SHA-384)");
+    }
+    wantRtmr3 = decodeRtmr3(opts.expectedRtmr3);
+  }
   const expected = opts.expectedReportData;
 
   // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
@@ -414,13 +533,20 @@ export async function verifyEvidence(
     let out: string;
     if (isAzSnp) out = await verifyAzSnp(JSON.stringify(evidence), expected);
     else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected);
-    else if (isTdx) out = await verifyTdx(JSON.stringify(evidence), expected);
+    else if (isTdx) out = await verifyTdx(JSON.stringify(evidence), expected, undefined, wantRtmr3);
     else out = await verifySnp(evidence, opts.generation!, expected);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
     // The vTPM/tdx verifiers fail closed (throw) on a freshness mismatch when an
     // anchor is supplied — map it to the precise report_data_mismatch code
     // instead of the generic verification_failed used for chain/signature failures.
+    if (wantRtmr3 !== undefined && isRtmr3Mismatch(e)) {
+      fail(
+        "rtmr3_denied",
+        "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from",
+        { details: { expected: bytesToHex(wantRtmr3) }, cause: e },
+      );
+    }
     if ((isVtpm || isTdx) && expected !== undefined && isFreshnessMismatch(e)) {
       fail(
         "report_data_mismatch",
@@ -436,6 +562,20 @@ export async function verifyEvidence(
   }
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
+  }
+
+  // Same reasoning as verifyAttestation: the WASM entry point throws on a
+  // mismatch, but an older or substituted verifier build that ignored the
+  // argument would return a valid-looking result with the field absent.
+  // Require an explicit true.
+  if (wantRtmr3 !== undefined && result.rtmr3_match !== true) {
+    fail(
+      "rtmr3_denied",
+      result.rtmr3_match === false
+        ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
+        : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
+      { details: { expected: bytesToHex(wantRtmr3), got: rtmr3FromClaims(result) } },
+    );
   }
 
   // Measurement allowlist (case-insensitive hex).
