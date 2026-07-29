@@ -55,6 +55,12 @@ end up with a confidential channel to a genuine-but-attacker-operated LB, forwar
 which is generated inside the CDS TEE; image hashes are not. So we have to pin *something*
 cluster-unique, and the mesh CA certificate is one such value.
 
+**That pin is no longer mandatory.** CDS's own RA-TLS certificate carries hardware
+evidence over a `config-claims` extension that commits the SHA-256 of the mesh CA
+it issues under, and those claims are folded into the TDX quote's REPORTDATA. So a
+verified CDS identity *authenticates* the mesh CA, and the anchor becomes derived
+rather than assumed — see [Deriving the mesh CA](#deriving-the-mesh-ca-attesting-cds).
+
 On Intel TDX there is a second, better one: **RTMR[3]**, pinned via
 `expectedRtmr3`. It is a runtime measurement register, extended after launch —
 on a c8s node, with the operator public key bound at boot, and with any
@@ -84,9 +90,9 @@ The protocol closes the copied-public-chain gap in two ways:
 
 The identity signature is ECDSA, so authentication is currently classical. The
 channel key combines X25519 and ML-KEM-768; its recorded-traffic confidentiality
-is post-quantum as long as ML-KEM-768 remains secure. A future measurement-driven
-anchor may replace the pinned CA certificate, but it must still commit to a
-cluster-unique value.
+is post-quantum as long as ML-KEM-768 remains secure. The derived anchor described below is that
+measurement-driven replacement: it still commits to a cluster-unique value, but
+the commitment is checked rather than trusted.
 
 ## Library
 
@@ -109,6 +115,8 @@ const client = new C8sClient({
   baseUrl: "https://lb.example.com",
   measurements: ["<expected hex SHA-384 launch digest>"], // pinned out of band
   meshCaPem: pinnedMeshCaPem,                              // pinned CDS/mesh CA anchor
+  //   ^ or drop it and pass `cdsIdentity` instead, to derive the anchor from
+  //     attested claims. Exactly one of the two is required.
   // Intel TDX only. Pins the deployment, not just the build: RTMR[3] carries the
   // operator key bound at launch, so a genuine-but-someone-else's cluster running
   // the same audited image is rejected. SHA-384(0x00*48 ‖ SHA-384(operator pubkey)).
@@ -164,6 +172,118 @@ const r = await verifyEvidence(evidence /* { attestation_report, cert_chain:{ vc
 });
 console.log(r.measurement, r.reportDataMatch, r.claims);
 ```
+
+## Deriving the mesh CA (attesting CDS)
+
+The mesh CA used to be trusted because an operator sent you the file. It does not
+have to be. CDS runs in its own TEE and its RA-TLS certificate carries a
+`config-claims` extension (OID `1.3.6.1.4.1.59888.1.3`) committing:
+
+| claim | what it pins |
+|---|---|
+| `meshCaDigest` | SHA-256 of the mesh CA CDS issues under (claims v2+) |
+| `allowlistDigest` | SHA-256 of the allowlist CDS is serving **now** (claims v3+) |
+| `operatorKeysDigest` | the operator key set authorized to mutate the allowlist |
+| `seedDigest` | the allowlist seed loaded at boot |
+
+Those claim bytes are folded into the TDX quote's REPORTDATA together with the
+certificate's public key, so the evidence vouches for *this certificate carrying
+exactly these claims*. Verify it once and both the CA and the admission policy
+become derived values.
+
+```js
+import { C8sClient, attestCDSIdentity, verifyAllowlist, MemoryCDSIdentityCache } from "c8s-verify";
+
+// `cds_identity.certificate_pem` from the front door's discovery document. It is
+// safe to fetch from an untrusted front door: it is self-authenticating, so a
+// substituted or edited copy simply fails to verify.
+const client = new C8sClient({
+  baseUrl: "https://lb.example.com",
+  measurements: ["<expected LB launch digest>"],
+  cdsIdentity: {
+    certificatePem: discovery.cds_identity.certificate_pem,
+    policy: {
+      measurements: ["<expected CDS launch digest>"], // required, and non-empty
+      expectedRtmr3: "<expected RTMR[3]>",            // recommended
+    },
+    cache: new MemoryCDSIdentityCache(),              // optional, see below
+  },
+});
+const session = await client.connect();
+```
+
+The client matches the attested `meshCaDigest` against the certificates the server
+serves beside its leaf and pins **exactly that one certificate**, re-encoded on its
+own. It never pins the served chain: hardware vouched for one certificate, and
+trusting the bundle it arrived in would trust every block in it. `meshCaPem` and
+`cdsIdentity` are mutually exclusive — pass exactly one.
+
+To check the served allowlist against the same attested claims:
+
+```js
+const id = await attestCDSIdentity(discovery.cds_identity.certificate_pem, {
+  measurements: ["<expected CDS launch digest>"],
+});
+const res = await fetch("https://lb.example.com/allowlist");
+// The RAW response bytes — CDS commits SHA-256 over the canonical bytes it
+// serves, so a re-serialized copy is a different digest.
+await verifyAllowlist(id, new Uint8Array(await res.arrayBuffer()));
+```
+
+### Caching, and refusing a downgrade
+
+CDS re-issues its certificate whenever the live allowlist changes, so the
+certificate fingerprint is an exact invalidation signal — no staleness window to
+tune. `attestCDSIdentityCached` uses it, and does one thing plain attestation
+cannot: it remembers the last verified `notBefore` and **refuses a certificate
+older than one already seen**.
+
+That matters because a single attestation cannot tell yesterday's genuine
+certificate from today's. Yesterday's certificate and yesterday's allowlist are
+internally consistent and correctly signed by real hardware; the only thing wrong
+with the pair is that a newer one exists. Replaying it rolls the admission policy
+back. Comparing issuance times turns that into something checkable.
+
+```js
+import { attestCDSIdentityCached, StorageCDSIdentityCache } from "c8s-verify";
+
+const cache = new StorageCDSIdentityCache(localStorage); // survives reloads
+const id = await attestCDSIdentityCached(pem, policy, cache, "lb.example.com");
+if (id.cached) console.log("reused a verified verdict; no WASM ran");
+```
+
+A rollback throws `cds_identity_rollback`, naming both fingerprints and both
+timestamps. Set `policy.allowRollback` for a deliberate re-bootstrap (cluster
+reinstalled, CDS re-keyed).
+
+The comparison is only sound because `attestCDSIdentity` verifies the
+certificate's **self-signature** against the SPKI that REPORTDATA binds. The
+validity window sits outside the transcript, so without that check `notBefore` is
+attacker-chosen — and so was `notAfter`, which meant a genuine certificate could
+be given a 2099 expiry and replayed forever.
+
+### Error codes
+
+| code | meaning |
+|---|---|
+| `cds_identity_missing` | the discovery document carries no `cds_identity` |
+| `cds_identity_invalid` | not a parseable CDS RA-TLS certificate |
+| `cds_identity_denied` | a check ran and failed (evidence, report-data binding, RTMR[3], measurement) |
+| `cds_identity_unsigned` | the certificate body is not signed by the attested key |
+| `cds_identity_expired` | outside its validity window at the reference time |
+| `cds_identity_rollback` | older than a certificate already verified under this cache key |
+| `mesh_ca_denied` / `allowlist_denied` | digest mismatch against the attested claims |
+| `mesh_ca_not_attested` / `allowlist_not_attested` | the claims predate the field (v1/v2), so nothing to check against |
+
+`_denied` and `_not_attested` are deliberately distinct: the first is a check that
+ran and failed, the second is a cluster older than the claim. Conflating them
+would send an operator hunting a breach that is really an upgrade.
+
+> **Server side.** Deriving the mesh CA needs a CDS that emits claims v2+ and
+> publishes `cds_identity` in its discovery document. That runtime lives on the
+> c8s `feat/cds-identity-claims` branch; against an older cluster
+> `cdsIdentity` fails closed with `cds_identity_missing` or
+> `mesh_ca_not_attested`, and `meshCaPem` remains the way to anchor.
 
 ## Demo
 

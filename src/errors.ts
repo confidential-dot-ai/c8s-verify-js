@@ -22,6 +22,19 @@ export type C8sErrorCode =
   | "cds_identity_missing"
   | "cds_identity_invalid"
   | "cds_identity_denied"
+  // The certificate body — validity window, serial, subject — sits OUTSIDE the
+  // REPORTDATA transcript, which covers only the SPKI and the config-claims
+  // bytes. It is trustworthy only because the certificate self-signs with the
+  // key REPORTDATA bound, so these two are separate failures from
+  // "_denied": the hardware evidence was fine and the certificate around it
+  // was not.
+  | "cds_identity_unsigned"
+  | "cds_identity_expired"
+  // A newly presented CDS certificate that is older than one already verified.
+  // Distinct from every other failure because nothing is forged: each half is
+  // internally consistent, and the attack is serving yesterday's genuine
+  // (certificate, allowlist) pair to roll back the admission policy.
+  | "cds_identity_rollback"
   | "mesh_ca_denied"
   | "mesh_ca_not_attested"
   | "allowlist_denied"

@@ -261,3 +261,29 @@ test("verifyEvidence rejects missing options with a typed error", async () => {
     (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
   );
 });
+
+// A multi-block meshCaPem means "each of these is independently trusted as an
+// anchor", and selectPinnedCA anchors to whichever one the proof names. That is
+// the documented contract, and also what a caller gets by accident if they pass
+// a chain the SERVER handed them — at which point the pin is not a pin. It
+// still verifies (the named block really is pinned), but it must not do so
+// quietly.
+test("warns when meshCaPem pins more than one certificate", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const { leafPem } = await loadFixtures();
+  // A second, unrelated block alongside the real anchor.
+  const r = await verifyAttestation(bundle, nonce, policy(meshCaPem + leafPem));
+  assert.equal(r.ok, true);
+  assert.ok(
+    r.warnings.some((w) => w.includes("pins 2 certificates and each is independently trusted")),
+    `expected a multi-anchor warning, got: ${JSON.stringify(r.warnings)}`,
+  );
+});
+
+test("a single-certificate meshCaPem produces no anchor warning", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const r = await verifyAttestation(bundle, nonce, policy(meshCaPem));
+  assert.ok(!r.warnings.some((w) => w.includes("independently trusted")));
+});

@@ -29,7 +29,8 @@ entirely on the returned payload:
    TDX roots, VCEK/DCAP collateral supplied inline — no network during
    verification).
 3. The client checks the measurement against its pinned allowlist, checks that the
-   served mesh leaf chains to a pinned **mesh CA**, and verifies a per-session proof
+   served mesh leaf chains to a **mesh CA** that is either pinned out of band or
+   *derived from attested CDS claims* (see below), and verifies a per-session proof
    of possession made by that leaf key.
 4. Only then does the client derive a **post-quantum hybrid over-encryption channel** to
    the attested per-session key, so all subsequent application traffic is end-to-end
@@ -37,6 +38,65 @@ entirely on the returned payload:
 
 The user only verifies **CDS + LB**; C8s's internal RA-TLS mesh transitively vouches for
 the backend pods the LB talks to.
+
+### Deriving the mesh CA from CDS config-claims
+
+The mesh CA may be authenticated instead of pinned. CDS's own self-signed RA-TLS
+certificate carries two extensions on the `1.3.6.1.4.1.59888.1` arc:
+
+| OID | contents |
+|---|---|
+| `…1.1` | `SEQUENCE { teeType INTEGER, report OCTET STRING, certChain OCTET STRING }`; for TDX `report` holds a JSON `{platform, evidence}` envelope |
+| `…1.3` | `config-claims`, below |
+
+```
+C8SConfigClaims ::= SEQUENCE {
+    version             INTEGER,        -- 1, 2 or 3
+    operatorKeysDigest  OCTET STRING,   -- 32 bytes
+    seedDigest          OCTET STRING,
+    workloadDigest      OCTET STRING,
+    meshCADigest        OCTET STRING,   -- v2+
+    allowlistDigest     OCTET STRING }  -- v3+
+```
+
+An all-zero digest is the "not applicable" sentinel; it is unreachable as a real
+SHA-256 output, so a verifier pinning a real value can never be satisfied by one.
+The encoding MUST be the single canonical DER encoding of its version — minimal
+lengths, a minimal `version` INTEGER, no trailing bytes — because the binding
+below covers the bytes rather than their meaning.
+
+The TD quote's `report_data` commits to those bytes:
+
+```
+REPORTDATA = SHA-384( "c8s/config-claims/v1\x00"
+                    ‖ uint64be(len(spki))   ‖ spki
+                    ‖ uint64be(len(claims)) ‖ claims
+                    ‖ uint64be(len(nonce))  ‖ nonce )   -- nonce empty for a
+                                                        -- self-signed serving cert
+```
+
+zero-padded to 64 bytes. `spki` is the PKIX SubjectPublicKeyInfo DER exactly as it
+appears in the certificate; `claims` is the raw `extnValue` of `…1.3`, verbatim.
+This is `ReportDataForKeyAndClaims` in c8s `pkg/ratls`.
+
+A client verifying this certificate MUST, in order:
+
+1. verify the TD quote and require `report_data` to equal the transcript above —
+   this is what binds the claims to hardware;
+2. verify the certificate's **self-signature** over `tbsCertificate` using the SPKI
+   the transcript just bound. The validity window, serial and subject are outside
+   the transcript, so until this step they are attacker-chosen;
+3. enforce the validity window against a reference time;
+4. enforce the launch-measurement allowlist, which MUST be non-empty.
+
+The mesh CA is then the certificate whose SHA-256 equals `meshCADigest`. A client
+MUST pin that single certificate, not the chain it was served in.
+
+Freshness comes from re-issuance, not from a timestamp: CDS re-issues this
+certificate whenever the live allowlist digest changes, so a changed fingerprint is
+exactly when to re-attest. Because an old certificate remains internally consistent,
+a client SHOULD also refuse one whose `notBefore` precedes that of a certificate it
+has already verified.
 
 ## Endpoints (LB, plain HTTPS)
 
@@ -384,10 +444,19 @@ end-to-end confidentiality to the enclave regardless of the outer TLS terminator
 
 The client MUST fail closed. Typed errors (mirroring c8s error codes) include:
 `invalid_request`, `nonce_mismatch`, `verification_failed` (signature/chain/JsError),
-`report_data_mismatch`, `measurement_denied`, `invalid_cert` / `cert_chain` (mesh leaf
-does not chain to the pinned CA or is expired), `identity_binding`, and `key_binding`.
+`report_data_mismatch`, `measurement_denied`, `rtmr3_denied`, `invalid_cert` /
+`cert_chain` (mesh leaf does not chain to the pinned CA or is expired),
+`identity_binding`, and `key_binding`.
+
+CDS attestation adds `cds_identity_missing`, `cds_identity_invalid`,
+`cds_identity_denied`, `cds_identity_unsigned`, `cds_identity_expired`,
+`cds_identity_rollback`, `mesh_ca_denied`, `mesh_ca_not_attested`,
+`allowlist_denied` and `allowlist_not_attested`. `_denied` means a check ran and
+failed; `_not_attested` means the claims never carried the field, which is an
+upgrade problem rather than an attack.
+
 Any failure aborts before the over-encryption channel is established. The policy
-rejects an empty measurement allowlist, a missing mesh-CA pin, or any version
-other than `c8s-verify/v1`. Freshness enforcement defaults to true; the
+rejects an empty measurement allowlist, an anchor that is neither a mesh-CA pin nor
+a CDS identity (or both at once), or any version other than `c8s-verify/v1`. Freshness enforcement defaults to true; the
 recorded-evidence demo explicitly disables it and reports that downgrade as a
 warning.
