@@ -44,6 +44,9 @@ export {
   hasDigest,
 } from "./cdsidentity.js";
 export type { CDSIdentity, CDSPolicy, ConfigClaims, DiscoveryDocument } from "./cdsidentity.js";
+// Callers need this to hand DER to verifyMeshCA, which takes bytes rather than
+// PEM so it hashes exactly what it was given.
+export { decodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
 export type { Evidence, SnpEvidence, AzSnpEvidence, AzTdxEvidence, TdxEvidence } from "./hcl.js";
