@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import {
   attestCDSIdentity,
   attestCDSIdentityCached,
+  selectAttestedMeshCA,
   cdsIdentityPEM,
   hasDigest,
   parseConfigClaims,
@@ -291,8 +292,9 @@ test("a re-serialized allowlist does not verify, even when equivalent", async ()
   await assert.rejects(verifyAllowlist(id, reserialized), isError("allowlist_denied"));
 });
 
-test("claims that predate a field cannot satisfy a request for it", async () => {
-  const v1: CDSIdentity = {
+/** A v1-era identity: every optional digest is the "unset" sentinel. */
+function v1Identity(): CDSIdentity {
+  return {
     fingerprint: "0".repeat(64),
     launchDigest: MRTD,
     notBefore: CERT_NOT_BEFORE,
@@ -306,6 +308,10 @@ test("claims that predate a field cannot satisfy a request for it", async () => 
       allowlistDigest: new Uint8Array(32),
     },
   };
+}
+
+test("claims that predate a field cannot satisfy a request for it", async () => {
+  const v1 = v1Identity();
   await assert.rejects(
     verifyMeshCA(v1, await meshCA()),
     isError("mesh_ca_not_attested", "claims v1"),
@@ -313,6 +319,40 @@ test("claims that predate a field cannot satisfy a request for it", async () => 
   await assert.rejects(
     verifyAllowlist(v1, new Uint8Array(await allowlistBytes())),
     isError("allowlist_not_attested", "claims v1/v2"),
+  );
+});
+
+// selectAttestedMeshCA is what the client uses to derive an anchor; it must
+// refuse the same cases verifyMeshCA does rather than quietly picking a
+// candidate when the claims vouch for none.
+test("selectAttestedMeshCA refuses when the claims carry no mesh-CA digest", async () => {
+  const v1 = v1Identity();
+  await assert.rejects(
+    selectAttestedMeshCA(v1, [await meshCA()]),
+    isError("mesh_ca_not_attested", "claims v1"),
+  );
+});
+
+test("selectAttestedMeshCA picks the attested certificate out of several", async () => {
+  const id = await attested();
+  const ca = await meshCA();
+  const decoy = decodePEM(await cdsIdentity())[0];
+  assert.deepEqual(await selectAttestedMeshCA(id, [decoy, ca, decoy]), ca);
+});
+
+test("selectAttestedMeshCA reports an empty candidate list distinctly", async () => {
+  const id = await attested();
+  await assert.rejects(
+    selectAttestedMeshCA(id, []),
+    isError("mesh_ca_denied", "served no CA certificate"),
+  );
+});
+
+test("selectAttestedMeshCA refuses when nothing matches", async () => {
+  const id = await attested();
+  await assert.rejects(
+    selectAttestedMeshCA(id, [decodePEM(await cdsIdentity())[0]]),
+    isError("mesh_ca_denied", "matches the attested mesh-CA digest"),
   );
 });
 

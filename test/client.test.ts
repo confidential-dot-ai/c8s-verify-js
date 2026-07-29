@@ -167,7 +167,10 @@ test("refuses to derive when the server serves no CA at all", async () => {
   const client = await derivingClient();
   await assert.rejects(
     client.deriveMeshCaPem(bundleServing([await readFixture("cds-identity.pem")])),
-    (e: unknown) => e instanceof C8sVerifyError && e.code === "mesh_ca_denied",
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "mesh_ca_denied" &&
+      e.message.includes("served no CA certificate"),
   );
 });
 
