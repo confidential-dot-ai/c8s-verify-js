@@ -36,6 +36,15 @@ export interface Certificate {
   spkiCurve: string | null;
   sigAlgOID: string;
   signatureDER: Uint8Array;
+  /**
+   * Extension values by OID, as the raw extnValue OCTET STRING contents.
+   *
+   * Kept raw and unparsed on purpose: the RA-TLS attestation binds the exact
+   * extension bytes a certificate carries (REPORTDATA folds in the config-claims
+   * DER verbatim), so anything that re-encodes before hashing would compute a
+   * different value for the same certificate.
+   */
+  extensions: Map<string, Uint8Array>;
 }
 
 export interface ChainResult {
@@ -114,6 +123,7 @@ export function parseCertificate(der: Uint8Array): Certificate {
 
   return {
     der,
+    extensions: parseExtensions(der, tbsChildren.slice(i)),
     tbs: tbs.bytes,
     serialHex: bytesToHex(serial.content),
     notBefore,
@@ -125,6 +135,48 @@ export function parseCertificate(der: Uint8Array): Certificate {
     sigAlgOID,
     signatureDER,
   };
+}
+
+/**
+ * Collect X.509 v3 extensions from the tbsCertificate fields that follow
+ * subjectPublicKeyInfo.
+ *
+ * Those trailing fields are the optional issuerUniqueID [1], subjectUniqueID
+ * [2] and extensions [3] EXPLICIT, so the block is located by its context tag
+ * rather than by position — a certificate carrying a uniqueID would otherwise
+ * shift it and the extensions would silently read as absent.
+ *
+ * A duplicate OID is rejected rather than resolved: X.509 forbids it, and
+ * picking either copy would let a certificate carry two different values for
+ * one extension while a verifier enforces only one of them.
+ */
+function parseExtensions(der: Uint8Array, trailing: DERNode[]): Map<string, Uint8Array> {
+  const out = new Map<string, Uint8Array>();
+  const block = trailing.find((n) => n.tag === 0xa3);
+  if (!block) return out;
+
+  const [seq] = readChildren(der, block);
+  if (seq?.tag !== TAG.SEQUENCE) {
+    throw new C8sVerifyError("invalid_cert", "extensions block is not a SEQUENCE");
+  }
+
+  for (const ext of readChildren(der, seq)) {
+    const parts = readChildren(der, ext);
+    const oidNode = parts[0];
+    const valueNode = parts[parts.length - 1];
+    if (oidNode?.tag !== TAG.OID || valueNode?.tag !== TAG.OCTET_STRING) {
+      throw new C8sVerifyError("invalid_cert", "malformed certificate extension");
+    }
+    const oid = decodeOID(oidNode.content);
+    if (out.has(oid)) {
+      throw new C8sVerifyError(
+        "invalid_cert",
+        `certificate carries extension ${oid} more than once`,
+      );
+    }
+    out.set(oid, valueNode.content);
+  }
+  return out;
 }
 
 /**

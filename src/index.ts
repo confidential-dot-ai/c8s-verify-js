@@ -35,6 +35,18 @@ export type {
   VerifyEvidenceOptions,
   CertInfo,
 } from "./verify.js";
+export {
+  attestCDSIdentity,
+  cdsIdentityPEM,
+  verifyMeshCA,
+  verifyAllowlist,
+  parseConfigClaims,
+  hasDigest,
+} from "./cdsidentity.js";
+export type { CDSIdentity, CDSPolicy, ConfigClaims, DiscoveryDocument } from "./cdsidentity.js";
+// Callers need this to hand DER to verifyMeshCA, which takes bytes rather than
+// PEM so it hashes exactly what it was given.
+export { decodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
 export type { Evidence, SnpEvidence, AzSnpEvidence, AzTdxEvidence, TdxEvidence } from "./hcl.js";
@@ -50,6 +62,16 @@ export interface C8sClientOptions {
   at?: Date;
   fetch?: typeof fetch;
   wellKnownPrefix?: string;
+  /**
+   * Expected TDX RTMR[3] (96 hex chars), pinned out of band. Optional but
+   * strongly recommended: `measurements` proves the node runs the audited
+   * build, not that it is *your* node — the images are reproducible, so anyone
+   * can stand up an instance with the same launch digest. RTMR[3] carries the
+   * operator key bound at launch, which is unique to a deployment and, unlike
+   * `meshCaPem`, survives reinstalls and image rebuilds. Requires
+   * `platform: "tdx"`.
+   */
+  expectedRtmr3?: string;
 }
 
 export interface RequestInit {
@@ -104,6 +126,7 @@ export class C8sClient {
       requireFreshness: opts.requireFreshness,
       meshCaPem: opts.meshCaPem,
       at: opts.at,
+      expectedRtmr3: opts.expectedRtmr3,
     };
   }
 

@@ -119,16 +119,25 @@ export async function verifyAzTdx(
  * needed. DCAP collateral checks (PCK CRL, TCB status, TD-QE identity) need an
  * async provider and are skipped in WASM: `collateral_verified` stays `false`.
  *
+ * When `expectedRtmr3` is supplied the verifier additionally requires the TD's
+ * RTMR[3] to equal it, and **throws** on a mismatch. RTMR[3] is extended after
+ * launch (on a c8s node: the operator key bound at boot, plus any per-workload
+ * measurements chained on), so unlike MRTD it identifies a specific deployment
+ * rather than a build. It is not replayable from the CCEL by construction,
+ * which is why it must be supplied rather than derived.
+ *
  * @param evidenceJson tdx evidence: { quote, cc_eventlog? } (base64 std)
  * @param expectedReportData raw bytes the TD quote report_data must equal
  * @param expectedInitDataHash bytes to bind against MRCONFIGID
+ * @param expectedRtmr3 48 raw bytes the TD's RTMR[3] must equal
  * @returns verification result JSON (or throws on any failure)
  */
 export async function verifyTdx(
   evidenceJson: string,
   expectedReportData?: Uint8Array,
   expectedInitDataHash?: Uint8Array,
+  expectedRtmr3?: Uint8Array,
 ): Promise<string> {
   await initVerifier();
-  return verify_tdx(evidenceJson, expectedReportData, expectedInitDataHash);
+  return verify_tdx(evidenceJson, expectedReportData, expectedInitDataHash, expectedRtmr3);
 }

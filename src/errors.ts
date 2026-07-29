@@ -8,11 +8,24 @@ export type C8sErrorCode =
   | "verification_failed"
   | "report_data_mismatch"
   | "measurement_denied"
+  | "rtmr3_denied"
   | "invalid_cert"
   | "cert_chain"
   | "identity_binding"
   | "key_binding"
   | "channel_error"
+  // CDS roll-up: attesting CDS once and deriving the mesh CA and allowlist from
+  // its claims. "_denied" means a check ran and failed; "_not_attested" means
+  // the target's claims never carried the field, which is an upgrade problem
+  // rather than an attack — conflating them would send an operator hunting a
+  // breach when the cluster is simply older.
+  | "cds_identity_missing"
+  | "cds_identity_invalid"
+  | "cds_identity_denied"
+  | "mesh_ca_denied"
+  | "mesh_ca_not_attested"
+  | "allowlist_denied"
+  | "allowlist_not_attested"
   | "unsupported";
 
 export interface C8sErrorOptions {
