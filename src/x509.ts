@@ -146,26 +146,63 @@ export function parseCertificate(der: Uint8Array): Certificate {
  * rather than by position — a certificate carrying a uniqueID would otherwise
  * shift it and the extensions would silently read as absent.
  *
- * A duplicate OID is rejected rather than resolved: X.509 forbids it, and
- * picking either copy would let a certificate carry two different values for
- * one extension while a verifier enforces only one of them.
+ * Anything ambiguous is rejected rather than resolved, because these bytes are
+ * what the RA-TLS attestation binds — a certificate that can be read two ways
+ * is a certificate where the value the quote committed to and the value a
+ * verifier enforces may differ:
+ *
+ *   - a duplicate OID, which X.509 forbids and which would otherwise let one
+ *     certificate carry two values for one extension;
+ *   - more than one [3] block, or a [3] holding more than one SEQUENCE, where
+ *     taking the first silently discards a second set of extensions that a
+ *     stricter parser would have seen;
+ *   - an Extension SEQUENCE that is not exactly {extnID, extnValue} or
+ *     {extnID, critical, extnValue}. Reading "the last element" instead of
+ *     validating the shape accepted {OID, OCTET STRING, NULL, OCTET STRING}
+ *     and picked the decoy — an arity the Go parser rejects outright.
  */
 function parseExtensions(der: Uint8Array, trailing: DERNode[]): Map<string, Uint8Array> {
   const out = new Map<string, Uint8Array>();
-  const block = trailing.find((n) => n.tag === 0xa3);
+  const blocks = trailing.filter((n) => n.tag === 0xa3);
+  if (blocks.length > 1) {
+    throw new C8sVerifyError(
+      "invalid_cert",
+      `certificate carries ${blocks.length} extensions blocks; exactly one [3] is permitted`,
+    );
+  }
+  const block = blocks[0];
   if (!block) return out;
 
-  const [seq] = readChildren(der, block);
-  if (seq?.tag !== TAG.SEQUENCE) {
+  const blockChildren = readChildren(der, block);
+  if (blockChildren.length !== 1) {
+    throw new C8sVerifyError("invalid_cert", "extensions [3] block must hold exactly one SEQUENCE");
+  }
+  const seq = blockChildren[0];
+  if (seq.tag !== TAG.SEQUENCE) {
     throw new C8sVerifyError("invalid_cert", "extensions block is not a SEQUENCE");
   }
 
   for (const ext of readChildren(der, seq)) {
     const parts = readChildren(der, ext);
+    // Extension ::= SEQUENCE { extnID OBJECT IDENTIFIER,
+    //                          critical BOOLEAN DEFAULT FALSE,
+    //                          extnValue OCTET STRING }
+    if (parts.length !== 2 && parts.length !== 3) {
+      throw new C8sVerifyError(
+        "invalid_cert",
+        `certificate extension has ${parts.length} elements, expected 2 or 3`,
+      );
+    }
     const oidNode = parts[0];
     const valueNode = parts[parts.length - 1];
-    if (oidNode?.tag !== TAG.OID || valueNode?.tag !== TAG.OCTET_STRING) {
+    if (oidNode.tag !== TAG.OID || valueNode.tag !== TAG.OCTET_STRING) {
       throw new C8sVerifyError("invalid_cert", "malformed certificate extension");
+    }
+    if (parts.length === 3 && parts[1].tag !== TAG.BOOLEAN) {
+      throw new C8sVerifyError(
+        "invalid_cert",
+        "certificate extension's middle element is not the critical BOOLEAN",
+      );
     }
     const oid = decodeOID(oidNode.content);
     if (out.has(oid)) {
