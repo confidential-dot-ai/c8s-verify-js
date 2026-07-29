@@ -243,6 +243,7 @@ async function prepareIdentity(
   sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array },
   nonce: Uint8Array,
   policy: VerifyPolicy,
+  warnings: string[],
 ): Promise<PreparedIdentity> {
   if (bundle?.version !== PROTOCOL_VERSION) {
     fail("identity_binding", `attestation response has unexpected version ${bundle?.version}`);
@@ -258,6 +259,20 @@ async function prepareIdentity(
   const pinnedCAs = decodePEM(policy.meshCaPem, "CERTIFICATE");
   if (leafBlocks.length === 0 || pinnedCAs.length === 0) {
     fail("invalid_cert", "identity verification requires a leaf and pinned mesh CA");
+  }
+  // Multi-block meshCaPem means "every block in here is independently trusted",
+  // and selectPinnedCA will happily anchor to whichever one the proof names.
+  // That is the documented contract, but it is also what a caller gets by
+  // accident if they pass a chain the *server* handed them — at which point the
+  // pin is not a pin. Deriving the anchor (C8sClientOptions.cdsIdentity) makes
+  // this structurally impossible by pinning exactly one attested certificate, so
+  // say so rather than silently accepting the wider trust set.
+  if (pinnedCAs.length > 1) {
+    warnings.push(
+      `meshCaPem pins ${pinnedCAs.length} certificates and each is independently trusted as an ` +
+        "anchor; pass a single CA, or use the cdsIdentity option to derive the anchor from " +
+        "attested claims",
+    );
   }
   const selectedCA = await selectPinnedCA(bundle.identity_proof, pinnedCAs);
   if (!selectedCA) {
@@ -397,7 +412,7 @@ export async function verifyAttestation(
   const wantPlatform = policy.platform ?? "snp";
   const requireFreshness = policy.requireFreshness !== false;
   const sessionPubKey = decodeSessionPublicKey(bundle, nonce);
-  const identity = await prepareIdentity(bundle, sessionPubKey, nonce, policy);
+  const identity = await prepareIdentity(bundle, sessionPubKey, nonce, policy, warnings);
   const result = await verifyHardwareAttestation(
     bundle,
     identity.transcript,

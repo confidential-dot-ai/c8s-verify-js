@@ -623,6 +623,49 @@ export async function verifyMeshCA(id: CDSIdentity, caDER: Uint8Array): Promise<
 }
 
 /**
+ * Pick, out of several served certificates, the one the attested claims vouch
+ * for — and refuse if none of them is it.
+ *
+ * This is what lets a client stop pinning the mesh CA out of band. The server
+ * hands over a chain; exactly one block in it should hash to the attested
+ * meshCADigest, and that block alone becomes the anchor. The others are not
+ * "also trusted", they are simply not selected — which is the difference
+ * between deriving an anchor and accepting a bundle.
+ */
+export async function selectAttestedMeshCA(
+  id: CDSIdentity,
+  candidates: Uint8Array[],
+): Promise<Uint8Array> {
+  if (!hasDigest(id.claims.meshCaDigest)) {
+    fail(
+      "mesh_ca_not_attested",
+      "attested claims carry no mesh-CA digest (claims v1), so the mesh CA cannot be derived — " +
+        "pin it out of band with meshCaPem, or upgrade the cluster",
+    );
+  }
+  if (candidates.length === 0) {
+    fail(
+      "mesh_ca_denied",
+      "the server served no CA certificate alongside its leaf, so there is nothing to match " +
+        "against the attested mesh-CA digest",
+    );
+  }
+  const seen: string[] = [];
+  for (const der of candidates) {
+    const got = new Uint8Array(await subtle().digest("SHA-256", der.slice()));
+    if (constantTimeEqual(got, id.claims.meshCaDigest)) return der;
+    seen.push(bytesToHex(got));
+  }
+  fail(
+    "mesh_ca_denied",
+    `none of the ${candidates.length} served CA certificate(s) matches the attested mesh-CA ` +
+      `digest ${bytesToHex(id.claims.meshCaDigest)} (served: ${seen.join(", ")}) — the verified ` +
+      "CDS does not issue under any CA this server presented",
+    { details: { attested: bytesToHex(id.claims.meshCaDigest), served: seen } },
+  );
+}
+
+/**
  * Check the EXACT bytes of a `GET /allowlist` response against the attested
  * live-allowlist digest.
  *
