@@ -35,6 +35,15 @@ export type {
   VerifyEvidenceOptions,
   CertInfo,
 } from "./verify.js";
+export {
+  attestCDSIdentity,
+  cdsIdentityPEM,
+  verifyMeshCA,
+  verifyAllowlist,
+  parseConfigClaims,
+  hasDigest,
+} from "./cdsidentity.js";
+export type { CDSIdentity, CDSPolicy, ConfigClaims, DiscoveryDocument } from "./cdsidentity.js";
 export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
 export type { Evidence, SnpEvidence, AzSnpEvidence, AzTdxEvidence, TdxEvidence } from "./hcl.js";
