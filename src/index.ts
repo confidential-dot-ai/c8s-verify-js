@@ -37,13 +37,25 @@ export type {
 } from "./verify.js";
 export {
   attestCDSIdentity,
+  attestCDSIdentityCached,
   cdsIdentityPEM,
   verifyMeshCA,
   verifyAllowlist,
   parseConfigClaims,
   hasDigest,
 } from "./cdsidentity.js";
-export type { CDSIdentity, CDSPolicy, ConfigClaims, DiscoveryDocument } from "./cdsidentity.js";
+export type {
+  CDSIdentity,
+  CachedCDSIdentity,
+  CDSPolicy,
+  ConfigClaims,
+  DiscoveryDocument,
+} from "./cdsidentity.js";
+// Caching a verified CDS identity: skips re-attestation while the certificate
+// is unchanged, and remembers the last verified notBefore so a replayed older
+// certificate is refused instead of silently rolling the allowlist back.
+export { MemoryCDSIdentityCache, StorageCDSIdentityCache, isCacheEntry } from "./cdscache.js";
+export type { CDSCacheEntry, CDSIdentityCache, WebStorageLike } from "./cdscache.js";
 // Callers need this to hand DER to verifyMeshCA, which takes bytes rather than
 // PEM so it hashes exactly what it was given.
 export { decodePEM } from "./pem.js";

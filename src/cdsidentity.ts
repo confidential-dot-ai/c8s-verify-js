@@ -17,12 +17,36 @@
 
 import { readTLV, readChildren, TAG, type DERNode } from "./asn1.js";
 import { bytesToHex, constantTimeEqual } from "./base64.js";
+import { entryDate, type CDSCacheEntry, type CDSIdentityCache } from "./cdscache.js";
 import { subtle } from "./crypto-env.js";
 import { fail } from "./errors.js";
-import { decodePEM } from "./pem.js";
+import { decodeOnePEM } from "./pem.js";
 import { verifyTdx } from "./wasm-loader.js";
-import { fingerprintSHA256, parseCertificate, type Certificate } from "./x509.js";
+import {
+  fingerprintSHA256,
+  parseCertificate,
+  verifyECDSASignature,
+  type Certificate,
+} from "./x509.js";
 import type { WasmVerifyResult } from "./verify.js";
+
+/**
+ * The hardware verifier, behind a mutable binding.
+ *
+ * Only reason it is not a direct import: the cached path's contract is that a
+ * fingerprint hit never reaches the WASM core, and the only way to *prove* a
+ * function was not called is to count its calls. Tests swap this; nothing else
+ * should, so it is deliberately absent from the package index.
+ *
+ * @internal
+ */
+export const verifierSeam = { verifyTdx };
+
+/** ECDSA-with-SHA-256 / SHA-384, the two algorithms c8s RA-TLS certificates use. */
+const SELF_SIG_HASH: Record<string, "SHA-256" | "SHA-384"> = {
+  "1.2.840.10045.4.3.2": "SHA-256",
+  "1.2.840.10045.4.3.3": "SHA-384",
+};
 
 /** RA-TLS extension OIDs (c8s pkg/ratls, the 1.3.6.1.4.1.59888 arc). */
 const OID_RATLS_ATTESTATION = "1.3.6.1.4.1.59888.1.1";
@@ -60,6 +84,13 @@ export interface CDSIdentity {
   fingerprint: string;
   launchDigest: string;
   claims: ConfigClaims;
+  /**
+   * Issuance time. Trustworthy only because attestCDSIdentity verifies the
+   * certificate's self-signature against the SPKI that REPORTDATA binds — the
+   * validity window itself is outside the transcript. It is what makes
+   * monotonic rollback detection possible (see cdscache.ts).
+   */
+  notBefore: Date;
   notAfter: Date;
 }
 
@@ -73,6 +104,21 @@ export interface CDSPolicy {
   measurements?: string[];
   /** Expected TDX RTMR[3] as 96 hex chars — pins the deployment, not just the image. */
   expectedRtmr3?: string;
+  /**
+   * Validity reference time (default now). Injectable so verification is a
+   * pure function of its inputs — tests pin it, and a caller with a trusted
+   * clock source can supply that instead of the host's.
+   */
+  at?: Date;
+  /**
+   * Accept a CDS certificate older than one already verified under this cache
+   * key. Off by default: an older certificate is the downgrade case, where
+   * every individual signature is genuine and the attack is the *age* of the
+   * pair. Turn it on only for a deliberate re-bootstrap (cluster reinstalled,
+   * CDS re-keyed), where the operator knows the identity legitimately went
+   * backwards.
+   */
+  allowRollback?: boolean;
 }
 
 /** The subset of /v1/discovery this module reads. */
@@ -85,6 +131,9 @@ export interface DiscoveryDocument {
 }
 
 const isSentinel = (d: Uint8Array): boolean => d.every((b) => b === 0);
+
+/** Message of a thrown value, without assuming it is an Error. */
+const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message ?? e);
 
 /** True when the claims actually carry this digest (not the "unset" sentinel). */
 export const hasDigest = (d: Uint8Array): boolean =>
@@ -113,21 +162,35 @@ export function cdsIdentityPEM(doc: DiscoveryDocument): string {
  * Verify a CDS RA-TLS certificate and return what it vouches for.
  *
  * Fails closed on every path: a missing extension, evidence that does not bind
- * this certificate's key and claims, a launch digest outside the policy, or an
+ * this certificate's key and claims, a broken self-signature, a validity window
+ * that does not contain `policy.at`, a launch digest outside the policy, or an
  * RTMR[3] mismatch all throw rather than returning a partial result.
  */
 export async function attestCDSIdentity(
   certPEM: string | Uint8Array,
   policy: CDSPolicy = {},
 ): Promise<CDSIdentity> {
-  const der = typeof certPEM === "string" ? decodePEM(certPEM, "CERTIFICATE")[0] : certPEM;
-  if (!der) fail("cds_identity_invalid", "cds_identity is not a PEM CERTIFICATE");
+  // decodeOnePEM, not decodePEM(...)[0]: a discovery document shipping a bundle
+  // would otherwise have its first certificate attested and the rest silently
+  // dropped, and "which one did we actually verify?" is not a question a trust
+  // root should leave open.
+  let der: Uint8Array;
+  if (typeof certPEM === "string") {
+    try {
+      der = decodeOnePEM(certPEM, "CERTIFICATE");
+    } catch (err) {
+      fail("cds_identity_invalid", `cds_identity is not a PEM CERTIFICATE: ${errMsg(err)}`);
+    }
+  } else {
+    der = certPEM;
+  }
+  if (der.length === 0) fail("cds_identity_invalid", "cds_identity is empty");
 
   let cert: Certificate;
   try {
     cert = parseCertificate(der);
   } catch (err) {
-    fail("cds_identity_invalid", `cannot parse cds_identity: ${(err as Error).message}`);
+    fail("cds_identity_invalid", `cannot parse cds_identity: ${errMsg(err)}`);
   }
 
   const attExt = cert.extensions.get(OID_RATLS_ATTESTATION);
@@ -161,21 +224,26 @@ export async function attestCDSIdentity(
   // attested.
   const expectedReportData = await reportDataForKeyAndClaims(cert.spki, claimsDER);
 
-  const expectedRtmr3 = policy.expectedRtmr3 ? decodeRtmr3(policy.expectedRtmr3) : undefined;
+  // `!== undefined`, not a truthiness test: `expectedRtmr3: ""` used to be
+  // falsy and so silently disabled the pin, which is exactly the "configured
+  // but enforcing nothing" state the rest of this library refuses. Matches
+  // verify.ts, which rejects an empty pin with invalid_request.
+  const expectedRtmr3 =
+    policy.expectedRtmr3 !== undefined ? decodeRtmr3(policy.expectedRtmr3) : undefined;
 
   let raw: string;
   try {
     // The WASM core takes the platform-specific evidence object ({quote,
     // cc_eventlog}), not the {platform, evidence} envelope that wraps it — the
     // platform tag has already been dispatched on above.
-    raw = await verifyTdx(
+    raw = await verifierSeam.verifyTdx(
       JSON.stringify(envelope.evidence),
       expectedReportData,
       undefined,
       expectedRtmr3,
     );
   } catch (err) {
-    fail("cds_identity_denied", `cds_identity attestation failed: ${(err as Error).message}`);
+    fail("cds_identity_denied", `cds_identity attestation failed: ${errMsg(err)}`);
   }
 
   const result = JSON.parse(raw) as WasmVerifyResult;
@@ -213,6 +281,39 @@ export async function attestCDSIdentity(
     );
   }
 
+  // Only NOW is the certificate body worth reading. REPORTDATA covers the SPKI
+  // and the config-claims bytes and nothing else — the validity window, serial,
+  // subject and issuer are all outside it. What ties them to the attested key is
+  // the self-signature: the certificate signs its own tbsCertificate with the
+  // key the quote just vouched for, so verifying it against `cert.spki`
+  // (attested, one check ago) upgrades the whole body from attacker-chosen to
+  // TEE-asserted. Skipping this is not a formality — without it, anyone holding
+  // a genuine CDS certificate can rewrite its notAfter to 2099 and replay the
+  // pair forever, because the quote keeps matching.
+  await verifySelfSignature(cert);
+
+  // With the window now trustworthy, enforce it. Expiry is the ONLY bound on
+  // replaying an old-but-internally-consistent (certificate, allowlist) pair,
+  // so an unchecked window means unbounded downgrade.
+  const at = policy.at ?? new Date();
+  if (at < cert.notBefore) {
+    fail(
+      "cds_identity_expired",
+      `cds_identity is not yet valid: notBefore ${cert.notBefore.toISOString()} is after the ` +
+        `reference time ${at.toISOString()}`,
+      { details: { notBefore: cert.notBefore.toISOString(), at: at.toISOString() } },
+    );
+  }
+  if (at > cert.notAfter) {
+    fail(
+      "cds_identity_expired",
+      `cds_identity expired at ${cert.notAfter.toISOString()} (reference time ` +
+        `${at.toISOString()}): CDS re-issues this certificate on every allowlist change, so an ` +
+        "expired one is a stale snapshot of the admission policy, not the policy in force",
+      { details: { notAfter: cert.notAfter.toISOString(), at: at.toISOString() } },
+    );
+  }
+
   const launchDigest = String(result.claims.launch_digest).toLowerCase();
   const allowed = (policy.measurements ?? []).map((m) => m.trim().toLowerCase()).filter(Boolean);
   if (allowed.length > 0 && !allowed.includes(launchDigest)) {
@@ -227,8 +328,237 @@ export async function attestCDSIdentity(
     fingerprint: await fingerprintSHA256(der),
     launchDigest,
     claims: parseConfigClaims(claimsDER),
+    notBefore: cert.notBefore,
     notAfter: cert.notAfter,
   };
+}
+
+/**
+ * Verify that a certificate signs its own tbsCertificate with its own key.
+ *
+ * CDS's RA-TLS certificate is self-signed and served without a chain, so there
+ * is no issuer to defer to; the signature is meaningful precisely because the
+ * key it verifies against is the one REPORTDATA bound. Call it only after the
+ * report-data check has passed.
+ */
+async function verifySelfSignature(cert: Certificate): Promise<void> {
+  const hash = SELF_SIG_HASH[cert.sigAlgOID];
+  if (!hash) {
+    fail(
+      "cds_identity_unsigned",
+      `cds_identity is signed with unsupported algorithm ${cert.sigAlgOID} (want ECDSA with ` +
+        "SHA-256 or SHA-384), so its validity window cannot be authenticated",
+    );
+  }
+  let ok: boolean;
+  try {
+    ok = await verifyECDSASignature(cert, cert.tbs, cert.signatureDER, hash);
+  } catch (err) {
+    fail("cds_identity_unsigned", `cds_identity self-signature is unverifiable: ${errMsg(err)}`);
+  }
+  if (!ok) {
+    fail(
+      "cds_identity_unsigned",
+      "cds_identity is not self-signed by the attested key: the hardware evidence vouches for " +
+        "this public key and config-claims, but the certificate body around them (validity " +
+        "window, serial, subject) has been altered and is not covered by the quote",
+    );
+  }
+}
+
+/** A verified CDS identity, plus whether it came from cache or from the TEE. */
+export interface CachedCDSIdentity extends CDSIdentity {
+  /** True when this verdict was reconstructed from cache; no WASM ran. */
+  cached: boolean;
+}
+
+/**
+ * attestCDSIdentity with a fingerprint-keyed cache and rollback detection.
+ *
+ * Two things happen here that plain attestation cannot do.
+ *
+ * The cheap one: CDS re-issues its certificate whenever the live allowlist
+ * changes, so the certificate fingerprint is a perfect invalidation signal.
+ * Same fingerprint, still inside its validity window, same policy — the verdict
+ * is unchanged by construction and the hardware verifier is skipped entirely.
+ *
+ * The one that matters: a single attestation cannot detect a replayed
+ * *genuine* certificate. Yesterday's CDS certificate and yesterday's allowlist
+ * are internally consistent, correctly signed, and vouched for by real
+ * hardware; the only thing wrong with the pair is that a newer one exists.
+ * Comparing each new certificate's notBefore against the last one verified
+ * turns that into something checkable, and refusing a move backwards closes the
+ * downgrade. `policy.allowRollback` is the deliberate escape hatch for a real
+ * re-bootstrap.
+ *
+ * @param cacheKey identifies the cluster (e.g. its base URL) — NOT the
+ * fingerprint, which is the value expected to change.
+ */
+export async function attestCDSIdentityCached(
+  certPEM: string | Uint8Array,
+  policy: CDSPolicy,
+  cache: CDSIdentityCache,
+  cacheKey: string,
+): Promise<CachedCDSIdentity> {
+  let der: Uint8Array;
+  if (typeof certPEM === "string") {
+    try {
+      der = decodeOnePEM(certPEM, "CERTIFICATE");
+    } catch (err) {
+      fail("cds_identity_invalid", `cds_identity is not a PEM CERTIFICATE: ${errMsg(err)}`);
+    }
+  } else {
+    der = certPEM;
+  }
+
+  const at = policy.at ?? new Date();
+  const fingerprint = await fingerprintSHA256(der);
+  const policyDigest = await policyDigestHex(policy);
+  const prior = await cache.get(cacheKey);
+
+  if (prior !== undefined) {
+    const hit = await cacheHit(prior, der, fingerprint, policyDigest, at);
+    if (hit) return hit;
+  }
+
+  // Cache miss, fingerprint change, policy change, or an entry that no longer
+  // holds: full verification, hardware and all.
+  const fresh = await attestCDSIdentity(der, policy);
+
+  if (prior !== undefined && policy.allowRollback !== true) {
+    // The floor is the LAST VERIFIED certificate's notBefore, not the cached
+    // one's expiry: a certificate that has since expired still proves the
+    // cluster had reached that point in time, so its issuance instant remains a
+    // valid lower bound even once the certificate itself is useless.
+    const priorNotBefore = entryDate(prior, "notBeforeISO");
+    if (fresh.notBefore < priorNotBefore) {
+      fail(
+        "cds_identity_rollback",
+        `cds_identity went backwards: the presented certificate ${fresh.fingerprint} was issued ` +
+          `at ${fresh.notBefore.toISOString()}, older than the already-verified certificate ` +
+          `${prior.fingerprintSha256Hex} issued at ${priorNotBefore.toISOString()}. Both are ` +
+          "genuine and internally consistent — that is what a downgrade looks like: an older " +
+          "allowlist replayed with the certificate that attests it. Set allowRollback to accept " +
+          "this deliberately (cluster reinstalled or CDS re-keyed).",
+        {
+          details: {
+            presentedFingerprint: fresh.fingerprint,
+            presentedNotBefore: fresh.notBefore.toISOString(),
+            cachedFingerprint: prior.fingerprintSha256Hex,
+            cachedNotBefore: priorNotBefore.toISOString(),
+          },
+        },
+      );
+    }
+  }
+
+  // Written only now: an entry exists if and only if full verification passed,
+  // so the rollback floor can never be raised by a certificate that was refused.
+  await cache.set(cacheKey, {
+    fingerprintSha256Hex: fresh.fingerprint,
+    notBeforeISO: fresh.notBefore.toISOString(),
+    notAfterISO: fresh.notAfter.toISOString(),
+    meshCaDigestHex: bytesToHex(fresh.claims.meshCaDigest),
+    allowlistDigestHex: bytesToHex(fresh.claims.allowlistDigest),
+    launchDigestHex: fresh.launchDigest,
+    policyDigestHex: policyDigest,
+    verifiedAtISO: at.toISOString(),
+  });
+
+  return { ...fresh, cached: false };
+}
+
+/**
+ * Decide whether a cached entry can stand in for full verification, and
+ * reconstruct the verdict if so.
+ *
+ * Returns undefined for "re-verify" on every doubt. A cache is an optimisation;
+ * anything it cannot justify completely is a miss, never a partial acceptance.
+ */
+async function cacheHit(
+  prior: CDSCacheEntry,
+  der: Uint8Array,
+  fingerprint: string,
+  policyDigest: string,
+  at: Date,
+): Promise<CachedCDSIdentity | undefined> {
+  // Different certificate: CDS re-issued, so the claims may have moved. Miss.
+  if (prior.fingerprintSha256Hex !== fingerprint) return undefined;
+  // Different policy: the cached verdict was reached under different pins, and
+  // serving it now would silently ignore a measurement or RTMR[3] pin the
+  // caller has since added. Miss.
+  if (prior.policyDigestHex !== policyDigest) return undefined;
+  // Outside the cached window: fall through so the full path reports the
+  // expiry with its own error code rather than inventing one here.
+  const notBefore = entryDate(prior, "notBeforeISO");
+  const notAfter = entryDate(prior, "notAfterISO");
+  if (at < notBefore || at > notAfter) return undefined;
+
+  let cert: Certificate;
+  try {
+    cert = parseCertificate(der);
+  } catch {
+    return undefined;
+  }
+
+  // A fingerprint match means these bytes ARE the bytes that were verified, so
+  // in principle the entry alone would do. Re-checking the self-signature and
+  // the claims anyway costs one ECDSA verify and no WASM, and it means a
+  // forged or corrupted cache entry cannot make us accept a certificate that
+  // was never attested — the cache stops being a trust root and goes back to
+  // being an optimisation.
+  try {
+    await verifySelfSignature(cert);
+  } catch {
+    return undefined;
+  }
+  if (cert.notBefore.getTime() !== notBefore.getTime()) return undefined;
+  if (cert.notAfter.getTime() !== notAfter.getTime()) return undefined;
+
+  const claimsDER = cert.extensions.get(OID_RATLS_CONFIG_CLAIMS);
+  if (!claimsDER) return undefined;
+  let claims: ConfigClaims;
+  try {
+    claims = parseConfigClaims(claimsDER);
+  } catch {
+    return undefined;
+  }
+  if (bytesToHex(claims.meshCaDigest) !== prior.meshCaDigestHex) return undefined;
+  if (bytesToHex(claims.allowlistDigest) !== prior.allowlistDigestHex) return undefined;
+
+  return {
+    fingerprint,
+    launchDigest: prior.launchDigestHex,
+    claims,
+    notBefore: cert.notBefore,
+    notAfter: cert.notAfter,
+    cached: true,
+  };
+}
+
+/**
+ * Digest of the acceptance-governing parts of a policy.
+ *
+ * `measurements` and `expectedRtmr3` decide whether a certificate is accepted,
+ * so a verdict is only reusable under the same values. `at` deliberately is not
+ * included (it changes every call and is checked directly), nor is
+ * `allowRollback` (it loosens nothing about the certificate itself).
+ */
+async function policyDigestHex(policy: CDSPolicy): Promise<string> {
+  const measurements = (policy.measurements ?? [])
+    .map((m) => m.trim().toLowerCase())
+    .filter(Boolean)
+    .sort();
+  const rtmr3 = policy.expectedRtmr3 === undefined ? "" : policy.expectedRtmr3.trim().toLowerCase();
+  // JSON rather than concatenation: it delimits and escapes the elements, so
+  // ["ab","cd"] and ["abcd"] cannot serialize to the same string. Object key
+  // order is fixed by the literal, and the array is sorted above, so the
+  // encoding is a function of the policy's content alone. `v` versions the
+  // scheme, so changing what is covered invalidates old entries rather than
+  // silently reusing verdicts reached under a different rule.
+  const canonical = JSON.stringify({ v: 1, measurements, rtmr3 });
+  const digest = await subtle().digest("SHA-256", new TextEncoder().encode(canonical));
+  return bytesToHex(new Uint8Array(digest));
 }
 
 /**
@@ -350,7 +680,7 @@ function attestationEnvelope(extValue: Uint8Array): { platform: string; evidence
   try {
     envelope = JSON.parse(text) as { platform?: string; evidence?: unknown };
   } catch (err) {
-    fail("cds_identity_invalid", `cannot parse evidence envelope: ${(err as Error).message}`);
+    fail("cds_identity_invalid", `cannot parse evidence envelope: ${errMsg(err)}`);
   }
   if (!envelope.platform || envelope.evidence === undefined) {
     fail("cds_identity_invalid", "evidence envelope is missing platform or evidence");
