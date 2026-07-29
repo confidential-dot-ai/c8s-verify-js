@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { readTLV, readChildren, decodeOID, decodeTime, TAG } from "../src/asn1.js";
+import { C8sVerifyError } from "../src/errors.js";
 
 /** Build a DER TLV with a short (<128) content length. */
 function der(tag: number, content: Uint8Array): Uint8Array {
@@ -64,6 +65,69 @@ test("readChildren splits a constructed node into its elements", () => {
 test("readChildren rejects a primitive node", () => {
   const int = der(TAG.INTEGER, Uint8Array.of(0x01));
   assert.throws(() => readChildren(int, readTLV(int, 0)), /expected constructed node/);
+});
+
+// `len = (len << 8) | b` coerces to int32, so a 4-byte length with the top bit
+// set wraps NEGATIVE. contentEnd then lands before contentStart, sails past the
+// "exceeds buffer" bounds check, and produces a node whose `end` is at or behind
+// its own `start` — which used to send readChildren into a loop that never
+// advanced and allocated until V8 aborted with "heap out of memory". Reachable
+// from the untrusted discovery document, i.e. a hostile front door could kill
+// the tab before any attestation ran.
+test("readTLV rejects a 4-byte length that would overflow to negative", () => {
+  for (const len of [
+    [0xff, 0xff, 0xff, 0xfa], // -6: the original repro, end == start
+    [0xff, 0xff, 0xff, 0xff], // -1
+    [0x80, 0x00, 0x00, 0x00], // exactly the sign bit
+  ]) {
+    assert.throws(
+      () => readTLV(Uint8Array.of(TAG.OCTET_STRING, 0x84, ...len), 0),
+      /length exceeds the supported range/,
+      `length ${len.map((b) => b.toString(16)).join("")} must be refused`,
+    );
+  }
+});
+
+// The guard above must not cost us legitimate encodings: a high bit in a
+// shorter length is an ordinary value, not an overflow.
+test("readTLV still accepts long-form lengths with a high bit below 4 bytes", () => {
+  const content = new Uint8Array(128).fill(0x7);
+  // 0x81 0x80 — one length byte, value 128. High bit set, perfectly valid.
+  assert.equal(
+    readTLV(Uint8Array.of(TAG.OCTET_STRING, 0x81, 0x80, ...content), 0).content.length,
+    128,
+  );
+  // 0x83 0xFF 0xFF 0xFF would be 16MiB — valid arithmetic, just larger than the
+  // buffer, so it must fail on bounds rather than on the overflow guard.
+  assert.throws(
+    () => readTLV(Uint8Array.of(TAG.OCTET_STRING, 0x83, 0xff, 0xff, 0xff), 0),
+    /exceeds buffer/,
+  );
+});
+
+// The end-to-end version of the same bug: this exact buffer used to OOM the
+// process. readTLV's guard is what stops it now; readChildren's progress
+// assertion is belt-and-braces behind that (and consequently unreachable while
+// the guard holds, which is the point of having both).
+test("readChildren terminates on a length that would not advance", () => {
+  // A child whose declared length is -6 would end exactly where it began.
+  const inner = [0x04, 0x84, 0xff, 0xff, 0xff, 0xfa];
+  const buf = Uint8Array.of(TAG.SEQUENCE, inner.length, ...inner);
+  assert.throws(
+    () => readChildren(buf, readTLV(buf, 0)),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      /length exceeds the supported range|does not advance/.test(e.message),
+  );
+});
+
+// DER makes the parent's length authoritative, so a child that runs past it is
+// malformed. Tolerating it would let a crafted element hide bytes from one
+// parser that another one sees.
+test("readChildren rejects a child that overruns its parent", () => {
+  // SEQUENCE declares 2 content bytes; the child inside declares 5.
+  const buf = Uint8Array.of(TAG.SEQUENCE, 0x02, TAG.OCTET_STRING, 0x05, 1, 2, 3, 4, 5);
+  assert.throws(() => readChildren(buf, readTLV(buf, 0)), /overruns its parent/);
 });
 
 test("decodeOID decodes dotted-decimal, including multi-byte arcs", () => {

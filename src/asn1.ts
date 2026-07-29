@@ -54,6 +54,19 @@ export function readTLV(buf: Uint8Array, offset: number): DERNode {
     if (numBytes === 0 || numBytes > 4) {
       throw new C8sVerifyError("invalid_cert", "ASN.1: unsupported length encoding");
     }
+    // `<<` coerces to int32, so a FOUR-byte length whose top bit is set (e.g.
+    // 0xFFFFFFFA) wraps to a NEGATIVE number. That length then passes the
+    // "exceeds buffer" check below — contentEnd lands *before* contentStart —
+    // and yields a node whose `end` is at or behind its own `start`, which sends
+    // readChildren into a loop that never advances and allocates until the heap
+    // dies. Reject it here rather than relying on `>>> 0`: a 2GiB-plus element
+    // cannot appear in any certificate this library parses, so there is nothing
+    // legitimate to preserve. Only the 4-byte case can overflow — with three or
+    // fewer bytes the value tops out at 0x00FFFFFF — so a leading high bit in a
+    // shorter length (0x81 0x80 is a perfectly ordinary 128) stays valid.
+    if (numBytes === 4 && pos < buf.length && buf[pos] & 0x80) {
+      throw new C8sVerifyError("invalid_cert", "ASN.1: length exceeds the supported range");
+    }
     len = 0;
     for (let i = 0; i < numBytes; i++) {
       if (pos >= buf.length) {
@@ -64,6 +77,12 @@ export function readTLV(buf: Uint8Array, offset: number): DERNode {
   }
   const contentStart = pos;
   const contentEnd = contentStart + len;
+  // Belt and braces: the high-bit rejection above makes a negative length
+  // unreachable, but this is the invariant every caller depends on, so assert it
+  // here rather than trusting the arithmetic to stay correct forever.
+  if (len < 0) {
+    throw new C8sVerifyError("invalid_cert", "ASN.1: negative length");
+  }
   if (contentEnd > buf.length) {
     throw new C8sVerifyError("invalid_cert", "ASN.1: content exceeds buffer");
   }
@@ -91,8 +110,22 @@ export function readChildren(buf: Uint8Array, node: DERNode): DERNode[] {
   let off = node.contentStart;
   while (off < node.contentEnd) {
     const child = readTLV(buf, off);
+    // Every TLV has at least a tag and a length byte, so a child must end
+    // strictly past where it started. Asserting it here means no malformed
+    // length can ever turn this loop into a non-terminating one, independently
+    // of how readTLV computes its bounds — a loop that does not advance is the
+    // difference between a rejected certificate and a dead browser tab.
+    if (child.end <= off) {
+      throw new C8sVerifyError("invalid_cert", "ASN.1: element does not advance");
+    }
     children.push(child);
     off = child.end;
+  }
+  // A child that overruns its parent means the lengths disagree; DER says the
+  // parent's length is authoritative, so a mismatch is malformed, not a
+  // trailing element to be tolerated.
+  if (off !== node.contentEnd) {
+    throw new C8sVerifyError("invalid_cert", "ASN.1: child element overruns its parent");
   }
   return children;
 }
