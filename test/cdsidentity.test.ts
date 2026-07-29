@@ -299,6 +299,85 @@ test("rejects an unsupported claims version rather than ignoring the claims", ()
   assert.throws(() => parseConfigClaims(der), isError("unsupported", "version 9"));
 });
 
+/** A v3 claims body: version INTEGER followed by five 32-byte digests. */
+function claimsBody(version: number[]): number[] {
+  const d32 = (b: number) => [0x04, 0x20, ...Array<number>(32).fill(b)];
+  return [...version, ...d32(1), ...d32(2), ...d32(3), ...d32(4), ...d32(5)];
+}
+
+// The property Go's UnmarshalConfigClaims spells out and enforces with a
+// byte-exact re-encode round-trip: "parses as vN" must mean "IS the one vN
+// encoding". It is load-bearing because REPORTDATA hashes the extension bytes
+// verbatim — if two byte strings can decode to one ConfigClaims, then the value
+// the quote committed to and the value policy is enforced against are no longer
+// the same object. Every variant below used to be accepted, all five decoding to
+// an identical ConfigClaims.
+test("accepts only the one canonical DER encoding of a claims value", () => {
+  const body = claimsBody([0x02, 0x01, 0x03]);
+  const L = body.length; // 173 — long form, one length octet
+
+  // The canonical encoding must still parse, or the rule is too strict.
+  const canonical = new Uint8Array([0x30, 0x81, L, ...body]);
+  assert.equal(parseConfigClaims(canonical).version, 3);
+
+  const wideBody = claimsBody([0x02, 0x02, 0x00, 0x03]); // version 3, padded
+  for (const [name, der, expect] of [
+    ["two-byte length", [0x30, 0x82, 0x00, L, ...body], "non-minimal DER length"],
+    ["three-byte length", [0x30, 0x83, 0, 0, L, ...body], "non-minimal DER length"],
+    ["trailing bytes", [...canonical, 0xde, 0xad, 0xbe, 0xef], "trailing bytes"],
+    ["padded version INTEGER", [0x30, 0x81, wideBody.length, ...wideBody], "minimally encoded"],
+  ] as const) {
+    assert.throws(
+      () => parseConfigClaims(new Uint8Array(der)),
+      isError("cds_identity_invalid", expect),
+      `${name} must be refused`,
+    );
+  }
+
+  // A non-minimal length on an INNER field, not just the outer SEQUENCE: the
+  // first digest written as 0x04 0x81 0x20 instead of 0x04 0x20.
+  const d32 = (b: number) => [0x04, 0x20, ...Array<number>(32).fill(b)];
+  const fat = [
+    0x02,
+    0x01,
+    0x03,
+    0x04,
+    0x81,
+    0x20,
+    ...Array<number>(32).fill(1), // long-form length on field 1
+    ...d32(2),
+    ...d32(3),
+    ...d32(4),
+    ...d32(5),
+  ];
+  assert.throws(
+    () => parseConfigClaims(new Uint8Array([0x30, 0x81, fat.length, ...fat])),
+    isError("cds_identity_invalid", "config-claims field 1 uses a non-minimal DER length"),
+  );
+});
+
+test("rejects a negative or empty claims version INTEGER", () => {
+  const body = claimsBody([0x02, 0x01, 0xff]); // -1
+  assert.throws(
+    () => parseConfigClaims(new Uint8Array([0x30, 0x81, body.length, ...body])),
+    isError("cds_identity_invalid", "negative"),
+  );
+  const empty = claimsBody([0x02, 0x00]);
+  assert.throws(
+    () => parseConfigClaims(new Uint8Array([0x30, 0x81, empty.length, ...empty])),
+    isError("cds_identity_invalid", "empty"),
+  );
+});
+
+// The live fixture is the proof the rule is calibrated: real CDS output, from
+// Go's asn1.Marshal, must sail through unchanged.
+test("the live CDS certificate's claims are canonically encoded", async () => {
+  const raw = parseCertificate(decodePEM(await cdsIdentity())[0]).extensions.get(
+    OID_CONFIG_CLAIMS,
+  )!;
+  assert.equal(parseConfigClaims(raw).version, 3);
+});
+
 // ---------------------------------------------------------------------------
 // Cache + rollback detection
 // ---------------------------------------------------------------------------
