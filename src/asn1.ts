@@ -148,6 +148,41 @@ export function decodeOID(content: Uint8Array): string {
   return parts.join(".");
 }
 
+/** Number of bytes needed to represent a non-negative integer. */
+function byteWidth(n: number): number {
+  let w = 1;
+  while (n > 0xff) {
+    n = Math.floor(n / 256);
+    w++;
+  }
+  return w;
+}
+
+/**
+ * Assert that a node's length is written the one way DER permits.
+ *
+ * DER's whole promise is that a value has exactly one encoding, but readTLV is
+ * permissive about *how* a length is written — 0x81 0xAD and 0x82 0x00 0xAD
+ * both decode to 173. For most parsing that laxity is harmless. It is not for
+ * attested extensions: the trust chain vouches for the exact extension bytes,
+ * so "these bytes mean this value" has to be a bijection. Go buys the same
+ * property with a byte-exact re-encode round-trip and calls the strictness
+ * load-bearing; this states the rule directly instead.
+ */
+export function requireMinimalLength(node: DERNode, what: string): void {
+  const len = node.contentEnd - node.contentStart;
+  const lengthBytes = node.headerLen - 1;
+  const minimal = len < 0x80 ? 1 : 1 + byteWidth(len);
+  if (lengthBytes !== minimal) {
+    throw new C8sVerifyError(
+      "invalid_cert",
+      `${what} uses a non-minimal DER length (${lengthBytes} length octets for ${len} bytes, ` +
+        `minimal is ${minimal}): two encodings of one value would let two distinct byte strings ` +
+        "yield the same parsed value",
+    );
+  }
+}
+
 /**
  * Parse a DER time (UTCTime or GeneralizedTime) into a Date.
  */

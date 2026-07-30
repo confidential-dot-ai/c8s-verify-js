@@ -50,12 +50,22 @@ test("end-to-end: identity-bound attestation and transcript-keyed channel", asyn
     assert.equal(session.attestation.identityBound, false); // recorded evidence
     assert.equal(session.attestation.keyAgreementContext.length, 48);
     assert.equal(session.attestation.cert.subjectCN, "lb.demo.c8s.local");
+    assert.equal(session.attestation.trustClass, "specific-cluster"); // meshCaPem pinned
 
     const msg = "round-trip over the post-quantum channel";
     const res = await session.fetch("/v1/echo", { method: "POST", body: msg });
     assert.equal(res.status, 200);
     assert.match(res.text(), /over-encrypted channel/);
     assert.ok(res.text().includes(JSON.stringify(msg)));
+
+    // The retired endpoint and the query selectors are explicit 400s — no
+    // alias, no downgrade.
+    const retired = await fetch(`http://localhost:${port}/.well-known/c8s/attestation?nonce=x`);
+    assert.equal(retired.status, 400);
+    const selector = await fetch(
+      `http://localhost:${port}/.well-known/c8s/attest-pq?nonce=x&pq=false`,
+    );
+    assert.equal(selector.status, 400);
   } finally {
     server.kill();
   }

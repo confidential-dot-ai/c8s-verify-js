@@ -3,18 +3,25 @@
 // a caller-supplied policy (expected measurements, platform, freshness binding).
 
 import { verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
-import { verifyCertChain, type ChainResult } from "./x509.js";
+import { verifyCertChain, type Certificate, type ChainResult } from "./x509.js";
 import { decodePEM } from "./pem.js";
 import { bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
 import { fail } from "./errors.js";
 import type { Evidence } from "./hcl.js";
 import {
-  PROTOCOL_VERSION,
+  BINDING_ATTEST_PQ,
   identityTranscriptHash,
   selectPinnedCA,
   verifyMeshIdentityProof,
   type MeshIdentityProof,
 } from "./identity.js";
+import {
+  OID_MATCHED_WORKLOAD,
+  allowlistDigestHex,
+  parseAllowlist,
+  parseMatchedWorkload,
+  resolveWorkload,
+} from "./workload.js";
 
 export interface VerifyPolicy {
   /** accepted launch digests (hex sha-384) */
@@ -23,8 +30,32 @@ export interface VerifyPolicy {
   platform?: string;
   /** default true: report_data must bind the selected session transcript */
   requireFreshness?: boolean;
-  /** mesh CA pinned out of band */
-  meshCaPem: string;
+  /**
+   * Mesh CA pinned out of band. Optional: the required anchor is this pin OR
+   * `allowlist`. When absent, the anchor is the transcript-committed CA
+   * selected from the served chain — the identity transcript authenticates
+   * the choice, and the verdict is deployment-class rather than
+   * specific-cluster (see {@link AttestationResult.trustClass}).
+   */
+  meshCaPem?: string;
+  /**
+   * Exact canonical allowlist bytes (`GET /allowlist` response, or the output
+   * of the canonicalization tool), pinned out of band. A string is
+   * UTF-8-encoded verbatim, never parsed-and-reserialized — the stamp commits
+   * SHA-256 over these exact bytes.
+   *
+   * Pinning it requires the mesh leaf to carry a matched-workload stamp whose
+   * allowlist digest equals SHA-256 of these bytes, and resolves the stamped
+   * name in this document. Serves as the trust anchor when `meshCaPem` is
+   * absent.
+   */
+  allowlist?: Uint8Array | string;
+  /**
+   * Expected matched-workload name. Requires the mesh leaf to carry a stamp
+   * naming exactly this workload. The stamp is CA-vouched, so this is
+   * enforced only after the chain check — which either anchor provides.
+   */
+  workloadName?: string;
   /** validity reference time (default now) */
   at?: Date;
   /**
@@ -99,6 +130,16 @@ export interface CertInfo {
   notAfter: string;
 }
 
+/** A verified matched-workload stamp, surfaced on the result. */
+export interface WorkloadInfo {
+  /** The stamped (and, when pinned, matched) workload name. */
+  name: string;
+  /** Allowlist store version the stamp's match was decided under. */
+  allowlistVersion: string;
+  /** Hex SHA-256 of the canonical allowlist bytes the stamp commits to. */
+  allowlistDigestHex: string;
+}
+
 export interface AttestationResult {
   ok: true;
   platform: string;
@@ -115,6 +156,21 @@ export interface AttestationResult {
   sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array };
   cert: CertInfo;
   claims: WasmClaims;
+  /**
+   * The mesh leaf's verified matched-workload stamp. Present only when a
+   * workload policy (`workloadName` and/or `allowlist`) was pinned and every
+   * check passed; without a pin the stamp is not read at all.
+   */
+  workload?: WorkloadInfo;
+  /**
+   * What the verdict identifies. `"specific-cluster"` iff `meshCaPem` was
+   * pinned: the chain anchors to a CA the caller chose out of band.
+   * `"deployment-class"` means the CA was derived from the transcript
+   * commitment — the verdict says "a genuine instance of this measured
+   * deployment", never "my cluster"; a genuine clone cluster booted from the
+   * same measured images and policy is indistinguishable by public inputs.
+   */
+  trustClass: "deployment-class" | "specific-cluster";
   warnings: string[];
 }
 
@@ -166,8 +222,44 @@ function validatePolicy(policy: VerifyPolicy): void {
   if (!policy.measurements.every((measurement) => typeof measurement === "string")) {
     fail("invalid_request", "measurement allowlist entries must be strings");
   }
-  if (typeof policy.meshCaPem !== "string" || policy.meshCaPem.trim() === "") {
-    fail("identity_binding", "verification requires meshCaPem pinned out of band");
+  // The required anchor: a mesh CA pinned out of band, OR canonical allowlist
+  // bytes enforced against the stamp on the derived-CA chain. Both together is
+  // fine (specific-cluster plus policy skew detection); neither leaves the
+  // measurement pins anchoring nothing cluster- or deployment-specific.
+  if (policy.meshCaPem !== undefined) {
+    if (typeof policy.meshCaPem !== "string" || policy.meshCaPem.trim() === "") {
+      fail("identity_binding", "meshCaPem must be a non-empty PEM string when set");
+    }
+  }
+  if (policy.allowlist !== undefined) {
+    const empty =
+      typeof policy.allowlist === "string"
+        ? policy.allowlist.length === 0
+        : !(policy.allowlist instanceof Uint8Array) || policy.allowlist.length === 0;
+    if (empty) {
+      fail(
+        "invalid_request",
+        "allowlist must be the non-empty exact canonical document bytes (or the same as a " +
+          "verbatim UTF-8 string)",
+      );
+    }
+  }
+  if (policy.meshCaPem === undefined && policy.allowlist === undefined) {
+    fail(
+      "identity_binding",
+      "verification requires an anchor: pin meshCaPem out of band (specific-cluster), or pin " +
+        "the exact canonical allowlist bytes to enforce against the mesh leaf's " +
+        "matched-workload stamp (deployment-class)",
+    );
+  }
+  if (policy.workloadName !== undefined) {
+    if (typeof policy.workloadName !== "string" || policy.workloadName === "") {
+      fail(
+        "invalid_request",
+        "workloadName must be a non-empty workload entry name — an empty pin that enforces " +
+          "nothing is worse than no pin",
+      );
+    }
   }
   if (policy.expectedRtmr3 !== undefined) {
     // Reject here rather than at verification time: a pin the verifier would
@@ -245,8 +337,16 @@ async function prepareIdentity(
   policy: VerifyPolicy,
   warnings: string[],
 ): Promise<PreparedIdentity> {
-  if (bundle?.version !== PROTOCOL_VERSION) {
-    fail("identity_binding", `attestation response has unexpected version ${bundle?.version}`);
+  // Exactly the attest-pq binding id: an attest-lb response (native-client
+  // sibling protocol) or a stale pre-cutover c8s-verify/v1 bundle carries
+  // otherwise-valid evidence for a DIFFERENT trust decision, so both are
+  // rejected here rather than adapted to.
+  if (bundle?.version !== BINDING_ATTEST_PQ) {
+    fail(
+      "identity_binding",
+      `attestation response has version ${JSON.stringify(bundle?.version)}, ` +
+        `want ${BINDING_ATTEST_PQ}`,
+    );
   }
   if (!isMeshIdentityProof(bundle.identity_proof)) {
     fail("identity_binding", "attestation response omitted or malformed identity_proof");
@@ -256,27 +356,47 @@ async function prepareIdentity(
   }
 
   const leafBlocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
-  const pinnedCAs = decodePEM(policy.meshCaPem, "CERTIFICATE");
-  if (leafBlocks.length === 0 || pinnedCAs.length === 0) {
-    fail("invalid_cert", "identity verification requires a leaf and pinned mesh CA");
+  if (leafBlocks.length === 0) {
+    fail("invalid_cert", "identity verification requires a served leaf certificate");
   }
-  // Multi-block meshCaPem means "every block in here is independently trusted",
-  // and selectPinnedCA will happily anchor to whichever one the proof names.
-  // That is the documented contract, but it is also what a caller gets by
-  // accident if they pass a chain the *server* handed them — at which point the
-  // pin is not a pin. Deriving the anchor (C8sClientOptions.cdsIdentity) makes
-  // this structurally impossible by pinning exactly one attested certificate, so
-  // say so rather than silently accepting the wider trust set.
-  if (pinnedCAs.length > 1) {
-    warnings.push(
-      `meshCaPem pins ${pinnedCAs.length} certificates and each is independently trusted as an ` +
-        "anchor; pass a single CA, or use the cdsIdentity option to derive the anchor from " +
-        "attested claims",
-    );
-  }
-  const selectedCA = await selectPinnedCA(bundle.identity_proof, pinnedCAs);
-  if (!selectedCA) {
-    fail("identity_binding", "identity proof does not name any pinned mesh CA");
+
+  let selectedCA: Uint8Array | undefined;
+  if (policy.meshCaPem !== undefined) {
+    const pinnedCAs = decodePEM(policy.meshCaPem, "CERTIFICATE");
+    if (pinnedCAs.length === 0) {
+      fail("invalid_cert", "meshCaPem contains no PEM CERTIFICATE block");
+    }
+    // Multi-block meshCaPem means "every block in here is independently
+    // trusted", and selectPinnedCA will happily anchor to whichever one the
+    // proof names. That is the documented contract, but it is also what a
+    // caller gets by accident if they pass a chain the *server* handed them —
+    // at which point the pin is not a pin.
+    if (pinnedCAs.length > 1) {
+      warnings.push(
+        `meshCaPem pins ${pinnedCAs.length} certificates and each is independently trusted as ` +
+          "an anchor; pass a single CA",
+      );
+    }
+    selectedCA = await selectPinnedCA(bundle.identity_proof, pinnedCAs);
+    if (!selectedCA) {
+      fail("identity_binding", "identity proof does not name any pinned mesh CA");
+    }
+  } else {
+    // No pin: derive the anchor from the SERVED chain (blocks after the leaf)
+    // by the proof's mesh_ca_sha256 commitment. Selection alone trusts
+    // nothing — the transcript verification that follows binds the selected
+    // CA's digest into hardware-signed report_data and the leaf's proof of
+    // possession, which is what authenticates the choice. The verdict is
+    // deployment-class: the CA identifies the deployment the evidence came
+    // from, not a cluster the caller chose (see AttestationResult.trustClass).
+    selectedCA = await selectPinnedCA(bundle.identity_proof, leafBlocks.slice(1));
+    if (!selectedCA) {
+      fail(
+        "identity_binding",
+        "no served CA certificate matches the identity proof's mesh CA commitment, so the " +
+          "anchor cannot be derived from this response",
+      );
+    }
   }
   const chain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
   const transcript = await identityTranscriptHash(
@@ -397,9 +517,70 @@ function verifyFreshness(
 }
 
 /**
+ * Enforce the workload policy against the CHAIN-VERIFIED mesh leaf. The stamp
+ * is placed by CDS in the CA-signed area, so the chain — not the hardware
+ * evidence — is what vouches for it; verifyAttestation calls this only after
+ * every identity check has passed. Order: parse → digest check (when the
+ * allowlist is pinned) → name-pin check → name resolution.
+ */
+async function verifyWorkloadPolicy(
+  leaf: Certificate,
+  policy: VerifyPolicy,
+): Promise<WorkloadInfo | undefined> {
+  if (policy.workloadName === undefined && policy.allowlist === undefined) {
+    return undefined;
+  }
+  const extnValue = leaf.extensions.get(OID_MATCHED_WORKLOAD);
+  if (extnValue === undefined) {
+    // Absence is a real lifecycle state (a leaf issued before the pod's match
+    // resolved carries no stamp), not damage — hence _not_attested, not
+    // _denied. A pinned client still fails closed on it.
+    fail(
+      "workload_not_attested",
+      "a workload/allowlist pin is set but the mesh leaf carries no matched-workload " +
+        `extension (${OID_MATCHED_WORKLOAD}): the pod has no verified workload identity ` +
+        "(unnamed leaves are issued mid-lifecycle by design)",
+    );
+  }
+  const stamp = parseMatchedWorkload(extnValue);
+  const stampDigestHex = bytesToHex(stamp.allowlistDigest);
+
+  if (policy.allowlist !== undefined) {
+    const pinnedDigestHex = await allowlistDigestHex(policy.allowlist);
+    if (stampDigestHex !== pinnedDigestHex) {
+      fail(
+        "allowlist_denied",
+        `the stamp's allowlist digest ${stampDigestHex} does not match the pinned canonical ` +
+          `bytes (${pinnedDigestHex}): CDS decided this match under a different policy ` +
+          "document than the one pinned (hash the exact canonical bytes, never a " +
+          "re-serialized copy)",
+        { details: { stamped: stampDigestHex, pinned: pinnedDigestHex } },
+      );
+    }
+  }
+  if (policy.workloadName !== undefined && stamp.name !== policy.workloadName) {
+    fail(
+      "workload_denied",
+      `mesh leaf is stamped for workload ${JSON.stringify(stamp.name)}, not the pinned ` +
+        JSON.stringify(policy.workloadName),
+      { details: { stamped: stamp.name, pinned: policy.workloadName } },
+    );
+  }
+  if (policy.allowlist !== undefined) {
+    resolveWorkload(parseAllowlist(policy.allowlist), stamp.name);
+  }
+
+  return {
+    name: stamp.name,
+    allowlistVersion: stamp.allowlistVersion,
+    allowlistDigestHex: stampDigestHex,
+  };
+}
+
+/**
  * Verify an attestation bundle end to end.
  *
- * @param bundle the LB /attestation response
+ * @param bundle the LB attest-pq response
  * @param nonce the nonce WE generated and sent
  */
 export async function verifyAttestation(
@@ -428,6 +609,26 @@ export async function verifyAttestation(
     identity.chain.leaf,
     identity.chain.ca,
   );
+  // Workload policy runs LAST: the stamp is CA-vouched, so it is meaningful
+  // only once steps 1–5 (versions, evidence, measurement, transcript, proof,
+  // chain) have all passed.
+  const workload = await verifyWorkloadPolicy(identity.chain.leaf, policy);
+
+  // A derived-CA (deployment-class) verdict rests entirely on the measurement
+  // policy identifying the deployment. The WASM TDX verifier currently pins
+  // MRTD (plus an optional RTMR[3]) but not RTMR[1]/RTMR[2], so a TDX image
+  // pin here is not platform-complete — MRTD covers TDVF, while the guest
+  // kernel and rootfs live in RTMR[1]/RTMR[2]. Say so prominently rather than
+  // silently underdelivering. A meshCaPem pin does not depend on the
+  // measurement policy for cluster identity, so the pinned mode is exempt.
+  if (wantPlatform === "tdx" && policy.meshCaPem === undefined) {
+    warnings.push(
+      "TDX deployment-class verdict with a measurement policy that is not platform-complete: " +
+        "only MRTD (and optionally RTMR[3]) is pinned, not RTMR[1]/RTMR[2], so the guest " +
+        "kernel and rootfs are not covered by the image pin. Pin meshCaPem for a " +
+        "specific-cluster verdict until RTMR[1]/RTMR[2] pinning is available",
+    );
+  }
 
   return {
     ok: true,
@@ -440,6 +641,8 @@ export async function verifyAttestation(
     sessionPubKey,
     cert: certInfo(identity.chain),
     claims: result.claims,
+    workload,
+    trustClass: policy.meshCaPem !== undefined ? "specific-cluster" : "deployment-class",
     warnings,
   };
 }
@@ -499,7 +702,7 @@ export interface EvidenceResult {
  * — when the caller supplies one — a `report_data` binding.
  *
  * Unlike {@link verifyAttestation}, this takes the raw `attestation-rs`
- * `SnpEvidence` directly and needs no `c8s-verify/v1` bundle, client nonce,
+ * `SnpEvidence` directly and needs no `attest-pq` bundle, client nonce,
  * session key, or CDS certificate. Use it when you fetch evidence over your own
  * transport and compute the `report_data` binding yourself (e.g. a discovery
  * document binding `SHA-384(cert_spki ‖ challenge)`). Cluster identity

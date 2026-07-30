@@ -9,7 +9,7 @@ import { bytesToBase64Url } from "../src/base64.js";
 import {
   certificateHashBase64Url,
   IDENTITY_PROOF_ALGORITHM,
-  PROTOCOL_VERSION,
+  BINDING_ATTEST_PQ,
   identityTranscriptHash,
   type MeshIdentityProof,
 } from "../src/identity.js";
@@ -54,7 +54,7 @@ export async function mintIdentityProof(
     transcript,
     proof,
     bundleFields: {
-      version: PROTOCOL_VERSION,
+      version: BINDING_ATTEST_PQ,
       identity_proof: proof,
     },
   };

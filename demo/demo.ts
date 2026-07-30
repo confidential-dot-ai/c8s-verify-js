@@ -77,7 +77,7 @@ async function run(): Promise<void> {
 
     // 2. fetch bundle
     set("fetch", "run");
-    const bundleRes = await fetch(`${PREFIX}/attestation?nonce=${bytesToBase64Url(nonce)}`, {
+    const bundleRes = await fetch(`${PREFIX}/attest-pq?nonce=${bytesToBase64Url(nonce)}`, {
       headers: { accept: "application/json" },
     });
     if (!bundleRes.ok) throw new Error(`HTTP ${bundleRes.status}`);

@@ -39,27 +39,34 @@ model documents the separate assumptions and limitations of that internal hop.
 
 ## How the protocol binds cluster identity
 
-Today the client pins two things out of band: the **LB measurement** allowlist and the
-**mesh CA certificate** (see `meshCaPem` in the example below). It is reasonable to ask
-why we pin a certificate at all, rather than simply pinning the known-good image hashes
-of the CDS and LB and letting attestation carry the rest.
+The client pins the **LB measurement** allowlist out of band, plus one of two
+anchors: the **mesh CA certificate** (`meshCaPem`), or the **canonical allowlist
+document bytes** (`allowlist`) enforced against the mesh leaf's matched-workload
+stamp. It is reasonable to ask why measurement pins alone are not enough.
 
-The reason is cluster identity. The CDS and LB images are open source and reproducible—
+The reason is identity. The CDS and LB images are open source and reproducible—
 that is what makes them auditable, but it also means a valid measurement only proves
-*"a genuine instance of the audited code, on real AMD silicon"*, not *"my cluster"*. An
+*"a genuine instance of the audited code, on real silicon"*, not *"my cluster"*. An
 attacker can stand up their own genuine LB enclave (same image, valid measurement, real
 VCEK chain, a `report_data` that correctly binds their enclave's session key to your
 nonce) and proxy you to it. Every measurement and freshness check passes — you would just
 end up with a confidential channel to a genuine-but-attacker-operated LB, forwarding to
-*their* backend pods. The one value that is unique per cluster is the **mesh CA key**,
-which is generated inside the CDS TEE; image hashes are not. So we have to pin *something*
-cluster-unique, and the mesh CA certificate is one such value.
+*their* backend pods.
 
-**That pin is no longer mandatory.** CDS's own RA-TLS certificate carries hardware
-evidence over a `config-claims` extension that commits the SHA-256 of the mesh CA
-it issues under, and those claims are folded into the TDX quote's REPORTDATA. So a
-verified CDS identity *authenticates* the mesh CA, and the anchor becomes derived
-rather than assumed — see [Deriving the mesh CA](#deriving-the-mesh-ca-attesting-cds).
+The two anchors answer that differently, and the result reports which one you got
+(`attestation.trustClass`):
+
+- **`meshCaPem` → `"specific-cluster"`.** The mesh CA key is generated inside
+  the CDS TEE and unique per cluster; pinning its certificate identifies *your*
+  cluster. It must be re-pinned after a reinstall or a no-handoff CDS restart.
+- **`allowlist` → `"deployment-class"`.** No CA file is distributed: the mesh CA
+  is derived from the identity transcript's hardware-bound commitment, and the
+  chain-verified leaf's matched-workload stamp must commit SHA-256 of exactly
+  the pinned canonical allowlist bytes, with the stamped name resolving in that
+  document. This proves "a genuine instance of this measured deployment running
+  an admitted workload" — it cannot distinguish your cluster from a genuine
+  clone booted from the same measured images and policy, which is why the
+  verdict is named what it is. Pinning both anchors is strictly stronger.
 
 On Intel TDX there is a second, better one: **RTMR[3]**, pinned via
 `expectedRtmr3`. It is a runtime measurement register, extended after launch —
@@ -90,9 +97,7 @@ The protocol closes the copied-public-chain gap in two ways:
 
 The identity signature is ECDSA, so authentication is currently classical. The
 channel key combines X25519 and ML-KEM-768; its recorded-traffic confidentiality
-is post-quantum as long as ML-KEM-768 remains secure. The derived anchor described below is that
-measurement-driven replacement: it still commits to a cluster-unique value, but
-the commitment is checked rather than trusted.
+is post-quantum as long as ML-KEM-768 remains secure.
 
 ## Library
 
@@ -114,9 +119,11 @@ import { C8sClient } from "c8s-verify";
 const client = new C8sClient({
   baseUrl: "https://lb.example.com",
   measurements: ["<expected hex SHA-384 launch digest>"], // pinned out of band
-  meshCaPem: pinnedMeshCaPem,                              // pinned CDS/mesh CA anchor
-  //   ^ or drop it and pass `cdsIdentity` instead, to derive the anchor from
-  //     attested claims. Exactly one of the two is required.
+  meshCaPem: pinnedMeshCaPem,                              // specific-cluster anchor
+  //   ^ or/and pass `allowlist` (the exact canonical allowlist bytes) for a
+  //     deployment-class anchor enforced against the mesh leaf's
+  //     matched-workload stamp. At least one of the two is required.
+  workloadName: "sglang-kimi-k3",                          // optional workload pin
   // Intel TDX only. Pins the deployment, not just the build: RTMR[3] carries the
   // operator key bound at launch, so a genuine-but-someone-else's cluster running
   // the same audited image is rejected. SHA-384(0x00*48 ‖ SHA-384(operator pubkey)).
@@ -143,13 +150,15 @@ every `session.fetch` reuses them. The LB keeps the session for its
 expires a tunnel request fails with a typed `channel_error` (HTTP 401), and the
 embedding app re-runs `client.connect()` to attest a fresh session.
 
-What is verified, and in what order: nonce echo → response is identity-bound v1 → served leaf
-chains to a mesh CA pinned out of band → hardware signature + certificate chain
-(WASM; SEV-SNP VCEK or TDX DCAP, per the policy `platform`) →
-launch measurement ∈ a non-empty allowlist → `report_data` commits the session
-keys, nonce, leaf, and CA → leaf proof-of-possession signature. The same transcript
-is the HKDF context. Any failure throws a typed `C8sVerifyError` and no channel
-is established.
+What is verified, and in what order: nonce echo → response version is exactly
+`c8s/attest-pq/v1` → served leaf chains to the pinned or transcript-derived mesh
+CA → hardware signature + certificate chain (WASM; SEV-SNP VCEK or TDX DCAP, per
+the policy `platform`) → launch measurement ∈ a non-empty allowlist →
+`report_data` commits the session keys, nonce, leaf, and CA → leaf
+proof-of-possession signature → matched-workload stamp (only when
+`workloadName`/`allowlist` is pinned, and only after everything else passed).
+The same transcript is the HKDF context. Any failure throws a typed
+`C8sVerifyError` and no channel is established.
 
 ### Lower-level: verifying bare evidence
 
@@ -173,117 +182,49 @@ const r = await verifyEvidence(evidence /* { attestation_report, cert_chain:{ vc
 console.log(r.measurement, r.reportDataMatch, r.claims);
 ```
 
-## Deriving the mesh CA (attesting CDS)
+## Verifying the workload (matched-workload stamp)
 
-The mesh CA used to be trusted because an operator sent you the file. It does not
-have to be. CDS runs in its own TEE and its RA-TLS certificate carries a
-`config-claims` extension (OID `1.3.6.1.4.1.59888.1.3`) committing:
-
-| claim | what it pins |
-|---|---|
-| `meshCaDigest` | SHA-256 of the mesh CA CDS issues under (claims v2+) |
-| `allowlistDigest` | SHA-256 of the allowlist CDS is serving **now** (claims v3+) |
-| `operatorKeysDigest` | the operator key set authorized to mutate the allowlist |
-| `seedDigest` | the allowlist seed loaded at boot |
-
-Those claim bytes are folded into the TDX quote's REPORTDATA together with the
-certificate's public key, so the evidence vouches for *this certificate carrying
-exactly these claims*. Verify it once and both the CA and the admission policy
-become derived values.
+CDS stamps a mesh leaf with the single allowlist entry whose (digest, argv)
+policy the pod's attested container inventory uniquely matched at issuance
+(X.509 extension `1.3.6.1.4.1.59888.1.5`). The stamp carries the matched name,
+the allowlist store version, and SHA-256 of the canonical allowlist document
+the match was decided under.
 
 ```js
-import { C8sClient, attestCDSIdentity, verifyAllowlist, MemoryCDSIdentityCache } from "c8s-verify";
+import { C8sClient } from "c8s-verify";
 
-// `cds_identity.certificate_pem` from the front door's discovery document. It is
-// safe to fetch from an untrusted front door: it is self-authenticating, so a
-// substituted or edited copy simply fails to verify.
+// The exact canonical allowlist bytes, obtained out of band (or from
+// `GET /allowlist`, which serves canonical bytes). Hash-exact: never
+// re-serialize the JSON before pinning it.
+const allowlist = new Uint8Array(await (await fetch(allowlistUrl)).arrayBuffer());
+
 const client = new C8sClient({
   baseUrl: "https://lb.example.com",
-  measurements: ["<expected LB launch digest>"],
-  cdsIdentity: {
-    certificatePem: discovery.cds_identity.certificate_pem,
-    policy: {
-      measurements: ["<expected CDS launch digest>"], // required, and non-empty
-      expectedRtmr3: "<expected RTMR[3]>",            // recommended
-    },
-    cache: new MemoryCDSIdentityCache(),              // optional, see below
-  },
+  measurements: ["<expected hex launch digest>"],
+  allowlist,                       // deployment-class anchor + policy pin
+  workloadName: "sglang-kimi-k3",  // optional: exactly this entry
 });
 const session = await client.connect();
+console.log(session.attestation.trustClass);     // "deployment-class"
+console.log(session.attestation.workload?.name); // "sglang-kimi-k3"
 ```
 
-The client matches the attested `meshCaDigest` against the certificates the server
-serves beside its leaf and pins **exactly that one certificate**, re-encoded on its
-own. It never pins the served chain: hardware vouched for one certificate, and
-trusting the bundle it arrived in would trust every block in it. `meshCaPem` and
-`cdsIdentity` are mutually exclusive — pass exactly one.
+The checks run only after every identity check has passed, in this order: the
+stamp parses (absent → `workload_not_attested`, malformed →
+`workload_invalid`), its allowlist digest equals SHA-256 of the pinned bytes
+(`allowlist_denied` otherwise), the stamped name equals `workloadName` when
+pinned (`workload_denied`), and the stamped name resolves as a key in the
+pinned document's `workloads` map (`workload_unresolved`).
 
-To check the served allowlist against the same attested claims:
+An unstamped leaf is a normal lifecycle state — CDS issues membership-only
+leaves until a pod's first post-completion renewal resolves the match — so
+`workload_not_attested` is distinct from `workload_invalid`: a verifier must
+not read damage as absence, and a pinned client fails closed on both.
 
-```js
-const id = await attestCDSIdentity(discovery.cds_identity.certificate_pem, {
-  measurements: ["<expected CDS launch digest>"],
-});
-const res = await fetch("https://lb.example.com/allowlist");
-// The RAW response bytes — CDS commits SHA-256 over the canonical bytes it
-// serves, so a re-serialized copy is a different digest.
-await verifyAllowlist(id, new Uint8Array(await res.arrayBuffer()));
-```
-
-### Caching, and refusing a downgrade
-
-CDS re-issues its certificate whenever the live allowlist changes, so the
-certificate fingerprint is an exact invalidation signal — no staleness window to
-tune. `attestCDSIdentityCached` uses it, and does one thing plain attestation
-cannot: it remembers the last verified `notBefore` and **refuses a certificate
-older than one already seen**.
-
-That matters because a single attestation cannot tell yesterday's genuine
-certificate from today's. Yesterday's certificate and yesterday's allowlist are
-internally consistent and correctly signed by real hardware; the only thing wrong
-with the pair is that a newer one exists. Replaying it rolls the admission policy
-back. Comparing issuance times turns that into something checkable.
-
-```js
-import { attestCDSIdentityCached, StorageCDSIdentityCache } from "c8s-verify";
-
-const cache = new StorageCDSIdentityCache(localStorage); // survives reloads
-const id = await attestCDSIdentityCached(pem, policy, cache, "lb.example.com");
-if (id.cached) console.log("reused a verified verdict; no WASM ran");
-```
-
-A rollback throws `cds_identity_rollback`, naming both fingerprints and both
-timestamps. Set `policy.allowRollback` for a deliberate re-bootstrap (cluster
-reinstalled, CDS re-keyed).
-
-The comparison is only sound because `attestCDSIdentity` verifies the
-certificate's **self-signature** against the SPKI that REPORTDATA binds. The
-validity window sits outside the transcript, so without that check `notBefore` is
-attacker-chosen — and so was `notAfter`, which meant a genuine certificate could
-be given a 2099 expiry and replayed forever.
-
-### Error codes
-
-| code | meaning |
-|---|---|
-| `cds_identity_missing` | the discovery document carries no `cds_identity` |
-| `cds_identity_invalid` | not a parseable CDS RA-TLS certificate |
-| `cds_identity_denied` | a check ran and failed (evidence, report-data binding, RTMR[3], measurement) |
-| `cds_identity_unsigned` | the certificate body is not signed by the attested key |
-| `cds_identity_expired` | outside its validity window at the reference time |
-| `cds_identity_rollback` | older than a certificate already verified under this cache key |
-| `mesh_ca_denied` / `allowlist_denied` | digest mismatch against the attested claims |
-| `mesh_ca_not_attested` / `allowlist_not_attested` | the claims predate the field (v1/v2), so nothing to check against |
-
-`_denied` and `_not_attested` are deliberately distinct: the first is a check that
-ran and failed, the second is a cluster older than the claim. Conflating them
-would send an operator hunting a breach that is really an upgrade.
-
-> **Server side.** Deriving the mesh CA needs a CDS that emits claims v2+ and
-> publishes `cds_identity` in its discovery document. That runtime lives on the
-> c8s `feat/cds-identity-claims` branch; against an older cluster
-> `cdsIdentity` fails closed with `cds_identity_missing` or
-> `mesh_ca_not_attested`, and `meshCaPem` remains the way to anchor.
+The lower-level pieces (`parseMatchedWorkload`, `parseAllowlist`,
+`resolveWorkload`, `allowlistDigestHex`, `OID_MATCHED_WORKLOAD`) are exported
+for callers that obtain certificates through their own transport; the stamp is
+CA-vouched, so parse it only off a chain-verified leaf.
 
 ## Demo
 
@@ -323,7 +264,7 @@ browser-check` compiles a browser bundle first (`npm run build:demo`).
   PQ over-encryption channel, the mock LB, the browser demo, and the test suite.
 - **Implemented (server):** the matching c8s endpoints ship as the `c8s cds-attest`
   sidecar, fronted by the existing tls-lb nginx (chart flag `tlsLb.attest.enabled`):
-  it serves `/.well-known/c8s/attestation` + the over-encryption handshake and
+  it serves `/.well-known/c8s/attest-pq` + the over-encryption handshake and
   returns the exact identity chain in each bundle; a bundle is fetched once per
   session, so the chain does not ride every application request. Go↔JS interop
   is verified end to end (`c8s/pkg/overenc`, `c8s/internal/cmds/cdsattest`).
