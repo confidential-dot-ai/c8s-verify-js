@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { verifyTdx } from "../src/wasm-loader.js";
-import { verifyEvidence } from "../src/verify.js";
+import { enforceTdxImagePins, verifyEvidence, type WasmVerifyResult } from "../src/verify.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { base64UrlToBytes } from "../src/base64.js";
 import type { TdxEvidence } from "../src/hcl.js";
@@ -112,7 +112,11 @@ test('verifyEvidence platform:"tdx" verifies without a generation', async () => 
   assert.equal(res.platform, "tdx");
   assert.equal(res.measurement, TDX_MRTD);
   assert.equal(res.reportDataMatch, true);
-  assert.deepEqual(res.warnings, []);
+  // MRTD-only is not a platform-complete TDX image policy: warn prominently.
+  assert.ok(
+    res.warnings.some((w) => w.includes("not platform-complete")),
+    `expected the platform-completeness warning, got: ${JSON.stringify(res.warnings)}`,
+  );
 });
 
 test('verifyEvidence platform:"tdx" denies a wrong measurement pin', async () => {
@@ -224,4 +228,138 @@ test('verifyEvidence platform:"tdx" without a pin does not check RTMR[3]', async
   const { evidence } = await tdxBundle();
   const res = await verifyEvidence(evidence, { platform: "tdx", measurements: [TDX_MRTD] });
   assert.equal(res.ok, true);
+});
+
+// ---------------------------------------------------------------------------
+// The TDX image tuple: MRTD + RTMR[1] + RTMR[2] pinned as one unit
+// ---------------------------------------------------------------------------
+
+// RTMR[1]/RTMR[2] of the TD that produced the fixture: the guest kernel and
+// rootfs measurements that, together with MRTD, form the complete image
+// identity — the tuple a build publishes in its image manifest.
+const TDX_RTMR1 =
+  "e0aaa1f273b80e1e4e5032b789f34fc3f78c88719717b266cb3152aa4bc6490f13fe3a9cea8e00b48a3719074e06c05a";
+const TDX_RTMR2 =
+  "15d4452b636e411b9c85a9fdb8b9c75b8ac7abb7eafe846aed987495a8b44b3b22a9681521961b382bdfe170efc4adeb";
+const TDX_IMAGE = { mrtd: TDX_MRTD, rtmr1: TDX_RTMR1, rtmr2: TDX_RTMR2 };
+
+test('verifyEvidence platform:"tdx" accepts a matching image tuple', async () => {
+  const { evidence } = await tdxBundle();
+  // The tuple's MRTD joins the allowlist, so no separate `measurements` pin is
+  // needed; the result reports both registers as compared.
+  const res = await verifyEvidence(evidence, { platform: "tdx", tdxImage: TDX_IMAGE });
+  assert.equal(res.ok, true);
+  assert.equal(res.measurement, TDX_MRTD);
+  assert.deepEqual(res.rtmrsPinned, [`1:${TDX_RTMR1}`, `2:${TDX_RTMR2}`]);
+  assert.ok(!res.warnings.some((w) => w.includes("not platform-complete")));
+});
+
+test("a full tuple pin also records RTMR[3] when that pin is set", async () => {
+  const { evidence } = await tdxBundle();
+  const res = await verifyEvidence(evidence, {
+    platform: "tdx",
+    tdxImage: TDX_IMAGE,
+    expectedRtmr3: TDX_RTMR3,
+  });
+  assert.deepEqual(res.rtmrsPinned, [`1:${TDX_RTMR1}`, `2:${TDX_RTMR2}`, `3:${TDX_RTMR3}`]);
+});
+
+// A matching MRTD must not stand in for the image: the same firmware boots
+// any guest kernel/rootfs, so a diverging RTMR[1] or RTMR[2] is a different
+// image and fails with the register-precise code.
+test("a wrong RTMR[1] or RTMR[2] fails with rtmr_denied even when MRTD matches", async () => {
+  const { evidence } = await tdxBundle();
+  for (const bad of [
+    { ...TDX_IMAGE, rtmr1: "ff".repeat(48) },
+    { ...TDX_IMAGE, rtmr2: TDX_RTMR2.slice(0, 94) + "00" },
+  ]) {
+    await assert.rejects(
+      verifyEvidence(evidence, { platform: "tdx", tdxImage: bad }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr_denied",
+    );
+  }
+});
+
+// All three registers or none: a partial tuple would silently verify only
+// part of the image, so it is refused up front — as are bad hex, uppercase
+// (the claims are lowercase and comparisons are byte-exact), and wrong length.
+test("a partial or malformed tuple is refused with invalid_request", async () => {
+  const { evidence } = await tdxBundle();
+  const partials = [
+    { rtmr1: TDX_RTMR1, rtmr2: TDX_RTMR2 },
+    { mrtd: TDX_MRTD, rtmr2: TDX_RTMR2 },
+    { mrtd: TDX_MRTD, rtmr1: TDX_RTMR1 },
+    { ...TDX_IMAGE, rtmr1: "" },
+    { ...TDX_IMAGE, mrtd: "zz".repeat(48) },
+    { ...TDX_IMAGE, rtmr2: TDX_RTMR2.toUpperCase() },
+    { ...TDX_IMAGE, rtmr1: TDX_RTMR1.slice(0, 95) },
+  ];
+  for (const bad of partials) {
+    await assert.rejects(
+      verifyEvidence(evidence, {
+        platform: "tdx",
+        tdxImage: bad as unknown as typeof TDX_IMAGE,
+      }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      `tuple ${JSON.stringify(bad).slice(0, 60)}… must be refused`,
+    );
+  }
+});
+
+// An absent or malformed claim must fail closed, never read as "held": a
+// verifier build whose claims omit the registers cannot vouch for the pin.
+// Real evidence always carries them, so the fail-closed paths are exercised
+// directly on hand-built results.
+test("enforceTdxImagePins fails closed on absent or malformed register claims", () => {
+  const base = {
+    signature_valid: true,
+    platform: "tdx",
+    report_data_match: null,
+  };
+  for (const claims of [
+    { launch_digest: TDX_MRTD }, // no platform_data at all
+    { launch_digest: TDX_MRTD, platform_data: {} }, // registers absent
+    { launch_digest: TDX_MRTD, platform_data: { rtmr_1: TDX_RTMR1 } }, // rtmr_2 absent
+    // present but not a comparable register encoding
+    {
+      launch_digest: TDX_MRTD,
+      platform_data: { rtmr_1: TDX_RTMR1.toUpperCase(), rtmr_2: TDX_RTMR2 },
+    },
+    { launch_digest: TDX_MRTD, platform_data: { rtmr_1: "abcd", rtmr_2: TDX_RTMR2 } },
+    { launch_digest: TDX_MRTD, platform_data: { rtmr_1: 7, rtmr_2: TDX_RTMR2 } },
+  ]) {
+    const result: WasmVerifyResult = { ...base, claims };
+    assert.throws(
+      () => enforceTdxImagePins(result, TDX_IMAGE),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr_denied",
+      `claims ${JSON.stringify(claims).slice(0, 80)}… must fail closed`,
+    );
+  }
+  // The same helper passes on well-formed matching claims.
+  const ok = enforceTdxImagePins(
+    {
+      ...base,
+      claims: { launch_digest: TDX_MRTD, platform_data: { rtmr_1: TDX_RTMR1, rtmr_2: TDX_RTMR2 } },
+    },
+    TDX_IMAGE,
+  );
+  assert.deepEqual(ok, [`1:${TDX_RTMR1}`, `2:${TDX_RTMR2}`]);
+});
+
+// Mirror of the expectedRtmr3 platform rule: the registers exist only on TDX
+// (SNP's launch measurement already covers the full image by design), so a
+// tuple combined with any other platform is a policy error, never ignored.
+test("verifyEvidence refuses an image tuple on a non-TDX platform", async () => {
+  const { evidence } = await tdxBundle();
+  for (const platform of ["snp", "az-snp", "az-tdx"]) {
+    await assert.rejects(
+      verifyEvidence(evidence, {
+        platform,
+        generation: "milan",
+        tdxImage: TDX_IMAGE,
+      }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      `platform ${platform} must refuse the tuple`,
+    );
+  }
 });

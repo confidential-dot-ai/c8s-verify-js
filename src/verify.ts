@@ -22,6 +22,7 @@ import {
   parseMatchedWorkload,
   resolveWorkload,
 } from "./workload.js";
+import { requireTdxImage, type TdxImage } from "./manifest.js";
 
 export interface VerifyPolicy {
   /** accepted launch digests (hex sha-384) */
@@ -78,6 +79,25 @@ export interface VerifyPolicy {
    * rather than silently ignored.
    */
   expectedRtmr3?: string;
+  /**
+   * The complete TDX guest-image pin: MRTD + RTMR[1] + RTMR[2] as one tuple,
+   * each exactly 96 lowercase hex chars, published with the image build (feed
+   * a manifest file to {@link parseImageManifest}). `measurements` alone pins
+   * only MRTD, which covers the TDVF firmware — the guest kernel and rootfs
+   * land in RTMR[1]/RTMR[2], so only the tuple identifies the image. The
+   * tuple's `mrtd` joins the `measurements` allowlist and `rtmr1`/`rtmr2` are
+   * compared exactly against the verified claims. All three registers or
+   * none: a partial tuple is rejected rather than partially enforced.
+   *
+   * Required for a TDX deployment-class verdict (no `meshCaPem`), where the
+   * measurement policy is the entire anchor; with a pinned mesh CA it is
+   * strongly recommended, and its absence is a prominent warning.
+   *
+   * TDX only — SNP's launch measurement already covers the full image and has
+   * no runtime-register equivalent, so combining this with any other platform
+   * is rejected rather than silently ignored.
+   */
+  tdxImage?: TdxImage;
 }
 
 export interface SessionPubKeyB64 {
@@ -171,6 +191,14 @@ export interface AttestationResult {
    * same measured images and policy is indistinguishable by public inputs.
    */
   trustClass: "deployment-class" | "specific-cluster";
+  /**
+   * The TDX runtime measurement registers this verdict compared exactly, as
+   * "<index>:<expected hex>" (e.g. "1:<rtmr1>", "2:<rtmr2>" from the
+   * `tdxImage` tuple, "3:<rtmr3>" from `expectedRtmr3`). Present only when at
+   * least one register pin was enforced — absent means only the launch digest
+   * was pinned.
+   */
+  rtmrsPinned?: string[];
   warnings: string[];
 }
 
@@ -192,10 +220,54 @@ function errMessage(e: unknown): string {
 }
 
 /** The TDX verifier reports the registers under claims.platform_data. */
-function rtmr3FromClaims(result: WasmVerifyResult): string {
+function rtmrFromClaims(result: WasmVerifyResult, idx: number): unknown {
   const pd = result.claims.platform_data as Record<string, unknown> | undefined;
-  const rtmr3 = pd?.rtmr_3;
+  return pd?.[`rtmr_${idx}`];
+}
+
+function rtmr3FromClaims(result: WasmVerifyResult): string {
+  const rtmr3 = rtmrFromClaims(result, 3);
   return typeof rtmr3 === "string" ? rtmr3 : "";
+}
+
+/** The exact register encoding the claims carry: 96 lowercase hex chars. */
+const CLAIM_REGISTER_HEX = /^[0-9a-f]{96}$/;
+
+/**
+ * Enforce the RTMR[1]/RTMR[2] half of a TDX image pin against the VERIFIED
+ * claims (the tuple's MRTD is enforced through the launch-digest allowlist
+ * instead). Register-exact lowercase-hex comparison; an absent or malformed
+ * claim fails closed — a claim that cannot be compared must never read as a
+ * pin that held. Returns the `rtmrsPinned` entries ("<idx>:<hex>") recorded on
+ * the result. Exported for direct testing of the fail-closed paths; callers
+ * go through {@link verifyAttestation} / {@link verifyEvidence}.
+ */
+export function enforceTdxImagePins(result: WasmVerifyResult, image: TdxImage): string[] {
+  const pinned: string[] = [];
+  for (const [idx, meaning, want] of [
+    [1, "guest kernel", image.rtmr1],
+    [2, "guest rootfs", image.rtmr2],
+  ] as const) {
+    const got = rtmrFromClaims(result, idx);
+    if (typeof got !== "string" || !CLAIM_REGISTER_HEX.test(got)) {
+      fail(
+        "rtmr_denied",
+        `cannot enforce the RTMR[${idx}] pin: the verified claims carry no well-formed ` +
+          `rtmr_${idx} — refusing to report a pin that was never compared`,
+        { details: { register: `rtmr_${idx}`, expected: want, got } },
+      );
+    }
+    if (got !== want) {
+      fail(
+        "rtmr_denied",
+        `RTMR[${idx}] (${meaning}) is ${got}, expected ${want}: the TD is not running the ` +
+          "pinned guest image, even though its launch digest may match",
+        { details: { register: `rtmr_${idx}`, expected: want, got } },
+      );
+    }
+    pinned.push(`${idx}:${want}`);
+  }
+  return pinned;
 }
 
 /**
@@ -278,6 +350,18 @@ function validatePolicy(policy: VerifyPolicy): void {
     ) {
       fail("invalid_request", "expectedRtmr3 must be 96 hex characters (48 bytes, SHA-384)");
     }
+  }
+  if (policy.tdxImage !== undefined) {
+    // Same platform rule as expectedRtmr3: a pin the verifier would silently
+    // drop is worse than no pin.
+    const platform = policy.platform ?? "snp";
+    if (platform !== "tdx") {
+      fail(
+        "invalid_request",
+        `tdxImage requires platform "tdx" (got ${JSON.stringify(platform)}): SNP's launch measurement already covers the full image and has no runtime-register equivalent, so the pin could not be enforced`,
+      );
+    }
+    requireTdxImage("tdxImage", policy.tdxImage);
   }
 }
 
@@ -601,7 +685,23 @@ export async function verifyAttestation(
     requireFreshness,
     policy.expectedRtmr3 === undefined ? undefined : decodeRtmr3(policy.expectedRtmr3),
   );
-  const measurement = verifyMeasurement(result, policy.measurements);
+  // The image tuple's MRTD is an accepted launch digest alongside the
+  // explicit allowlist; RTMR[1]/[2] are compared exactly below.
+  const measurement = verifyMeasurement(
+    result,
+    policy.tdxImage === undefined
+      ? policy.measurements
+      : [...policy.measurements, policy.tdxImage.mrtd],
+  );
+  const rtmrsPinned: string[] = [];
+  if (policy.tdxImage !== undefined) {
+    rtmrsPinned.push(...enforceTdxImagePins(result, policy.tdxImage));
+  }
+  if (policy.expectedRtmr3 !== undefined) {
+    // Enforced above by verifyHardwareAttestation (rtmr3_match must be true);
+    // recorded here so the result reports every register the verdict pinned.
+    rtmrsPinned.push(`3:${policy.expectedRtmr3.toLowerCase()}`);
+  }
   verifyFreshness(result, identity.transcript, requireFreshness, warnings);
   await verifyMeshIdentityProof(
     identity.proof,
@@ -614,19 +714,29 @@ export async function verifyAttestation(
   // chain) have all passed.
   const workload = await verifyWorkloadPolicy(identity.chain.leaf, policy);
 
-  // A derived-CA (deployment-class) verdict rests entirely on the measurement
-  // policy identifying the deployment. The WASM TDX verifier currently pins
-  // MRTD (plus an optional RTMR[3]) but not RTMR[1]/RTMR[2], so a TDX image
-  // pin here is not platform-complete — MRTD covers TDVF, while the guest
-  // kernel and rootfs live in RTMR[1]/RTMR[2]. Say so prominently rather than
-  // silently underdelivering. A meshCaPem pin does not depend on the
-  // measurement policy for cluster identity, so the pinned mode is exempt.
-  if (wantPlatform === "tdx" && policy.meshCaPem === undefined) {
+  // On TDX, MRTD covers only the TDVF firmware — the guest kernel and rootfs
+  // live in RTMR[1]/RTMR[2] — so without the tdxImage tuple the measurement
+  // policy is not platform-complete. A derived-CA (deployment-class) verdict
+  // rests entirely on the measurement policy identifying the deployment, so
+  // there the incomplete policy is rejected outright; with a pinned mesh CA
+  // cluster identity does not depend on the measurement pins, so the gap is a
+  // prominent warning instead.
+  if (wantPlatform === "tdx" && policy.tdxImage === undefined) {
+    if (policy.meshCaPem === undefined) {
+      fail(
+        "measurement_incomplete",
+        "TDX deployment-class verdict requires a platform-complete image pin: MRTD alone " +
+          "covers only the TDVF firmware, leaving the guest kernel and rootfs (RTMR[1]/" +
+          "RTMR[2]) unmeasured, so `measurements` is not a complete TDX image policy. Pass " +
+          "tdxImage with the mrtd+rtmr1+rtmr2 tuple from the image build's manifest (see " +
+          "parseImageManifest), or pin meshCaPem for a specific-cluster verdict",
+      );
+    }
     warnings.push(
-      "TDX deployment-class verdict with a measurement policy that is not platform-complete: " +
-        "only MRTD (and optionally RTMR[3]) is pinned, not RTMR[1]/RTMR[2], so the guest " +
-        "kernel and rootfs are not covered by the image pin. Pin meshCaPem for a " +
-        "specific-cluster verdict until RTMR[1]/RTMR[2] pinning is available",
+      "TDX measurement policy is not platform-complete: only MRTD (and optionally RTMR[3]) " +
+        "is pinned, not RTMR[1]/RTMR[2], so the guest kernel and rootfs are not covered by " +
+        "the image pin; cluster identity rests on the meshCaPem pin alone. Pass tdxImage " +
+        "with the mrtd+rtmr1+rtmr2 tuple from the image build's manifest to close the gap",
     );
   }
 
@@ -643,6 +753,7 @@ export async function verifyAttestation(
     claims: result.claims,
     workload,
     trustClass: policy.meshCaPem !== undefined ? "specific-cluster" : "deployment-class",
+    ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
     warnings,
   };
 }
@@ -684,6 +795,14 @@ export interface VerifyEvidenceOptions {
    * image digest cannot. Requires `platform: "tdx"`.
    */
   expectedRtmr3?: string;
+  /**
+   * The complete TDX guest-image pin (mrtd + rtmr1 + rtmr2, each 96 lowercase
+   * hex chars; see {@link VerifyPolicy.tdxImage} and `parseImageManifest`).
+   * The tuple's `mrtd` joins the `measurements` allowlist and `rtmr1`/`rtmr2`
+   * are compared exactly; a mismatch or an uncomparable claim fails closed.
+   * Requires `platform: "tdx"`.
+   */
+  tdxImage?: TdxImage;
 }
 
 export interface EvidenceResult {
@@ -693,6 +812,8 @@ export interface EvidenceResult {
   reportVersion: number;
   reportDataMatch: boolean | null;
   claims: WasmClaims;
+  /** Register pins this verdict compared exactly; see {@link AttestationResult.rtmrsPinned}. */
+  rtmrsPinned?: string[];
   warnings: string[];
 }
 
@@ -742,6 +863,17 @@ export async function verifyEvidence(
       fail("invalid_request", "expectedRtmr3 must be 96 hex characters (48 bytes, SHA-384)");
     }
     wantRtmr3 = decodeRtmr3(opts.expectedRtmr3);
+  }
+  if (opts.tdxImage !== undefined) {
+    // Same platform rule as expectedRtmr3: a pin the verifier would silently
+    // drop is worse than no pin.
+    if (!isTdx) {
+      fail(
+        "invalid_request",
+        `tdxImage requires platform "tdx" (got ${JSON.stringify(wantPlatform)}): SNP's launch measurement already covers the full image and has no runtime-register equivalent, so the pin could not be enforced`,
+      );
+    }
+    requireTdxImage("tdxImage", opts.tdxImage);
   }
   const expected = opts.expectedReportData;
 
@@ -796,15 +928,32 @@ export async function verifyEvidence(
     );
   }
 
-  // Measurement allowlist (case-insensitive hex).
+  // Measurement allowlist (case-insensitive hex). The image tuple's MRTD is
+  // an accepted launch digest alongside the explicit allowlist.
   const measurement = String(result.claims.launch_digest).toLowerCase();
   const allow = (opts.measurements ?? []).map((m) => m.toLowerCase());
+  if (opts.tdxImage !== undefined) allow.push(opts.tdxImage.mrtd);
   if (allow.length === 0) {
     warnings.push("no measurement allowlist provided — launch digest was not checked");
   } else if (!allow.includes(measurement)) {
     fail("measurement_denied", `launch digest ${measurement} is not in the allowlist`, {
       details: { measurement, allowed: allow },
     });
+  }
+  const rtmrsPinned: string[] = [];
+  if (opts.tdxImage !== undefined) {
+    rtmrsPinned.push(...enforceTdxImagePins(result, opts.tdxImage));
+  }
+  if (opts.expectedRtmr3 !== undefined) {
+    rtmrsPinned.push(`3:${opts.expectedRtmr3.toLowerCase()}`);
+  }
+  if (isTdx && allow.length > 0 && opts.tdxImage === undefined) {
+    warnings.push(
+      "TDX measurement policy is not platform-complete: only MRTD (and optionally RTMR[3]) " +
+        "is pinned, not RTMR[1]/RTMR[2], so the guest kernel and rootfs are not covered by " +
+        "the image pin. Pass tdxImage with the mrtd+rtmr1+rtmr2 tuple from the image " +
+        "build's manifest",
+    );
   }
 
   // report_data binding — only enforced when the caller supplies an expected value.
@@ -829,6 +978,7 @@ export async function verifyEvidence(
     reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
     claims: result.claims,
+    ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
     warnings,
   };
 }

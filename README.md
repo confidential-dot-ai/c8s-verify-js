@@ -88,6 +88,23 @@ Pinning both is strictly stronger than either alone; `expectedRtmr3` is optional
 only for backwards compatibility, and SNP has no equivalent register, so it is
 rejected on any platform other than `"tdx"` rather than silently ignored.
 
+TDX also changes what a complete *image* pin looks like. `measurements` pins the
+launch digest, which on TDX is MRTD — a measurement of the TDVF firmware only:
+the guest kernel lands in RTMR[1] and the guest rootfs in RTMR[2], so two
+different guest images built against the same firmware share an MRTD. A
+platform-complete image pin is therefore the tuple **mrtd + rtmr1 + rtmr2**,
+published in the image build's manifest — pass it as `tdxImage` (or feed the
+manifest file to `parseImageManifest`; each field is exactly 96 lowercase hex
+chars, all three required). The tuple's `mrtd` joins the `measurements`
+allowlist and `rtmr1`/`rtmr2` are compared exactly against the verified claims
+(`rtmr_denied` on divergence, failing closed if the claims cannot be compared).
+A deployment-class verdict — where the measurement policy is the entire anchor —
+rejects an MRTD-only TDX policy with `measurement_incomplete`; with a pinned
+mesh CA the gap is a prominent warning instead. On SEV-SNP the launch
+measurement already covers the whole image, and the platform has no
+runtime-register equivalent by design, so `tdxImage` is TDX-only and rejected on
+any other platform.
+
 The protocol closes the copied-public-chain gap in two ways:
 
 - Hardware evidence commits to the session keys, client nonce, exact mesh leaf,
@@ -114,7 +131,7 @@ npm install c8s-verify
 ```
 
 ```js
-import { C8sClient } from "c8s-verify";
+import { C8sClient, parseImageManifest } from "c8s-verify";
 
 const client = new C8sClient({
   baseUrl: "https://lb.example.com",
@@ -129,6 +146,11 @@ const client = new C8sClient({
   // the same audited image is rejected. SHA-384(0x00*48 ‖ SHA-384(operator pubkey)).
   platform: "tdx",
   expectedRtmr3: "<expected hex SHA-384 RTMR[3]>",
+  // Intel TDX only. The complete image pin: MRTD covers just the TDVF firmware,
+  // so the guest kernel (rtmr1) and rootfs (rtmr2) are pinned with it as one
+  // tuple, taken from the image build's manifest. Required for a
+  // deployment-class verdict (no meshCaPem).
+  tdxImage: parseImageManifest(imageManifestBytes),
 });
 
 // Generates a nonce, fetches the LB attestation, verifies the TEE evidence,

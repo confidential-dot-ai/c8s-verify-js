@@ -8,6 +8,22 @@ export type C8sErrorCode =
   | "verification_failed"
   | "report_data_mismatch"
   | "measurement_denied"
+  // A TDX measurement policy that is not platform-complete where completeness
+  // is required: a deployment-class verdict rests entirely on the measurement
+  // pins, and MRTD covers only the TDVF firmware — without the tdxImage tuple
+  // (mrtd+rtmr1+rtmr2) the guest kernel and rootfs are unmeasured. Distinct
+  // from invalid_request: the policy shape is fine, it is the combination of
+  // platform and trust class that makes it insufficient, which is a verdict
+  // decision rather than an input-validation one.
+  | "measurement_incomplete"
+  // An RTMR[1]/RTMR[2] image-tuple register check ran and failed — either the
+  // register differs from the pin, or the verified claims carry no well-formed
+  // value to compare (absent/malformed claims fail closed, never pass). Same
+  // shape as rtmr3_denied, which stays separate: RTMR[3] pins the runtime
+  // operator-key/workload chain (deployment identity), while RTMR[1]/[2] pin
+  // the guest image, and a caller telling "wrong image" from "wrong
+  // deployment" needs the codes to differ.
+  | "rtmr_denied"
   | "rtmr3_denied"
   | "invalid_cert"
   | "cert_chain"

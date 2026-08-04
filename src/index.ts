@@ -22,6 +22,7 @@ import { Channel, requestAAD, responseAAD, type WireRecord } from "./channel.js"
 import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
+import type { TdxImage } from "./manifest.js";
 
 export { C8sVerifyError } from "./errors.js";
 export type { C8sErrorCode } from "./errors.js";
@@ -49,6 +50,10 @@ export {
   allowlistDigestHex,
 } from "./workload.js";
 export type { MatchedWorkload, AllowlistDocument, AllowlistWorkload } from "./workload.js";
+// The TDX image pin: parse a published build-artifact manifest into the
+// mrtd+rtmr1+rtmr2 tuple `tdxImage` enforces.
+export { parseImageManifest } from "./manifest.js";
+export type { TdxImage } from "./manifest.js";
 export { decodePEM, decodeOnePEM, encodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
@@ -100,6 +105,15 @@ export interface C8sClientOptions {
    * `platform: "tdx"`.
    */
   expectedRtmr3?: string;
+  /**
+   * The complete TDX guest-image pin: the mrtd+rtmr1+rtmr2 tuple published
+   * with the image build (feed the manifest file to `parseImageManifest`).
+   * `measurements` alone pins only MRTD — the TDVF firmware — while the guest
+   * kernel and rootfs land in RTMR[1]/RTMR[2], so only the tuple identifies
+   * the image. Required for a TDX deployment-class verdict (no `meshCaPem`);
+   * strongly recommended otherwise. Requires `platform: "tdx"`.
+   */
+  tdxImage?: TdxImage;
 }
 
 export interface RequestInit {
@@ -173,6 +187,7 @@ export class C8sClient {
       workloadName: opts.workloadName,
       at: opts.at,
       expectedRtmr3: opts.expectedRtmr3,
+      tdxImage: opts.tdxImage,
     };
   }
 

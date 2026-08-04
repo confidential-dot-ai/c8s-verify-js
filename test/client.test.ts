@@ -107,3 +107,16 @@ test("workloadName passes through to the verification policy", () => {
   });
   assert.equal(client.policy.workloadName, "sglang-dev");
 });
+
+test("tdxImage passes through to the verification policy", () => {
+  const tdxImage = { mrtd: "1a".repeat(48), rtmr1: "2b".repeat(48), rtmr2: "3c".repeat(48) };
+  const client = new C8sClient({
+    baseUrl: "http://lb.test",
+    measurements: ["m"],
+    platform: "tdx",
+    meshCaPem: "pinned CA",
+    tdxImage,
+    fetch: captureFetch([]),
+  });
+  assert.deepEqual(client.policy.tdxImage, tdxImage);
+});

@@ -527,47 +527,180 @@ test("a malformed stamp fails with workload_invalid, never reads as absent", asy
 });
 
 // ---------------------------------------------------------------------------
-// TDX deployment-class measurement-completeness warning
+// TDX measurement-policy completeness: the mrtd+rtmr1+rtmr2 image tuple
 // ---------------------------------------------------------------------------
 
-// The WASM verifier can pin MRTD (and optionally RTMR[3]) but not
-// RTMR[1]/RTMR[2], so a TDX image pin is not platform-complete: the guest
-// kernel and rootfs are not covered. A deployment-class verdict rests entirely
-// on the measurement policy, so it must say so prominently; a meshCaPem pin
-// does not, so the pinned mode stays quiet.
-test("TDX deployment-class verdict warns that the measurement policy is incomplete", async () => {
+// MRTD covers only the TDVF firmware; the guest kernel and rootfs live in
+// RTMR[1]/RTMR[2], so an image pin is only complete as the tdxImage tuple. A
+// deployment-class verdict rests entirely on the measurement policy, so an
+// MRTD-only policy is rejected there; with a pinned mesh CA cluster identity
+// does not depend on the measurement pins, so the gap is a prominent warning.
+
+const TDX_MRTD =
+  "9309eaae9c151e766de0f97b1d1aaeb76b8c8c366080803943fb566521c8f0cf00a142d8b7b0683ed1d42c5a27198ba1";
+// The image tuple of the TD that produced the recorded fixture (RTMR[1] =
+// guest kernel, RTMR[2] = guest rootfs).
+const TDX_IMAGE = {
+  mrtd: TDX_MRTD,
+  rtmr1:
+    "e0aaa1f273b80e1e4e5032b789f34fc3f78c88719717b266cb3152aa4bc6490f13fe3a9cea8e00b48a3719074e06c05a",
+  rtmr2:
+    "15d4452b636e411b9c85a9fdb8b9c75b8ac7abb7eafe846aed987495a8b44b3b22a9681521961b382bdfe170efc4adeb",
+};
+
+async function tdxEvidence() {
   const { evidence } = JSON.parse(await readFile(join(FIX, "tdx-bundle.json"), "utf8"));
-  const TDX_MRTD =
-    "9309eaae9c151e766de0f97b1d1aaeb76b8c8c366080803943fb566521c8f0cf00a142d8b7b0683ed1d42c5a27198ba1";
+  return evidence;
+}
+
+test("TDX deployment-class verdict rejects an MRTD-only measurement policy", async () => {
   const nonce = generateNonce();
   const leaf = await stampedLeaf(await stampFor("sglang-dev"));
-  const { bundle } = await buildBundle(nonce, { leaf, evidence, platform: "tdx" });
+  const { bundle } = await buildBundle(nonce, {
+    leaf,
+    evidence: await tdxEvidence(),
+    platform: "tdx",
+  });
+  await assert.rejects(
+    async () =>
+      verifyAttestation(bundle, nonce, {
+        measurements: [TDX_MRTD],
+        platform: "tdx",
+        requireFreshness: false,
+        allowlist: await readAllowlistBytes(),
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "measurement_incomplete",
+  );
+});
+
+test("TDX deployment-class verdict passes with the full image tuple pinned", async () => {
+  const nonce = generateNonce();
+  const leaf = await stampedLeaf(await stampFor("sglang-dev"));
+  const { bundle } = await buildBundle(nonce, {
+    leaf,
+    evidence: await tdxEvidence(),
+    platform: "tdx",
+  });
+  // The tuple's MRTD joins the measurement allowlist, so the explicit list
+  // may pin a different (e.g. previous) image alongside it.
+  const r = await verifyAttestation(bundle, nonce, {
+    measurements: ["ab".repeat(48)],
+    platform: "tdx",
+    requireFreshness: false,
+    tdxImage: TDX_IMAGE,
+    allowlist: await readAllowlistBytes(),
+  });
+  assert.equal(r.trustClass, "deployment-class");
+  assert.equal(r.measurement, TDX_MRTD);
+  assert.deepEqual(r.rtmrsPinned, [`1:${TDX_IMAGE.rtmr1}`, `2:${TDX_IMAGE.rtmr2}`]);
+  assert.ok(!r.warnings.some((w) => w.includes("not platform-complete")));
+});
+
+test("a wrong RTMR[1] fails the tuple with rtmr_denied even though MRTD matches", async () => {
+  const nonce = generateNonce();
+  const leaf = await stampedLeaf(await stampFor("sglang-dev"));
+  const { bundle } = await buildBundle(nonce, {
+    leaf,
+    evidence: await tdxEvidence(),
+    platform: "tdx",
+  });
+  await assert.rejects(
+    async () =>
+      verifyAttestation(bundle, nonce, {
+        measurements: [TDX_MRTD],
+        platform: "tdx",
+        requireFreshness: false,
+        tdxImage: { ...TDX_IMAGE, rtmr1: "ff".repeat(48) },
+        allowlist: await readAllowlistBytes(),
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr_denied",
+  );
+});
+
+test("TDX specific-cluster verdict without the tuple keeps the prominent warning", async () => {
+  const nonce = generateNonce();
+  const leaf = await stampedLeaf(await stampFor("sglang-dev"));
+  const { bundle, meshCaPem } = await buildBundle(nonce, {
+    leaf,
+    evidence: await tdxEvidence(),
+    platform: "tdx",
+  });
   const r = await verifyAttestation(bundle, nonce, {
     measurements: [TDX_MRTD],
     platform: "tdx",
     requireFreshness: false,
-    allowlist: await readAllowlistBytes(),
+    meshCaPem,
   });
-  assert.equal(r.trustClass, "deployment-class");
+  assert.equal(r.trustClass, "specific-cluster");
   assert.ok(
     r.warnings.some((w) => w.includes("not platform-complete")),
     `expected the platform-completeness warning, got: ${JSON.stringify(r.warnings)}`,
   );
+  assert.equal(r.rtmrsPinned, undefined);
 
-  // The pinned (specific-cluster) mode is exempt: cluster identity does not
-  // rest on the measurement policy there.
+  // With the tuple pinned the warning goes away.
   const nonce2 = generateNonce();
-  const { bundle: bundle2, meshCaPem } = await buildBundle(nonce2, {
+  const { bundle: bundle2, meshCaPem: meshCaPem2 } = await buildBundle(nonce2, {
     leaf,
-    evidence,
+    evidence: await tdxEvidence(),
     platform: "tdx",
   });
   const r2 = await verifyAttestation(bundle2, nonce2, {
     measurements: [TDX_MRTD],
     platform: "tdx",
     requireFreshness: false,
-    meshCaPem,
+    tdxImage: TDX_IMAGE,
+    meshCaPem: meshCaPem2,
   });
-  assert.equal(r2.trustClass, "specific-cluster");
   assert.ok(!r2.warnings.some((w) => w.includes("not platform-complete")));
+});
+
+// SNP is unaffected by the completeness rule (its launch measurement already
+// covers the full image), and — mirroring expectedRtmr3 — an image tuple
+// combined with a non-TDX platform is a policy error, never silently ignored.
+test("SNP verdicts are unaffected, and a tuple on SNP is refused", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const r = await verifyAttestation(bundle, nonce, policy(meshCaPem));
+  assert.equal(r.ok, true);
+  assert.equal(r.rtmrsPinned, undefined);
+  assert.ok(!r.warnings.some((w) => w.includes("not platform-complete")));
+
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem, { tdxImage: TDX_IMAGE })),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "invalid_request" &&
+      e.message.includes('tdxImage requires platform "tdx"'),
+  );
+});
+
+// The tuple is all-or-nothing at the policy boundary too: verifyAttestation
+// refuses a partial or non-lowercase tuple before touching the evidence.
+test("verifyAttestation refuses a partial or malformed tuple with invalid_request", async () => {
+  const nonce = generateNonce();
+  const leaf = await stampedLeaf(await stampFor("sglang-dev"));
+  const { bundle, meshCaPem } = await buildBundle(nonce, {
+    leaf,
+    evidence: await tdxEvidence(),
+    platform: "tdx",
+  });
+  for (const bad of [
+    { mrtd: TDX_IMAGE.mrtd, rtmr1: TDX_IMAGE.rtmr1 }, // missing rtmr2
+    { ...TDX_IMAGE, rtmr2: TDX_IMAGE.rtmr2.toUpperCase() },
+    { ...TDX_IMAGE, mrtd: TDX_IMAGE.mrtd.slice(0, 95) },
+  ]) {
+    await assert.rejects(
+      () =>
+        verifyAttestation(bundle, nonce, {
+          measurements: [TDX_MRTD],
+          platform: "tdx",
+          requireFreshness: false,
+          tdxImage: bad as unknown as typeof TDX_IMAGE,
+          meshCaPem,
+        }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      `tuple ${JSON.stringify(bad).slice(0, 60)}… must be refused`,
+    );
+  }
 });

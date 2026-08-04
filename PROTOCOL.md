@@ -264,7 +264,23 @@ is verified against the PCK chain embedded in the quote up to the bundled
 Intel root. As with the other WASM entry points, the async collateral checks
 (CRL/TCB/QE identity) are skipped in the browser (`collateral_verified:
 false`). `claims.launch_digest` is the TD launch measurement (MRTD);
-`generation` is not applicable and is empty.
+`generation` is not applicable and is empty. The runtime measurement
+registers surface as `claims.platform_data.rtmr_0`…`rtmr_3`, each 96
+lowercase hex chars.
+
+**Platform-complete image pinning.** On TDX, MRTD covers only the TDVF
+firmware — the guest kernel is measured into RTMR[1] and the guest rootfs
+into RTMR[2] — so a complete image pin is the tuple **MRTD + RTMR[1] +
+RTMR[2]** from one image-build manifest (a JSON object with `mrtd`, `rtmr1`,
+`rtmr2`, each exactly 96 lowercase hex chars; all three required, unknown
+extra fields allowed). The policy layer (`tdxImage`, or `parseImageManifest`
+over the manifest file) folds the tuple's MRTD into the launch-digest
+allowlist and compares `rtmr1`/`rtmr2` exactly against the verified claims,
+failing closed on a mismatch or an absent/malformed claim. A
+deployment-class verdict rejects an MRTD-only TDX measurement policy; with a
+pinned mesh CA the gap is a prominent warning instead. SEV-SNP needs no
+equivalent: its launch measurement covers the full image, and the platform
+has no runtime measurement registers by design.
 
 ## Matched-workload extension (`1.3.6.1.4.1.59888.1.5`)
 
@@ -455,7 +471,10 @@ end-to-end confidentiality to the enclave regardless of the outer TLS terminator
 
 The client MUST fail closed. Typed errors (mirroring c8s error codes) include:
 `invalid_request`, `nonce_mismatch`, `verification_failed` (signature/chain/JsError),
-`report_data_mismatch`, `measurement_denied`, `rtmr3_denied`, `invalid_cert` /
+`report_data_mismatch`, `measurement_denied`, `measurement_incomplete` (TDX
+deployment-class verdict without the platform-complete mrtd+rtmr1+rtmr2 image
+tuple), `rtmr_denied` (an RTMR[1]/RTMR[2] image-tuple register differs from the
+pin, or the claims carry no comparable value), `rtmr3_denied`, `invalid_cert` /
 `cert_chain` (mesh leaf does not chain to the selected CA or is expired),
 `identity_binding`, and `key_binding`.
 
