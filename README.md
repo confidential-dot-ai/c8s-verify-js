@@ -208,7 +208,7 @@ console.log(r.measurement, r.reportDataMatch, r.claims);
 
 CDS stamps a mesh leaf with the single allowlist entry whose (digest, argv)
 policy the pod's attested container inventory uniquely matched at issuance
-(X.509 extension `1.3.6.1.4.1.59888.1.5`). The stamp carries the matched name,
+(X.509 extension `1.3.6.1.4.1.66378.1.5`). The stamp carries the matched name,
 the allowlist store version, and SHA-256 of the canonical allowlist document
 the match was decided under.
 

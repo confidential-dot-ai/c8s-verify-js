@@ -19,8 +19,8 @@ import { bytesToHex, utf8ToBytes } from "./base64.js";
 import { subtle } from "./crypto-env.js";
 import { C8sVerifyError, fail } from "./errors.js";
 
-/** Matched-workload extension OID (c8s pkg/ratls, the 1.3.6.1.4.1.59888 arc). */
-export const OID_MATCHED_WORKLOAD = "1.3.6.1.4.1.59888.1.5";
+/** Matched-workload extension OID (c8s pkg/ratls, the 1.3.6.1.4.1.66378 arc). */
+export const OID_MATCHED_WORKLOAD = "1.3.6.1.4.1.66378.1.5";
 
 /** The only encoding version this module parses; unknown versions fail closed. */
 const MATCHED_WORKLOAD_VERSION = 1;

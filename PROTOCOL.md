@@ -282,14 +282,14 @@ pinned mesh CA the gap is a prominent warning instead. SEV-SNP needs no
 equivalent: its launch measurement covers the full image, and the platform
 has no runtime measurement registers by design.
 
-## Matched-workload extension (`1.3.6.1.4.1.59888.1.5`)
+## Matched-workload extension (`1.3.6.1.4.1.66378.1.5`)
 
 The mesh leaf MAY carry a non-critical X.509 extension stamping the single
 allowlist entry whose (digest, argv) policy the pod's attested container
 inventory uniquely matched at issuance:
 
 ```
-OID 1.3.6.1.4.1.59888.1.5  (matched-workload extension, non-critical)
+OID 1.3.6.1.4.1.66378.1.5  (matched-workload extension, non-critical)
 MatchedWorkload ::= SEQUENCE {
     formatVersion    INTEGER,           -- exactly 1
     name             IA5String,         -- 1..63 bytes, [A-Za-z0-9][A-Za-z0-9._-]*

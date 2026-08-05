@@ -26,8 +26,8 @@ export const IA5 = (s: string): number[] => tlv(0x16, Array.from(new TextEncoder
 const UTC = (s: string): number[] => tlv(0x17, Array.from(new TextEncoder().encode(s)));
 const UTF8 = (s: string): number[] => tlv(0x0c, Array.from(new TextEncoder().encode(s)));
 
-/** 1.3.6.1.4.1.59888.1.5 — the matched-workload OID, DER-encoded. */
-export const OID_15_DER = [0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0xd3, 0x70, 0x01, 0x05];
+/** 1.3.6.1.4.1.66378.1.5 — the matched-workload OID, DER-encoded. */
+export const OID_15_DER = [0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x84, 0x86, 0x4a, 0x01, 0x05];
 /** ecdsa-with-SHA384. */
 const OID_ECDSA_SHA384 = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03];
 /** id-at-commonName. */
