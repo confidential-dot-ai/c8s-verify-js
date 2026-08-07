@@ -22,18 +22,11 @@ import { Channel, requestAAD, responseAAD, type WireRecord } from "./channel.js"
 import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
-import {
-  attestCDSIdentity,
-  attestCDSIdentityCached,
-  selectAttestedMeshCA,
-  type CDSIdentity,
-  type CDSPolicy,
-} from "./cdsidentity.js";
-import type { CDSIdentityCache } from "./cdscache.js";
-import { decodePEM, encodePEM } from "./pem.js";
+import type { TdxImage } from "./manifest.js";
 
 export { C8sVerifyError } from "./errors.js";
-export { PROTOCOL_VERSION } from "./identity.js";
+export type { C8sErrorCode } from "./errors.js";
+export { BINDING_ATTEST_PQ, TRANSCRIPT_DOMAIN_TAG } from "./identity.js";
 export type { MeshIdentityProof } from "./identity.js";
 export { verifyAttestation, verifyEvidence } from "./verify.js";
 export type {
@@ -43,32 +36,24 @@ export type {
   EvidenceResult,
   VerifyEvidenceOptions,
   CertInfo,
+  WorkloadInfo,
 } from "./verify.js";
+// The matched-workload stamp: parse the mesh leaf's .1.5 extension and the
+// allowlist document it pins. verifyAttestation applies these automatically
+// when the policy pins workloadName/allowlist; they are exported for callers
+// that verify certificates through their own transport.
 export {
-  attestCDSIdentity,
-  attestCDSIdentityCached,
-  cdsIdentityPEM,
-  verifyMeshCA,
-  selectAttestedMeshCA,
-  verifyAllowlist,
-  parseConfigClaims,
-  hasDigest,
-} from "./cdsidentity.js";
-export type {
-  CDSIdentity,
-  CachedCDSIdentity,
-  CDSPolicy,
-  ConfigClaims,
-  DiscoveryDocument,
-} from "./cdsidentity.js";
-// Caching a verified CDS identity: skips re-attestation while the certificate
-// is unchanged, and remembers the last verified notBefore so a replayed older
-// certificate is refused instead of silently rolling the allowlist back.
-export { MemoryCDSIdentityCache, StorageCDSIdentityCache, isCacheEntry } from "./cdscache.js";
-export type { CDSCacheEntry, CDSIdentityCache, WebStorageLike } from "./cdscache.js";
-// decodePEM to hand DER to verifyMeshCA (which takes bytes, so it hashes
-// exactly what it was given); encodePEM to turn a derived CA back into the
-// single-block PEM a VerifyPolicy pins.
+  OID_MATCHED_WORKLOAD,
+  parseMatchedWorkload,
+  parseAllowlist,
+  resolveWorkload,
+  allowlistDigestHex,
+} from "./workload.js";
+export type { MatchedWorkload, AllowlistDocument, AllowlistWorkload } from "./workload.js";
+// The TDX image pin: parse a published build-artifact manifest into the
+// mrtd+rtmr1+rtmr2 tuple `tdxImage` enforces.
+export { parseImageManifest } from "./manifest.js";
+export type { TdxImage } from "./manifest.js";
 export { decodePEM, decodeOnePEM, encodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
@@ -76,60 +61,37 @@ export type { Evidence, SnpEvidence, AzSnpEvidence, AzTdxEvidence, TdxEvidence }
 
 const WELL_KNOWN = "/.well-known/c8s";
 
-/**
- * How the client obtains the mesh CA when it is derived rather than pinned.
- *
- * Either an identity you already attested (so a cached verdict can be reused
- * across clients), or the raw `cds_identity` PEM from the front door's
- * discovery document plus the policy to attest it under.
- */
-export type CDSIdentityOption =
-  | {
-      /** A CDSIdentity you already obtained from attestCDSIdentity(Cached). */
-      identity: CDSIdentity;
-      certificatePem?: never;
-    }
-  | {
-      /** `cds_identity.certificate_pem` from the discovery document. */
-      certificatePem: string;
-      /** Pins to attest it under. `measurements` is required, as everywhere. */
-      policy: CDSPolicy;
-      /** Optional cache; when given, attestCDSIdentityCached is used. */
-      cache?: CDSIdentityCache;
-      /** Cache key. Defaults to the client's baseUrl. */
-      cacheKey?: string;
-      identity?: never;
-    };
-
 export interface C8sClientOptions {
   baseUrl: string;
   measurements: string[];
   platform?: string;
   requireFreshness?: boolean;
   /**
-   * Mesh CA pinned out of band. Mutually exclusive with `cdsIdentity` —
-   * exactly one of the two is required.
+   * Mesh CA pinned out of band — the specific-cluster anchor. At least one of
+   * `meshCaPem` and `allowlist` is required; both together is fine.
    *
    * Multiple PEM blocks mean *each block is independently trusted* as an
    * anchor: the identity proof selects whichever one it names. That is
-   * occasionally what you want during a CA rotation, and a footgun the rest of
-   * the time, so prefer a single block — or `cdsIdentity`, which derives the
-   * anchor and can only ever pin one certificate.
+   * occasionally what you want during a CA rotation, and a footgun the rest
+   * of the time, so prefer a single block.
    */
   meshCaPem?: string;
   /**
-   * Derive the mesh CA from attested CDS claims instead of pinning it.
-   *
-   * CDS's RA-TLS certificate commits the SHA-256 of the CA it issues under, and
-   * that commitment is bound into hardware evidence. So a verified CDS identity
-   * authenticates the CA, and the anchor stops being a file an operator sent
-   * you. The client matches the attested digest against the CA the server
-   * serves alongside its leaf and pins exactly that one certificate — not the
-   * served chain, which would trust every block in it.
-   *
-   * Mutually exclusive with `meshCaPem`.
+   * Exact canonical allowlist bytes, pinned out of band — the
+   * deployment-class anchor. A string is UTF-8-encoded verbatim, never
+   * parsed-and-reserialized. Requires the mesh leaf's matched-workload stamp
+   * to commit SHA-256 of exactly these bytes and resolves the stamped name in
+   * the document; the mesh CA is then derived from the identity transcript's
+   * commitment instead of pinned (`attestation.trustClass` reports which
+   * verdict you got).
    */
-  cdsIdentity?: CDSIdentityOption;
+  allowlist?: Uint8Array | string;
+  /**
+   * Expected matched-workload name on the mesh leaf. Optional; enforced
+   * against the CA-vouched stamp after the chain check, which either anchor
+   * provides.
+   */
+  workloadName?: string;
   at?: Date;
   fetch?: typeof fetch;
   wellKnownPrefix?: string;
@@ -143,6 +105,15 @@ export interface C8sClientOptions {
    * `platform: "tdx"`.
    */
   expectedRtmr3?: string;
+  /**
+   * The complete TDX guest-image pin: the mrtd+rtmr1+rtmr2 tuple published
+   * with the image build (feed the manifest file to `parseImageManifest`).
+   * `measurements` alone pins only MRTD — the TDVF firmware — while the guest
+   * kernel and rootfs land in RTMR[1]/RTMR[2], so only the tuple identifies
+   * the image. Required for a TDX deployment-class verdict (no `meshCaPem`);
+   * strongly recommended otherwise. Requires `platform: "tdx"`.
+   */
+  tdxImage?: TdxImage;
 }
 
 export interface RequestInit {
@@ -174,53 +145,31 @@ interface SessionOptions {
   attestation: AttestationResult;
 }
 
-/** The client's policy before the mesh CA is known (derived mode resolves it). */
-export type BaseVerifyPolicy = Omit<VerifyPolicy, "meshCaPem"> & { meshCaPem?: string };
-
 export class C8sClient {
   readonly baseUrl: string;
   readonly prefix: string;
   readonly fetch: typeof fetch;
-  /**
-   * Verification policy. In derived mode `meshCaPem` is absent here and is
-   * resolved per connection from attested claims — reading it is not a way to
-   * discover the anchor; read `session.attestation.cert.caSha256` instead.
-   */
-  readonly policy: BaseVerifyPolicy;
-  private readonly cdsIdentity?: CDSIdentityOption;
+  /** Verification policy applied to every connection. */
+  readonly policy: VerifyPolicy;
 
   constructor(opts: C8sClientOptions) {
     if (!opts?.baseUrl) {
       throw new C8sVerifyError("invalid_request", "baseUrl is required");
     }
-    // Exactly one anchor source. Both is ambiguous — we would have to pick, and
-    // picking silently is how a caller ends up believing the stronger option is
-    // in force while the weaker one decides. Neither leaves nothing to chain to.
+    // At least one anchor: a pinned mesh CA (specific-cluster), pinned
+    // canonical allowlist bytes enforced against the workload stamp
+    // (deployment-class), or both. verifyAttestation re-validates the shapes;
+    // refusing an anchorless client here means the misconfiguration surfaces
+    // at construction, not at the first connection.
     const hasPem = typeof opts.meshCaPem === "string" && opts.meshCaPem.trim() !== "";
-    const hasCds = opts.cdsIdentity !== undefined;
-    if (hasPem && hasCds) {
+    const hasAllowlist = opts.allowlist !== undefined && opts.allowlist.length > 0;
+    if (!hasPem && !hasAllowlist) {
       throw new C8sVerifyError(
         "invalid_request",
-        "pass either meshCaPem or cdsIdentity, not both: they are two different answers to " +
-          "'which CA anchors this cluster', and silently preferring one would misreport which " +
-          "check actually ran",
+        "verification requires an anchor: pass meshCaPem to pin the mesh CA out of band " +
+          "(specific-cluster), or allowlist with the exact canonical allowlist bytes to enforce " +
+          "against the mesh leaf's matched-workload stamp (deployment-class), or both",
       );
-    }
-    if (!hasPem && !hasCds) {
-      throw new C8sVerifyError(
-        "invalid_request",
-        "verification requires an anchor: pass meshCaPem to pin the mesh CA out of band, or " +
-          "cdsIdentity to derive it from attested CDS claims",
-      );
-    }
-    if (hasCds) {
-      const cds = opts.cdsIdentity!;
-      if (cds.identity === undefined && typeof cds.certificatePem !== "string") {
-        throw new C8sVerifyError(
-          "invalid_request",
-          "cdsIdentity needs either an attested identity or a certificatePem plus policy",
-        );
-      }
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
@@ -229,66 +178,17 @@ export class C8sClient {
       throw new C8sVerifyError("invalid_request", "no fetch implementation available");
     }
     this.fetch = f;
-    this.cdsIdentity = opts.cdsIdentity;
     this.policy = {
       measurements: opts.measurements,
       platform: opts.platform,
       requireFreshness: opts.requireFreshness,
       meshCaPem: hasPem ? opts.meshCaPem : undefined,
+      allowlist: opts.allowlist,
+      workloadName: opts.workloadName,
       at: opts.at,
       expectedRtmr3: opts.expectedRtmr3,
+      tdxImage: opts.tdxImage,
     };
-  }
-
-  /**
-   * Derive the mesh CA anchor from attested CDS claims, as a single-block PEM.
-   *
-   * Attests the CDS identity, then finds the certificate the server served
-   * alongside its leaf whose SHA-256 the attested claims commit to, and returns
-   * THAT ONE certificate re-encoded on its own. Re-encoding is the point:
-   * reusing the served chain as the pin would trust every block in it, whereas
-   * hardware vouched for exactly one.
-   *
-   * Public because a caller should be able to see, and log, which certificate
-   * the derivation actually chose.
-   *
-   * @throws when the client was configured with `meshCaPem` instead
-   */
-  async deriveMeshCaPem(bundle: AttestationBundle): Promise<string> {
-    if (this.cdsIdentity === undefined) {
-      fail("invalid_request", "this client pins meshCaPem out of band; nothing to derive");
-    }
-    const opt = this.cdsIdentity;
-    let identity: CDSIdentity;
-    if (opt.certificatePem === undefined) {
-      identity = opt.identity;
-    } else if (opt.cache !== undefined) {
-      identity = await attestCDSIdentityCached(
-        opt.certificatePem,
-        opt.policy,
-        opt.cache,
-        opt.cacheKey ?? this.baseUrl,
-      );
-    } else {
-      identity = await attestCDSIdentity(opt.certificatePem, opt.policy);
-    }
-
-    // The served chain is leaf-first; everything after it is a CA candidate.
-    // Only the block whose digest the attested claims name is selected.
-    const served = decodePEM(bundle?.cds_cert_pem ?? "", "CERTIFICATE");
-    if (served.length === 0) {
-      fail("identity_binding", "attestation response omitted cds_cert_pem");
-    }
-    const caDer = await selectAttestedMeshCA(identity, served.slice(1));
-    return encodePEM(caDer, "CERTIFICATE");
-  }
-
-  /** The effective policy for one bundle: configured, or derived per connection. */
-  private async resolvePolicy(bundle: AttestationBundle): Promise<VerifyPolicy> {
-    if (this.policy.meshCaPem !== undefined) {
-      return this.policy as VerifyPolicy;
-    }
-    return { ...this.policy, meshCaPem: await this.deriveMeshCaPem(bundle) };
   }
 
   private _url(path: string): string {
@@ -296,11 +196,13 @@ export class C8sClient {
   }
 
   /**
-   * Fetch the LB attestation bundle for a fresh nonce.
+   * Fetch the LB attest-pq bundle for a fresh nonce. There is no fallback,
+   * alias, or `pq`/`binding` parameter — the endpoint is the version selector,
+   * and a server that does not serve it is a server this client cannot verify.
    */
   async fetchAttestation(nonce: Uint8Array): Promise<AttestationBundle> {
     const params = new URLSearchParams({ nonce: bytesToBase64Url(nonce) });
-    const url = `${this._url(this.prefix)}/attestation?${params.toString()}`;
+    const url = `${this._url(this.prefix)}/attest-pq?${params.toString()}`;
     const res = await this.fetch(url, { headers: { accept: "application/json" } });
     if (!res.ok) {
       fail("verification_failed", `attestation endpoint returned HTTP ${res.status}`);
@@ -315,8 +217,7 @@ export class C8sClient {
   async connect(): Promise<Session> {
     const nonce = generateNonce();
     const bundle = await this.fetchAttestation(nonce);
-    const policy = await this.resolvePolicy(bundle);
-    const attestation = await verifyAttestation(bundle, nonce, policy);
+    const attestation = await verifyAttestation(bundle, nonce, this.policy);
 
     const { key, handshake } = await clientKeyAgreement(
       attestation.sessionPubKey,

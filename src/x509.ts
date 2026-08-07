@@ -39,10 +39,11 @@ export interface Certificate {
   /**
    * Extension values by OID, as the raw extnValue OCTET STRING contents.
    *
-   * Kept raw and unparsed on purpose: the RA-TLS attestation binds the exact
-   * extension bytes a certificate carries (REPORTDATA folds in the config-claims
-   * DER verbatim), so anything that re-encodes before hashing would compute a
-   * different value for the same certificate.
+   * Kept raw and unparsed on purpose: what a verifier enforces has to be the
+   * exact bytes the issuer signed — the matched-workload stamp is decoded from
+   * this DER verbatim, and the RA-TLS attestation extension is the value the
+   * quote's REPORTDATA commits to. Anything that re-encodes before comparing or
+   * hashing would compute a different value for the same certificate.
    */
   extensions: Map<string, Uint8Array>;
 }

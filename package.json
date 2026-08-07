@@ -1,6 +1,6 @@
 {
   "name": "c8s-verify",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Verify that a remote API is running in a C8s TEE-attested cluster, and establish a post-quantum over-encrypted channel to the attested Load Balancer.",
   "type": "module",
   "license": "Apache-2.0",
