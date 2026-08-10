@@ -6,7 +6,7 @@
 // genuinely chains to the fixture CA. node:crypto signing, so it must never be
 // imported from src/ (browser code only verifies).
 
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 
 import { readTLV, readChildren } from "../src/asn1.js";
 import { encodePEM } from "../src/pem.js";
@@ -32,6 +32,25 @@ export const OID_15_DER = [0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x84, 0x86,
 const OID_ECDSA_SHA384 = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x03];
 /** id-at-commonName. */
 const OID_CN = [0x06, 0x03, 0x55, 0x04, 0x03];
+/** id-ce-basicConstraints / id-ce-keyUsage. */
+const OID_BASIC_CONSTRAINTS = [0x06, 0x03, 0x55, 0x1d, 0x13];
+const OID_KEY_USAGE = [0x06, 0x03, 0x55, 0x1d, 0x0f];
+
+const BOOL = (v: boolean): number[] => tlv(0x01, [v ? 0xff : 0x00]);
+
+/**
+ * A critical basicConstraints Extension SEQUENCE. `false` emits the empty
+ * SEQUENCE — cA is DEFAULT FALSE, which is how a leaf spells "not a CA".
+ */
+export const basicConstraintsExt = (isCA: boolean): number[] =>
+  SEQ(OID_BASIC_CONSTRAINTS, BOOL(true), OCT(isCA ? SEQ(BOOL(true)) : SEQ()));
+
+/**
+ * A critical keyUsage Extension SEQUENCE: keyCertSign (bit 5, so 0x04 with two
+ * unused bits) or digitalSignature (bit 0, so 0x80 with seven).
+ */
+export const keyUsageExt = (certSign: boolean): number[] =>
+  SEQ(OID_KEY_USAGE, BOOL(true), OCT(tlv(0x03, certSign ? [0x02, 0x04] : [0x07, 0x80])));
 
 /**
  * Encode a matched-workload extnValue. An independent encoder on purpose: the
@@ -68,21 +87,62 @@ function subjectNameDer(certDer: Uint8Array): Uint8Array {
   return fields[i + 4].bytes;
 }
 
+/** Shared knobs of the two minters below. */
+interface MintOpts {
+  subjectCN?: string;
+  extensions?: number[][];
+}
+
 /**
  * Mint a leaf signed by the given CA, carrying the given Extension SEQUENCEs
  * (see {@link extension}). The issuer name is copied verbatim from the CA's
- * subject so the pair reads as a real chain link.
+ * subject so the pair reads as a real chain link — pass `issuerDer` to break
+ * exactly that and nothing else.
  */
 export function mintLeaf(
   caCertDer: Uint8Array,
   caKeyPem: string,
-  opts: { subjectCN?: string; extensions?: number[][] } = {},
+  opts: MintOpts & { issuerDer?: Uint8Array } = {},
 ): MintedLeaf {
-  const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-  const spki = new Uint8Array(publicKey.export({ type: "spki", format: "der" }));
-  const leafKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  return mint(opts.issuerDer ?? subjectNameDer(caCertDer), caKeyPem, opts);
+}
 
-  const subject = SEQ(tlv(0x31, SEQ(OID_CN, UTF8(opts.subjectCN ?? "minted.test.c8s.local"))));
+/**
+ * Mint a self-signed certificate: issuer = subject, signed with its own key.
+ * Extensions are the caller's to choose, so a test can mint the certificate a
+ * responder would forge — a self-signed "CA" with cA=TRUE — as easily as an
+ * ordinary one.
+ */
+export function mintSelfSigned(opts: MintOpts = {}): MintedLeaf {
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const keyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const subject = nameDer(opts.subjectCN);
+  return mint(new Uint8Array(subject), keyPem, opts, keyPem);
+}
+
+/** Subject Name DER for a CN, the one shape these minted certificates use. */
+export function nameDer(commonName?: string): number[] {
+  return SEQ(tlv(0x31, SEQ(OID_CN, UTF8(commonName ?? "minted.test.c8s.local"))));
+}
+
+/**
+ * Assemble and sign one certificate. `selfKeyPem`, when given, is the key
+ * whose public half goes in the certificate — that is what makes a self-signed
+ * certificate verify under its own SPKI rather than merely claim to.
+ */
+function mint(
+  issuerDer: Uint8Array,
+  signingKeyPem: string,
+  opts: MintOpts,
+  selfKeyPem?: string,
+): MintedLeaf {
+  const keyPem =
+    selfKeyPem ??
+    generateKeyPairSync("ec", { namedCurve: "P-256" })
+      .privateKey.export({ type: "pkcs8", format: "pem" })
+      .toString();
+  const spki = new Uint8Array(createPublicKey(keyPem).export({ type: "spki", format: "der" }));
+
   const validity = SEQ(UTC("260101000000Z"), UTC("280101000000Z"));
   const trailing = opts.extensions?.length ? [tlv(0xa3, SEQ(...opts.extensions))] : [];
   const tbs = new Uint8Array(
@@ -90,16 +150,16 @@ export function mintLeaf(
       tlv(0xa0, INT(2)), // v3
       INT(2),
       SEQ(OID_ECDSA_SHA384),
-      subjectNameDer(caCertDer), // issuer = CA subject, verbatim
+      issuerDer,
       validity,
-      subject,
+      nameDer(opts.subjectCN),
       spki,
       ...trailing,
     ),
   );
-  const signature = sign("sha384", tbs, { key: caKeyPem, dsaEncoding: "der" });
+  const signature = sign("sha384", tbs, { key: signingKeyPem, dsaEncoding: "der" });
   const leafDer = new Uint8Array(
     SEQ(tbs, SEQ(OID_ECDSA_SHA384), tlv(0x03, [0x00], new Uint8Array(signature))),
   );
-  return { leafPem: encodePEM(leafDer, "CERTIFICATE"), leafDer, leafKeyPem };
+  return { leafPem: encodePEM(leafDer, "CERTIFICATE"), leafDer, leafKeyPem: keyPem };
 }

@@ -5,7 +5,7 @@
 
 import { subtle } from "./crypto-env.js";
 import { readTLV, readChildren, decodeOID, decodeTime, TAG, type DERNode } from "./asn1.js";
-import { bytesToHex } from "./base64.js";
+import { bytesToHex, constantTimeEqual } from "./base64.js";
 import { C8sVerifyError } from "./errors.js";
 
 const OID = {
@@ -15,7 +15,15 @@ const OID = {
   P384: "1.3.132.0.34",
   ECDSA_SHA256: "1.2.840.10045.4.3.2",
   ECDSA_SHA384: "1.2.840.10045.4.3.3",
+  BASIC_CONSTRAINTS: "2.5.29.19",
+  KEY_USAGE: "2.5.29.15",
 } as const;
+
+/**
+ * keyCertSign is KeyUsage bit 5, i.e. the sixth-most-significant bit of the
+ * BIT STRING's first content byte.
+ */
+const KEY_USAGE_CERT_SIGN = 0x04;
 
 const CURVE_BY_OID: Record<string, string> = { [OID.P256]: "P-256", [OID.P384]: "P-384" };
 const CURVE_SIZE: Record<string, number> = { "P-256": 32, "P-384": 48 };
@@ -32,6 +40,15 @@ export interface Certificate {
   notAfter: Date;
   subjectCN: string | null;
   issuerCN: string | null;
+  /**
+   * Verbatim DER of the issuer and subject Name elements. Chaining compares
+   * these bytes, not the decoded CNs: a Name is a structure, and two different
+   * structures can share a CN (or carry none at all, as the c8s mesh leaf
+   * does), so anything short of byte equality lets a leaf claim an issuer it
+   * does not have.
+   */
+  rawIssuer: Uint8Array;
+  rawSubject: Uint8Array;
   spki: Uint8Array;
   spkiCurve: string | null;
   sigAlgOID: string;
@@ -131,6 +148,8 @@ export function parseCertificate(der: Uint8Array): Certificate {
     notAfter,
     subjectCN: nameCN(der, subject),
     issuerCN: nameCN(der, issuer),
+    rawIssuer: issuer.bytes,
+    rawSubject: subject.bytes,
     spki: spkiNode.bytes,
     spkiCurve,
     sigAlgOID,
@@ -298,8 +317,58 @@ export async function fingerprintSHA256(cert: Certificate | Uint8Array): Promise
 }
 
 /**
- * Verify that `child` was signed by `issuer` (ECDSA), and that both are within
- * their validity windows at `at`. Throws C8sVerifyError on any failure.
+ * Whether a certificate asserts `basicConstraints` with `cA=TRUE`.
+ *
+ * Absent, malformed, or explicitly false all read as "not a CA" — `cA` is
+ * DEFAULT FALSE, so an empty SEQUENCE (or one opening with the
+ * pathLenConstraint INTEGER) says exactly that, and DER damage in an extension
+ * this decision rests on must never resolve in the presenter's favour.
+ */
+function assertsCA(cert: Certificate): boolean {
+  const value = cert.extensions.get(OID.BASIC_CONSTRAINTS);
+  if (value === undefined) return false;
+  try {
+    const seq = readTLV(value, 0);
+    if (seq.tag !== TAG.SEQUENCE || seq.end !== value.length) return false;
+    const [ca] = readChildren(value, seq);
+    return ca?.tag === TAG.BOOLEAN && ca.content.length === 1 && ca.content[0] !== 0x00;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a certificate's `keyUsage` permits signing certificates. An absent
+ * extension is unconstrained (Go treats a zero KeyUsage the same way); a
+ * present one must carry keyCertSign, and anything unreadable is refused.
+ */
+function permitsCertSign(cert: Certificate): boolean {
+  const value = cert.extensions.get(OID.KEY_USAGE);
+  if (value === undefined) return true;
+  try {
+    const bits = readTLV(value, 0);
+    if (bits.tag !== TAG.BIT_STRING || bits.end !== value.length || bits.content.length < 2) {
+      return false;
+    }
+    return (bits.content[1] & KEY_USAGE_CERT_SIGN) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verify that `child` was signed by `issuer` (ECDSA), that `issuer` is a
+ * certificate allowed to have signed it, and that both are within their
+ * validity windows at `at`. Throws C8sVerifyError on any failure.
+ *
+ * A valid signature alone is not a chain. The responder chooses every byte of
+ * the served certificate bundle, so without the issuer checks below "signed
+ * by" degenerates to "some certificate signed this one": emitting one
+ * self-signed certificate twice makes the leaf its own CA, and everything the
+ * chain is meant to vouch for — the matched-workload stamp above all — becomes
+ * attacker-chosen. Go's `CheckSignatureFrom` enforces the constraint half of
+ * this and `Verify` the name half, which is why the c8s server has no such
+ * hole; the rules are restated here rather than inherited.
  */
 export async function verifySignedBy(
   child: Certificate,
@@ -322,6 +391,30 @@ export async function verifySignedBy(
         details: { notAfter: c.notAfter.toISOString() },
       });
     }
+  }
+
+  if (constantTimeEqual(child.der, issuer.der)) {
+    throw new C8sVerifyError(
+      "cert_chain",
+      "leaf and CA are the same certificate: a certificate cannot vouch for itself",
+    );
+  }
+  if (!assertsCA(issuer)) {
+    throw new C8sVerifyError(
+      "cert_chain",
+      "CA certificate does not assert basicConstraints cA=TRUE, so it may not issue certificates",
+    );
+  }
+  if (!permitsCertSign(issuer)) {
+    throw new C8sVerifyError(
+      "cert_chain",
+      "CA certificate carries a keyUsage extension that does not permit keyCertSign",
+    );
+  }
+  if (!constantTimeEqual(child.rawIssuer, issuer.rawSubject)) {
+    throw new C8sVerifyError("cert_chain", "leaf issuer name does not match the CA subject name", {
+      details: { leafIssuerCN: child.issuerCN, caSubjectCN: issuer.subjectCN },
+    });
   }
 
   const hash = SIG_ALG[child.sigAlgOID];

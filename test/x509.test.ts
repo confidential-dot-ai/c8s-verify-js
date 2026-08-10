@@ -2,11 +2,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { decodePEM } from "../src/pem.js";
-import { parseCertificate, verifyCertChain, verifySignedBy } from "../src/x509.js";
+import {
+  parseCertificate,
+  verifyCertChain,
+  verifyECDSASignature,
+  verifySignedBy,
+} from "../src/x509.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { OID_MATCHED_WORKLOAD } from "../src/workload.js";
 import { loadFixtures } from "./helpers.js";
-import { OID_15_DER } from "./mint-cert.js";
+import {
+  OID_15_DER,
+  basicConstraintsExt,
+  keyUsageExt,
+  mintLeaf,
+  mintSelfSigned,
+  nameDer,
+} from "./mint-cert.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -65,10 +77,83 @@ test("rejects an expired certificate", async () => {
   );
 });
 
-test("verifies a self-signed CA against itself", async () => {
+// The self-signature of the P-384 fixture CA still verifies — that is the
+// primitive the chain check is built on — but it is checked directly, because
+// running it *through* the chain check is precisely the forgery below.
+test("the self-signed CA's own signature verifies under its own key", async () => {
   const { meshCaPem } = await loadFixtures();
-  const caDer = decodePEM(meshCaPem)[0];
-  await assert.doesNotReject(() => verifyCertChain(caDer, caDer));
+  const ca = parseCertificate(decodePEM(meshCaPem)[0]);
+  assert.ok(await verifyECDSASignature(ca, ca.tbs, ca.signatureDER, "SHA-384"));
+});
+
+// ---------------------------------------------------------------------------
+// Issuer constraints: a signature is not a chain
+// ---------------------------------------------------------------------------
+//
+// The responder chooses every byte of the served certificate bundle, and the
+// mesh leaf's matched-workload stamp is enforced off whatever leaf survives
+// this check. Each case below verified fine when the only questions asked were
+// "is it in date" and "does the signature check out", and each hands a
+// responder a certificate whose extensions it wrote itself. Go's
+// CheckSignatureFrom/Verify refuse all three, which is why the server never
+// had the hole.
+
+test("rejects a certificate presented as its own CA", async () => {
+  // A self-signed certificate that says cA=TRUE: every remaining check passes,
+  // so only the leaf≠CA rule stands between a responder and a leaf that vouches
+  // for its own stamp.
+  const { leafDer } = mintSelfSigned({
+    subjectCN: "self.forged.c8s.local",
+    extensions: [basicConstraintsExt(true), keyUsageExt(true)],
+  });
+  await assert.rejects(
+    () => verifyCertChain(leafDer, leafDer),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "cert_chain" &&
+      e.message.includes("cannot vouch for itself"),
+  );
+});
+
+test("rejects a leaf issued by a certificate that is not a CA", async () => {
+  for (const [label, caExts] of [
+    ["cA=FALSE", [basicConstraintsExt(false)]],
+    ["no basicConstraints at all", []],
+    ["cA=TRUE but keyUsage without keyCertSign", [basicConstraintsExt(true), keyUsageExt(false)]],
+  ] as const) {
+    const ca = mintSelfSigned({ subjectCN: "not-a-ca.c8s.local", extensions: [...caExts] });
+    const { leafDer } = mintLeaf(ca.leafDer, ca.leafKeyPem);
+    await assert.rejects(
+      () => verifyCertChain(leafDer, ca.leafDer),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "cert_chain",
+      `an issuer with ${label} must not be accepted as a CA`,
+    );
+  }
+});
+
+test("rejects a leaf whose issuer name is not the CA's subject name", async () => {
+  const ca = mintSelfSigned({
+    subjectCN: "real-ca.c8s.local",
+    extensions: [basicConstraintsExt(true), keyUsageExt(true)],
+  });
+  // Signed by the CA's key, so the signature verifies; only the name lies.
+  const { leafDer } = mintLeaf(ca.leafDer, ca.leafKeyPem, {
+    issuerDer: new Uint8Array(nameDer("other-ca.c8s.local")),
+  });
+  await assert.rejects(
+    () => verifyCertChain(leafDer, ca.leafDer),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "cert_chain",
+  );
+});
+
+test("a leaf minted by a well-formed CA still verifies", async () => {
+  const ca = mintSelfSigned({
+    subjectCN: "real-ca.c8s.local",
+    extensions: [basicConstraintsExt(true), keyUsageExt(true)],
+  });
+  const { leafDer } = mintLeaf(ca.leafDer, ca.leafKeyPem);
+  const chain = await verifyCertChain(leafDer, ca.leafDer);
+  assert.equal(chain.ca.subjectCN, "real-ca.c8s.local");
 });
 
 // ---------------------------------------------------------------------------

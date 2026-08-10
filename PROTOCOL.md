@@ -54,6 +54,16 @@ equals the commitment, and anchors the chain check to exactly that one. Selectio
 alone trusts nothing; the transcript verification that follows is what
 authenticates the choice.
 
+The chain check itself asks more than "does this signature verify". The
+responder writes every byte of `cds_cert_pem`, so the selected anchor must also
+*be* a certificate that could have issued the leaf: it must carry
+`basicConstraints` with `cA=TRUE`, must permit `keyCertSign` if it carries a
+`keyUsage` extension at all, must have a subject name byte-identical to the
+leaf's issuer name, and must not be the leaf itself. Go's `CheckSignatureFrom`
+and `Verify` impose the same rules server-side. Without them, one self-signed
+certificate emitted twice would satisfy the chain check and its
+matched-workload stamp would be attacker-chosen.
+
 The two resulting verdicts are explicitly distinct:
 
 - **Deployment-class** (derived CA): non-empty measurement pins plus exact
