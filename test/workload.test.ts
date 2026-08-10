@@ -175,6 +175,19 @@ test("an absent workload name fails closed with workload_unresolved", async () =
   );
 });
 
+// pkg/allowlist enforces MaxWorkloadNameLen on the WRITE path only: a served
+// document is not the verifier's to reject over a name that was already stored,
+// and failing the whole document would break every pull in the cluster over one
+// legacy entry. The stamp parser still applies the bound (above), so an
+// over-long name can be carried but never matched.
+test("a served document keeps an over-long legacy workload name", () => {
+  const legacy = "a".repeat(64);
+  const doc = parseAllowlist(
+    `{"schema":"c8s.allowlist/v1","digests":{},"workloads":{"${legacy}":{}}}`,
+  );
+  assert.ok(resolveWorkload(doc, legacy));
+});
+
 test("rejects a document that is not schema c8s.allowlist/v1", () => {
   for (const bad of [
     "null",
