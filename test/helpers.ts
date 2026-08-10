@@ -23,6 +23,7 @@ const FIX = join(dirname(fileURLToPath(import.meta.url)), "..", "demo", "fixture
 export interface Fixtures {
   snpEvidence: Evidence;
   meshCaPem: string;
+  caKeyPem: string;
   leafPem: string;
   leafKeyPem: string;
   leafDer: Uint8Array;
@@ -39,9 +40,10 @@ let fixturesPromise: Promise<Fixtures> | undefined;
  */
 export function loadFixtures(): Promise<Fixtures> {
   fixturesPromise ??= (async () => {
-    const [evidenceJson, meshCaPem, leafPem, leafKeyPem] = await Promise.all([
+    const [evidenceJson, meshCaPem, caKeyPem, leafPem, leafKeyPem] = await Promise.all([
       readFile(join(FIX, "snp-evidence-genoa.json"), "utf8"),
       readFile(join(FIX, "mesh-ca.crt"), "utf8"),
+      readFile(join(FIX, "mesh-ca.key"), "utf8"),
       readFile(join(FIX, "cds-leaf.crt"), "utf8"),
       readFile(join(FIX, "cds-leaf.key"), "utf8"),
     ]);
@@ -49,6 +51,7 @@ export function loadFixtures(): Promise<Fixtures> {
     return {
       snpEvidence: (evidence.evidence ?? evidence) as Evidence,
       meshCaPem,
+      caKeyPem,
       leafPem,
       leafKeyPem,
       leafDer: decodePEM(leafPem, "CERTIFICATE")[0],
@@ -71,15 +74,27 @@ export interface BuiltBundle {
 
 /**
  * Build an attestation bundle bound to `nonce`, mirroring the mock LB.
+ * `opts.leaf` substitutes a different mesh leaf (e.g. one minted with a
+ * matched-workload stamp via mint-cert.ts) for the fixture leaf; the identity
+ * proof is minted with its key so the bundle stays internally consistent.
  */
 export async function buildBundle(
   nonce: Uint8Array,
-  opts: { tamperReport?: boolean } = {},
+  opts: {
+    tamperReport?: boolean;
+    leaf?: { leafPem: string; leafKeyPem: string };
+    evidence?: Evidence;
+    platform?: string;
+  } = {},
 ): Promise<BuiltBundle> {
-  const { snpEvidence, meshCaPem, leafPem, leafKeyPem, leafDer, caDer } = await loadFixtures();
+  const fixtures = await loadFixtures();
+  const { snpEvidence, meshCaPem, caDer } = fixtures;
+  const leafPem = opts.leaf?.leafPem ?? fixtures.leafPem;
+  const leafKeyPem = opts.leaf?.leafKeyPem ?? fixtures.leafKeyPem;
+  const leafDer = opts.leaf ? decodePEM(leafPem, "CERTIFICATE")[0] : fixtures.leafDer;
   const { priv, pub } = await generateServerHybridKey();
 
-  const evidence = JSON.parse(JSON.stringify(snpEvidence));
+  const evidence = JSON.parse(JSON.stringify(opts.evidence ?? snpEvidence));
   if (opts.tamperReport) {
     const rep = base64ToBytes(evidence.attestation_report);
     rep[200] ^= 0x01;
@@ -89,7 +104,7 @@ export async function buildBundle(
   const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
   const bundle: AttestationBundle = {
     ...minted.bundleFields,
-    platform: "snp",
+    platform: opts.platform ?? "snp",
     generation: "genoa",
     nonce: bytesToBase64Url(nonce),
     evidence,

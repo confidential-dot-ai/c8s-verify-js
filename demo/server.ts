@@ -1,5 +1,6 @@
-// Mock C8s Load Balancer for the demo. Implements c8s-verify/v1 (see
-// ../PROTOCOL.md) so the browser library can run the full flow offline.
+// Mock C8s Load Balancer for the demo. Implements the attest-pq protocol
+// (bundle version c8s/attest-pq/v1, see ../PROTOCOL.md) so the browser library
+// can run the full flow offline.
 //
 // TEST/DEMO ONLY. It mirrors c8s's own test/mock-cds: it serves REAL recorded
 // SNP hardware evidence (verified for real by the WASM verifier) but does not run
@@ -116,7 +117,22 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const p = url.pathname;
 
-    if (req.method === "GET" && p === "/.well-known/c8s/attestation") {
+    // The retired endpoint and its query selectors: an explicit 400, no alias
+    // or downgrade — mirroring the real sidecar's post-cutover behavior.
+    if (p === "/.well-known/c8s/attestation") {
+      return json(res, 400, {
+        error: "invalid_request",
+        message: "the /attestation endpoint is retired; use /attest-pq",
+      });
+    }
+
+    if (req.method === "GET" && p === "/.well-known/c8s/attest-pq") {
+      if (url.searchParams.has("pq") || url.searchParams.has("binding")) {
+        return json(res, 400, {
+          error: "invalid_request",
+          message: "attest-pq takes no pq or binding parameter",
+        });
+      }
       sweep();
       const nonceB64 = url.searchParams.get("nonce");
       if (!nonceB64) return json(res, 400, { error: "invalid_request", message: "missing nonce" });

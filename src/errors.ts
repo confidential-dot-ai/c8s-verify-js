@@ -8,37 +8,51 @@ export type C8sErrorCode =
   | "verification_failed"
   | "report_data_mismatch"
   | "measurement_denied"
+  // A TDX measurement policy that is not platform-complete where completeness
+  // is required: a deployment-class verdict rests entirely on the measurement
+  // pins, and MRTD covers only the TDVF firmware — without the tdxImage tuple
+  // (mrtd+rtmr1+rtmr2) the guest kernel and rootfs are unmeasured. Distinct
+  // from invalid_request: the policy shape is fine, it is the combination of
+  // platform and trust class that makes it insufficient, which is a verdict
+  // decision rather than an input-validation one.
+  | "measurement_incomplete"
+  // An RTMR[1]/RTMR[2] image-tuple register check ran and failed — either the
+  // register differs from the pin, or the verified claims carry no well-formed
+  // value to compare (absent/malformed claims fail closed, never pass). Same
+  // shape as rtmr3_denied, which stays separate: RTMR[3] pins the runtime
+  // operator-key/workload chain (deployment identity), while RTMR[1]/[2] pin
+  // the guest image, and a caller telling "wrong image" from "wrong
+  // deployment" needs the codes to differ.
+  | "rtmr_denied"
   | "rtmr3_denied"
   | "invalid_cert"
   | "cert_chain"
   | "identity_binding"
   | "key_binding"
   | "channel_error"
-  // CDS roll-up: attesting CDS once and deriving the mesh CA and allowlist from
-  // its claims. "_denied" means a check ran and failed; "_not_attested" means
-  // the target's claims never carried the field, which is an upgrade problem
-  // rather than an attack — conflating them would send an operator hunting a
-  // breach when the cluster is simply older.
-  | "cds_identity_missing"
-  | "cds_identity_invalid"
-  | "cds_identity_denied"
-  // The certificate body — validity window, serial, subject — sits OUTSIDE the
-  // REPORTDATA transcript, which covers only the SPKI and the config-claims
-  // bytes. It is trustworthy only because the certificate self-signs with the
-  // key REPORTDATA bound, so these two are separate failures from
-  // "_denied": the hardware evidence was fine and the certificate around it
-  // was not.
-  | "cds_identity_unsigned"
-  | "cds_identity_expired"
-  // A newly presented CDS certificate that is older than one already verified.
-  // Distinct from every other failure because nothing is forged: each half is
-  // internally consistent, and the attack is serving yesterday's genuine
-  // (certificate, allowlist) pair to roll back the admission policy.
-  | "cds_identity_rollback"
-  | "mesh_ca_denied"
-  | "mesh_ca_not_attested"
+  // Matched-workload policy: enforcing a workload/allowlist pin against the
+  // stamp on the chain-verified mesh leaf. "_denied" means a check ran and
+  // failed; "_not_attested" means the leaf never carried the stamp, which is
+  // an upgrade/lifecycle state (an unstamped leaf is issued mid-lifecycle by
+  // design) rather than forged data — conflating them would send an operator
+  // hunting a breach when the pod is simply not yet named.
+  | "workload_not_attested"
+  // A stamp is present but is not the one canonical v1 encoding, or violates
+  // the name/version/digest grammar. Distinct from absence: a verifier must
+  // not read damage as "not stamped", and an unpinned diagnostic may report
+  // only that an unparseable extension exists, never any field from it.
+  | "workload_invalid"
+  // The stamped name is not the pinned workloadName. Everything about the
+  // stamp is genuine and CA-vouched; it names a different workload.
+  | "workload_denied"
+  // The stamped name does not resolve in the pinned allowlist document. The
+  // digest check normally catches skew first, so reaching this means a
+  // document that hashes right yet omits the entry — never acceptable.
+  | "workload_unresolved"
+  // The stamped allowlist digest is not SHA-256 of the pinned canonical
+  // bytes: CDS decided the match under a different policy document than the
+  // one the caller holds.
   | "allowlist_denied"
-  | "allowlist_not_attested"
   | "unsupported";
 
 export interface C8sErrorOptions {

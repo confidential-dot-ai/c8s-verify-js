@@ -1,4 +1,4 @@
-# c8s-verify wire protocol (`c8s-verify/v1`)
+# c8s-verify wire protocol (`attest-pq`, binding `c8s/attest-pq/v1`)
 
 This document specifies the browser-facing attestation + over-encryption protocol
 between a JavaScript client (`c8s-verify-js`) and a C8s **Load Balancer (LB)**.
@@ -29,74 +29,62 @@ entirely on the returned payload:
    TDX roots, VCEK/DCAP collateral supplied inline — no network during
    verification).
 3. The client checks the measurement against its pinned allowlist, checks that the
-   served mesh leaf chains to a **mesh CA** that is either pinned out of band or
-   *derived from attested CDS claims* (see below), and verifies a per-session proof
-   of possession made by that leaf key.
-4. Only then does the client derive a **post-quantum hybrid over-encryption channel** to
+   served mesh leaf chains to a **mesh CA** that is either pinned out of band
+   (*specific-cluster*) or *derived from the identity transcript's commitment*
+   (*deployment-class*, below), and verifies a per-session proof of possession
+   made by that leaf key.
+4. When a workload policy is pinned, the client then reads the **matched-workload
+   stamp** off the chain-verified mesh leaf (see "Matched-workload extension"),
+   checks the stamped allowlist digest against its pinned canonical allowlist
+   bytes, and resolves the stamped name.
+5. Only then does the client derive a **post-quantum hybrid over-encryption channel** to
    the attested per-session key, so all subsequent application traffic is end-to-end
    confidential to the LB's TEE regardless of the outer TLS terminator.
 
-The user only verifies **CDS + LB**; C8s's internal RA-TLS mesh transitively vouches for
+The user only verifies the **LB**; C8s's internal RA-TLS mesh transitively vouches for
 the backend pods the LB talks to.
 
-### Deriving the mesh CA from CDS config-claims
+### Deriving the mesh CA: deployment-class vs specific-cluster
 
-The mesh CA may be authenticated instead of pinned. CDS's own self-signed RA-TLS
-certificate carries two extensions on the `1.3.6.1.4.1.59888.1` arc:
+The mesh CA does not have to be pinned out of band. The identity proof commits
+`mesh_ca_sha256`, and that commitment is folded into the hardware-bound identity
+transcript and signed by the mesh leaf. With no pin, the client selects from the
+served chain (`cds_cert_pem` blocks after the leaf) the certificate whose SHA-256
+equals the commitment, and anchors the chain check to exactly that one. Selection
+alone trusts nothing; the transcript verification that follows is what
+authenticates the choice.
 
-| OID | contents |
-|---|---|
-| `…1.1` | `SEQUENCE { teeType INTEGER, report OCTET STRING, certChain OCTET STRING }`; for TDX `report` holds a JSON `{platform, evidence}` envelope |
-| `…1.3` | `config-claims`, below |
+The chain check itself asks more than "does this signature verify". The
+responder writes every byte of `cds_cert_pem`, so the selected anchor must also
+*be* a certificate that could have issued the leaf: it must carry
+`basicConstraints` with `cA=TRUE`, must permit `keyCertSign` if it carries a
+`keyUsage` extension at all, must have a subject name byte-identical to the
+leaf's issuer name, and must not be the leaf itself. Go's `CheckSignatureFrom`
+and `Verify` impose the same rules server-side. Without them, one self-signed
+certificate emitted twice would satisfy the chain check and its
+matched-workload stamp would be attacker-chosen.
 
-```
-C8SConfigClaims ::= SEQUENCE {
-    version             INTEGER,        -- 1, 2 or 3
-    operatorKeysDigest  OCTET STRING,   -- 32 bytes
-    seedDigest          OCTET STRING,
-    workloadDigest      OCTET STRING,
-    meshCADigest        OCTET STRING,   -- v2+
-    allowlistDigest     OCTET STRING }  -- v3+
-```
+Certificate validity uses the server's window (`certutil.CheckValidity`):
+`notBefore` is granted a 5-minute clock-skew allowance, `notAfter` none. CDS
+mints leaves at `now` with no backdating and re-reads them per request, so a
+verifier whose clock trails the issuing TEE would otherwise reject a leaf that
+had just rotated; an expired certificate, by contrast, is simply expired.
 
-An all-zero digest is the "not applicable" sentinel; it is unreachable as a real
-SHA-256 output, so a verifier pinning a real value can never be satisfied by one.
-The encoding MUST be the single canonical DER encoding of its version — minimal
-lengths, a minimal `version` INTEGER, no trailing bytes — because the binding
-below covers the bytes rather than their meaning.
+The two resulting verdicts are explicitly distinct:
 
-The TD quote's `report_data` commits to those bytes:
+- **Deployment-class** (derived CA): non-empty measurement pins plus exact
+  canonical allowlist bytes enforced against the matched-workload stamp. The
+  verdict says "a genuine instance of this measured deployment" — public-input
+  anchors cannot distinguish "my cluster" from a genuine clone booted from the
+  same measured images and serving byte-identical allowlist bytes.
+- **Specific-cluster** (pinned CA): the same checks plus `meshCaPem`; the
+  committed CA must be one the caller pinned out of band. Optional hardening,
+  no longer a requirement.
 
-```
-REPORTDATA = SHA-384( "c8s/config-claims/v1\x00"
-                    ‖ uint64be(len(spki))   ‖ spki
-                    ‖ uint64be(len(claims)) ‖ claims
-                    ‖ uint64be(len(nonce))  ‖ nonce )   -- nonce empty for a
-                                                        -- self-signed serving cert
-```
-
-zero-padded to 64 bytes. `spki` is the PKIX SubjectPublicKeyInfo DER exactly as it
-appears in the certificate; `claims` is the raw `extnValue` of `…1.3`, verbatim.
-This is `ReportDataForKeyAndClaims` in c8s `pkg/ratls`.
-
-A client verifying this certificate MUST, in order:
-
-1. verify the TD quote and require `report_data` to equal the transcript above —
-   this is what binds the claims to hardware;
-2. verify the certificate's **self-signature** over `tbsCertificate` using the SPKI
-   the transcript just bound. The validity window, serial and subject are outside
-   the transcript, so until this step they are attacker-chosen;
-3. enforce the validity window against a reference time;
-4. enforce the launch-measurement allowlist, which MUST be non-empty.
-
-The mesh CA is then the certificate whose SHA-256 equals `meshCADigest`. A client
-MUST pin that single certificate, not the chain it was served in.
-
-Freshness comes from re-issuance, not from a timestamp: CDS re-issues this
-certificate whenever the live allowlist digest changes, so a changed fingerprint is
-exactly when to re-attest. Because an old certificate remains internally consistent,
-a client SHOULD also refuse one whose `notBefore` precedes that of a certificate it
-has already verified.
+A verdict from a derived CA MUST never be reported as "my cluster". Deriving the
+CA also removes an operational failure mode: a no-handoff CDS restart rotates the
+CA, which used to break every external client's pin; a derived CA is simply picked
+up at the next session (specific-cluster clients reject until re-pinned, by design).
 
 ## Endpoints (LB, plain HTTPS)
 
@@ -106,18 +94,28 @@ All under the `/.well-known/c8s/` namespace.
 Returns the CDS EAR-signing JWKS (ES256, `kid` = RFC 7638 thumbprint), republished from
 the CDS, for the optional EAR-verification path.
 
-### `GET /.well-known/c8s/attestation?nonce=<b64url>[&pq=false]`
+### `GET /.well-known/c8s/attest-pq?nonce=<b64url>`
 
 `nonce` is the client's fresh 32-byte random challenge, base64url (unpadded).
-The endpoint takes no other parameter — there is no version or binding
-negotiation, and a request carrying a `binding` parameter is rejected with
-`400 invalid_request`. `pq=false` selects the separate tls-cert response
-(below); the default response is the identity-bound over-encryption bundle.
+The endpoint takes no other parameter — there is **no version or binding
+negotiation and no fallback**: a request carrying a `pq` or `binding` parameter
+is rejected with `400 invalid_request`, and the former
+`/.well-known/c8s/attestation` endpoint returns `400 invalid_request` after the
+cutover (no alias, no downgrade).
+
+A sibling endpoint, `GET /.well-known/c8s/attest-lb?nonce=…` (binding id
+`c8s/attest-lb/v1`), exists for **native clients only**: it binds the exact
+outer TLS serving leaf into the hardware evidence and authorizes ordinary TLS
+after per-handshake verification. Browsers cannot see peer certificates, so
+`c8s-verify-js` neither implements it nor accepts its response shape — a bundle
+whose `version` is not exactly `c8s/attest-pq/v1` is rejected even when its
+evidence is otherwise valid.
+
 Response is `application/json`:
 
 ```jsonc
 {
-  "version": "c8s-verify/v1",
+  "version": "c8s/attest-pq/v1",
   "platform": "snp",            // "snp" | "az-snp" | "az-tdx" | "tdx"
   "generation": "genoa",        // AMD gen for the bare-SNP WASM verifier (milan|genoa|turin); empty for the other platforms
   "nonce": "<echoed b64url>",   // MUST equal the request nonce
@@ -149,9 +147,7 @@ shows bare `snp`; the vTPM (`az-snp`, `az-tdx`) and bare `tdx` shapes are
 specified in their sections below. Everything outside `evidence` (and the
 binding recomputation) is platform-independent.
 
-The `version`, `cds_cert_pem`, and `identity_proof` fields are mandatory in
-this default (identity-bound) response; the `?pq=false` response below omits
-the identity fields by design.
+The `version`, `cds_cert_pem`, and `identity_proof` fields are mandatory.
 The LB re-reads the TEE-held mesh leaf, private key, and CA for each request so
 certificate rotation cannot leave the bundle and proof on different credential
 generations. There is no legacy or downgrade path.
@@ -175,6 +171,11 @@ transcript_hash = SHA-384(transcript)
 report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
 ```
 
+The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
+is deliberately unchanged by the endpoint move (as are the HKDF info string and
+tunnel AADs below): only the bundle's `version` field carries the endpoint
+binding id `c8s/attest-pq/v1`.
+
 The 64-byte anchor is identical on every platform: SEV-SNP `report_data` and
 the TDX TD-quote `report_data` both carry 64 bytes natively, and the Azure vTPM
 platforms carry the same value in the TPM quote's `extraData` (see below).
@@ -191,8 +192,9 @@ signature = ECDSA-SHA384(leaf_private_key, transcript_hash)
 ```
 
 The client verifies the hardware evidence against `transcript_hash`, the launch
-measurement against its non-empty allowlist, the leaf chain against a CA pinned
-out of band, both certificate fingerprints, and the proof signature. This defeats
+measurement against its non-empty allowlist, the leaf chain against the pinned
+or transcript-derived CA, both certificate fingerprints, and the proof
+signature. This defeats
 the copied-public-chain attack: a genuine attacker-operated LB can copy the victim
 cluster's public certificates, but cannot sign its own session transcript with the
 victim leaf's private key.
@@ -278,30 +280,71 @@ is verified against the PCK chain embedded in the quote up to the bundled
 Intel root. As with the other WASM entry points, the async collateral checks
 (CRL/TCB/QE identity) are skipped in the browser (`collateral_verified:
 false`). `claims.launch_digest` is the TD launch measurement (MRTD);
-`generation` is not applicable and is empty.
+`generation` is not applicable and is empty. The runtime measurement
+registers surface as `claims.platform_data.rtmr_0`…`rtmr_3`, each 96
+lowercase hex chars.
 
-#### `?pq=false` — the tls-cert response
+**Platform-complete image pinning.** On TDX, MRTD covers only the TDVF
+firmware — the guest kernel is measured into RTMR[1] and the guest rootfs
+into RTMR[2] — so a complete image pin is the tuple **MRTD + RTMR[1] +
+RTMR[2]** from one image-build manifest (a JSON object with `mrtd`, `rtmr1`,
+`rtmr2`, each exactly 96 lowercase hex chars; all three required, unknown
+extra fields allowed). The policy layer (`tdxImage`, or `parseImageManifest`
+over the manifest file) folds the tuple's MRTD into the launch-digest
+allowlist and compares `rtmr1`/`rtmr2` exactly against the verified claims,
+failing closed on a mismatch or an absent/malformed claim. A
+deployment-class verdict rejects an MRTD-only TDX measurement policy; with a
+pinned mesh CA the gap is a prominent warning instead. SEV-SNP needs no
+equivalent: its launch measurement covers the full image, and the platform
+has no runtime measurement registers by design.
 
-`pq=false` selects a different trust decision for clients that ride the
-LB's validated **outer TLS** instead of the over-encryption tunnel (e.g.
-TEErminator Flow B). No session key is minted and no pending session is
-stored; the hardware anchor commits the LB's serving TLS leaf instead of a
-session transcript:
+## Matched-workload extension (`1.3.6.1.4.1.66378.1.5`)
+
+The mesh leaf MAY carry a non-critical X.509 extension stamping the single
+allowlist entry whose (digest, argv) policy the pod's attested container
+inventory uniquely matched at issuance:
 
 ```
-report_data = SHA-384(serving_leaf_spki_DER || nonce), zero-padded to 64 bytes
+OID 1.3.6.1.4.1.66378.1.5  (matched-workload extension, non-critical)
+MatchedWorkload ::= SEQUENCE {
+    formatVersion    INTEGER,           -- exactly 1
+    name             IA5String,         -- 1..63 bytes, [A-Za-z0-9][A-Za-z0-9._-]*
+    allowlistVersion IA5String,         -- 1..20 ASCII decimal digits, no leading zero
+    allowlistDigest  OCTET STRING (32)  -- SHA-256 of the canonical allowlist bytes
+}
 ```
 
-The response is the same bundle shape with `cds_cert_pem` empty and no
-`session_pubkey` or `identity_proof`: the client already sees the serving
-leaf on its TLS connection, recomputes the binding from that leaf's SPKI and
-its nonce, and must validate the leaf against a cluster-specific anchor of
-its own (e.g. chain it to the pinned mesh CA). The client knows which shape
-it asked for; the response carries no discriminator. The nonce for this
-response must be at least 16 bytes (the identity-bound response requires
-exactly 32). This mode supplies TEE + TLS-identity binding but **no post-quantum
-tunnel** — `c8s-verify-js` implements only the identity-bound default; the
-tls-cert response is specified here for other consumers.
+The stamp is CA-vouched: it sits in the CA-signed area, so it is meaningful only
+on a chain-verified leaf. On the LB's own leaf it is additionally evidence-bound,
+because the exact leaf DER is committed by the identity transcript.
+
+Normative parser rules (shared with c8s `pkg/ratls` and TEErminator):
+
+- minimal DER only, with no trailing bytes or fields;
+- exactly one extension with this OID — duplicates fail closed;
+- `formatVersion == 1`; unknown versions fail closed whenever workload identity
+  is requested;
+- name and version strings match the grammars above exactly; the digest is
+  exactly 32 bytes;
+- an unpinned diagnostic may report only that an unparseable extension exists,
+  never any unverified field from it.
+
+Cross-implementation golden vector — the one canonical encoding of
+`{v1, name "api", allowlistVersion "7", digest 0x11×32}`:
+
+```
+302d0201011603617069160137
+04201111111111111111111111111111111111111111111111111111111111111111
+```
+
+A client pinning a workload policy verifies, only after every identity check
+has passed: parse the stamp (absent ⇒ `workload_not_attested`, malformed ⇒
+`workload_invalid`), check `allowlistDigest` against SHA-256 of the **exact
+canonical allowlist bytes** it holds (mismatch ⇒ `allowlist_denied`; the bytes
+are hashed verbatim, never re-serialized), check the stamped name against an
+explicit `workloadName` pin (mismatch ⇒ `workload_denied`), and resolve the
+stamped name as a key lookup in the held document's `workloads` map (absent ⇒
+`workload_unresolved`).
 
 ## WASM verifier I/O (`attestation-rs` `verify_snp`)
 
@@ -444,19 +487,24 @@ end-to-end confidentiality to the enclave regardless of the outer TLS terminator
 
 The client MUST fail closed. Typed errors (mirroring c8s error codes) include:
 `invalid_request`, `nonce_mismatch`, `verification_failed` (signature/chain/JsError),
-`report_data_mismatch`, `measurement_denied`, `rtmr3_denied`, `invalid_cert` /
-`cert_chain` (mesh leaf does not chain to the pinned CA or is expired),
+`report_data_mismatch`, `measurement_denied`, `measurement_incomplete` (TDX
+deployment-class verdict without the platform-complete mrtd+rtmr1+rtmr2 image
+tuple), `rtmr_denied` (an RTMR[1]/RTMR[2] image-tuple register differs from the
+pin, or the claims carry no comparable value), `rtmr3_denied`, `invalid_cert` /
+`cert_chain` (mesh leaf does not chain to the selected CA or is expired),
 `identity_binding`, and `key_binding`.
 
-CDS attestation adds `cds_identity_missing`, `cds_identity_invalid`,
-`cds_identity_denied`, `cds_identity_unsigned`, `cds_identity_expired`,
-`cds_identity_rollback`, `mesh_ca_denied`, `mesh_ca_not_attested`,
-`allowlist_denied` and `allowlist_not_attested`. `_denied` means a check ran and
-failed; `_not_attested` means the claims never carried the field, which is an
-upgrade problem rather than an attack.
+The workload policy adds `workload_not_attested` (no stamp while a
+workload/allowlist pin is set), `workload_invalid` (malformed or duplicated
+stamp), `workload_denied` (stamped name differs from the pin),
+`workload_unresolved` (stamped name absent from the held document) and
+`allowlist_denied` (stamped digest differs from the held canonical bytes).
+`_denied` means a check ran and failed; `_not_attested` means the leaf never
+carried the stamp, which is a lifecycle state rather than an attack.
 
 Any failure aborts before the over-encryption channel is established. The policy
-rejects an empty measurement allowlist, an anchor that is neither a mesh-CA pin nor
-a CDS identity (or both at once), or any version other than `c8s-verify/v1`. Freshness enforcement defaults to true; the
-recorded-evidence demo explicitly disables it and reports that downgrade as a
-warning.
+rejects an empty measurement allowlist, the absence of both anchors (a mesh-CA
+pin and pinned allowlist bytes), or any version other than `c8s/attest-pq/v1` —
+including `c8s/attest-lb/v1` and the retired `c8s-verify/v1`. Freshness
+enforcement defaults to true; the recorded-evidence demo explicitly disables it
+and reports that downgrade as a warning.

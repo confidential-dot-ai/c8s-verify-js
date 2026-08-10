@@ -11,12 +11,26 @@ import { NONCE_BYTES } from "./nonce.js";
 import { verifyECDSASignature, type Certificate } from "./x509.js";
 import type { PublicHalves } from "./keyagreement.js";
 
-export const PROTOCOL_VERSION = "c8s-verify/v1";
+/**
+ * Binding identifier of the `attest-pq` response bundle. Each endpoint's
+ * response carries its own identifier and a client requires the one selected
+ * by its endpoint — `c8s/attest-lb/v1` (a native-client sibling protocol this
+ * browser library cannot implement) and the retired `c8s-verify/v1` bundle
+ * are rejected even when their evidence is otherwise valid.
+ */
+export const BINDING_ATTEST_PQ = "c8s/attest-pq/v1";
+/**
+ * Identity-transcript domain tag, shared with c8s pkg/overenc. Deliberately
+ * NOT the bundle binding id above: the transcript construction (and the HKDF
+ * info derived from it) is unchanged from the original protocol, only the
+ * endpoint and its bundle version moved.
+ */
+export const TRANSCRIPT_DOMAIN_TAG = "c8s-verify/v1";
 export const IDENTITY_PROOF_ALGORITHM = "ecdsa-sha384";
 /** SHA-384 transcript hash length; also the v1 HKDF context length. */
 export const IDENTITY_TRANSCRIPT_BYTES = 48;
 
-const TRANSCRIPT_DOMAIN = utf8ToBytes(PROTOCOL_VERSION);
+const TRANSCRIPT_DOMAIN = utf8ToBytes(TRANSCRIPT_DOMAIN_TAG);
 
 export interface MeshIdentityProof {
   algorithm: string;
