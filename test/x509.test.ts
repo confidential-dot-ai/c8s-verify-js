@@ -327,7 +327,9 @@ test("rejects a duplicate extension OID rather than picking one copy", () => {
       parseCertificate(
         synthCert(extBlock(SEQ(OID_MW_DER, OCT([0xaa])), SEQ(OID_MW_DER, OCT([0xbb])))),
       ),
-    new RegExp(`carries extension ${MW_OID_STR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} more than once`),
+    new RegExp(
+      `carries extension ${MW_OID_STR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} more than once`,
+    ),
   );
 });
 
