@@ -655,6 +655,52 @@ test("TDX specific-cluster verdict without the tuple keeps the prominent warning
   assert.ok(!r2.warnings.some((w) => w.includes("not platform-complete")));
 });
 
+// The completeness rule follows the TEE, not the cloud prefix. az-tdx evidence
+// surfaces MRTD as claims.launch_digest and carries the same RTMR registers, so
+// an az-tdx deployment-class verdict on an MRTD-only policy leaves the guest
+// kernel and rootfs unmeasured exactly as bare TDX would — and used to pass
+// silently, with no pin even accepted to close the gap.
+test("an az-tdx deployment-class verdict is held to the same image-completeness rule", async () => {
+  const azTdxEvidence = JSON.parse(
+    await readFile(join(FIX, "az-tdx-evidence.json"), "utf8"),
+  ).evidence;
+  const nonce = generateNonce();
+  const leaf = await stampedLeaf(await stampFor("sglang-dev"));
+  const { bundle } = await buildBundle(nonce, {
+    leaf,
+    evidence: azTdxEvidence,
+    platform: "az-tdx",
+  });
+  const azMrtd =
+    "024a32b070383331181619fa387cb4d55d1e38879f989933055ccad5bc2db795d1737b66205949d15469dc8c1ba7ab7b";
+  const base = {
+    measurements: [azMrtd],
+    platform: "az-tdx",
+    requireFreshness: false,
+    allowlist: await readAllowlistBytes(),
+  };
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, base),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "measurement_incomplete",
+  );
+
+  // And the tuple that closes the gap is now accepted rather than refused as
+  // "not TDX" — the registers are all-zero on the recorded fixture.
+  const nonce2 = generateNonce();
+  const { bundle: bundle2 } = await buildBundle(nonce2, {
+    leaf,
+    evidence: azTdxEvidence,
+    platform: "az-tdx",
+  });
+  const zero = "00".repeat(48);
+  const r = await verifyAttestation(bundle2, nonce2, {
+    ...base,
+    tdxImage: { mrtd: azMrtd, rtmr1: zero, rtmr2: zero },
+  });
+  assert.equal(r.trustClass, "deployment-class");
+  assert.deepEqual(r.rtmrsPinned, [`1:${zero}`, `2:${zero}`]);
+});
+
 // SNP is unaffected by the completeness rule (its launch measurement already
 // covers the full image), and — mirroring expectedRtmr3 — an image tuple
 // combined with a non-TDX platform is a policy error, never silently ignored.
@@ -671,7 +717,7 @@ test("SNP verdicts are unaffected, and a tuple on SNP is refused", async () => {
     (e: unknown) =>
       e instanceof C8sVerifyError &&
       e.code === "invalid_request" &&
-      e.message.includes('tdxImage requires platform "tdx"'),
+      e.message.includes("tdxImage requires a TDX platform"),
   );
 });
 

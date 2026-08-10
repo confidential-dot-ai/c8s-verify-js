@@ -103,6 +103,75 @@ test("verifyEvidence(platform:az-tdx) warns (does not fail) when no anchor is su
   );
 });
 
+// --- az-tdx is TDX for policy purposes, not a platform of its own ---
+//
+// MRTD alone covers only the TDVF firmware wherever the TD runs; the guest
+// kernel and rootfs live in RTMR[1]/RTMR[2], and the operator-key chain in
+// RTMR[3]. az-tdx evidence carries all of them under claims.platform_data,
+// exactly as bare TDX does. Refusing the pins here — which the verifier used
+// to do, on the strength of the platform tag alone — left an az-tdx
+// deployment on MRTD-only policy with no pin available and no warning. The
+// recorded fixture's registers are all-zero, so the tuple below is the TD's
+// real image tuple, not a placeholder.
+const AZ_TDX_ZERO = "00".repeat(48);
+const AZ_TDX_IMAGE = { mrtd: TDX_MRTD, rtmr1: AZ_TDX_ZERO, rtmr2: AZ_TDX_ZERO };
+
+test("verifyEvidence(platform:az-tdx) enforces the full image tuple", async () => {
+  const res = await verifyEvidence(await tdxEvidence(), {
+    platform: "az-tdx",
+    tdxImage: AZ_TDX_IMAGE,
+  });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.rtmrsPinned, [`1:${AZ_TDX_ZERO}`, `2:${AZ_TDX_ZERO}`]);
+  assert.ok(!res.warnings.some((w) => w.includes("not platform-complete")));
+});
+
+test("verifyEvidence(platform:az-tdx) denies a wrong RTMR[1] even though MRTD matches", async () => {
+  await assert.rejects(
+    verifyEvidence(await tdxEvidence(), {
+      platform: "az-tdx",
+      measurements: [TDX_MRTD],
+      tdxImage: { ...AZ_TDX_IMAGE, rtmr1: "ff".repeat(48) },
+    }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr_denied",
+  );
+});
+
+// The vTPM entry point takes no RTMR[3] argument, so the pin is enforced
+// against the verified claim. It must hold both ways round: a matching pin
+// passes, a wrong one is denied — never quietly reported as enforced.
+test("verifyEvidence(platform:az-tdx) enforces an RTMR[3] pin from the verified claims", async () => {
+  const res = await verifyEvidence(await tdxEvidence(), {
+    platform: "az-tdx",
+    tdxImage: AZ_TDX_IMAGE,
+    expectedRtmr3: AZ_TDX_ZERO,
+  });
+  assert.equal(res.ok, true);
+  assert.ok(res.rtmrsPinned?.includes(`3:${AZ_TDX_ZERO}`));
+
+  await assert.rejects(
+    verifyEvidence(await tdxEvidence(), {
+      platform: "az-tdx",
+      tdxImage: AZ_TDX_IMAGE,
+      expectedRtmr3: "ff".repeat(48),
+    }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
+  );
+});
+
+// Without the tuple the policy is incomplete on az-tdx for the same reason it
+// is on bare TDX, so the warning has to be there to be acted on.
+test("verifyEvidence(platform:az-tdx) warns when the image policy is not platform-complete", async () => {
+  const res = await verifyEvidence(await tdxEvidence(), {
+    platform: "az-tdx",
+    measurements: [TDX_MRTD],
+  });
+  assert.ok(
+    res.warnings.some((w) => w.includes("not platform-complete")),
+    `expected the platform-completeness warning, got: ${JSON.stringify(res.warnings)}`,
+  );
+});
+
 test("verifyEvidence(platform:az-tdx) rejects tampered evidence (HW verification fails)", async () => {
   const evidence = (await tdxEvidence()) as AzTdxEvidence;
   // Flip a byte deep in the HCL report (base64url) — verification must break.

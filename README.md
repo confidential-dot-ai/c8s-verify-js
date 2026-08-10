@@ -86,7 +86,10 @@ whereas the operator key is chosen by the operator and can be published ahead of
 time (the expected register value is `SHA-384(0x00*48 ‖ SHA-384(pubkey))`).
 Pinning both is strictly stronger than either alone; `expectedRtmr3` is optional
 only for backwards compatibility, and SNP has no equivalent register, so it is
-rejected on any platform other than `"tdx"` rather than silently ignored.
+rejected on the SNP platforms rather than silently ignored. "TDX" here is the
+platform family — `"tdx"`, `"az-tdx"`, `"gcp-tdx"` — as c8s's
+`ratls.NormalizePlatform` defines it: Azure TDX carries the same registers, so
+it takes the same pins.
 
 TDX also changes what a complete *image* pin looks like. `measurements` pins the
 launch digest, which on TDX is MRTD — a measurement of the TDVF firmware only:
@@ -102,8 +105,8 @@ A deployment-class verdict — where the measurement policy is the entire anchor
 rejects an MRTD-only TDX policy with `measurement_incomplete`; with a pinned
 mesh CA the gap is a prominent warning instead. On SEV-SNP the launch
 measurement already covers the whole image, and the platform has no
-runtime-register equivalent by design, so `tdxImage` is TDX-only and rejected on
-any other platform.
+runtime-register equivalent by design, so `tdxImage` is TDX-family-only (see
+above) and rejected on the SNP platforms.
 
 The protocol closes the copied-public-chain gap in two ways:
 

@@ -219,6 +219,31 @@ function errMessage(e: unknown): string {
   return String((e as { message?: unknown })?.message ?? e);
 }
 
+/**
+ * The TDX platform family, as c8s's `ratls.NormalizePlatform` defines it: the
+ * bare-metal tag and the cloud-prefixed ones name one TEE, so every TDX-only
+ * policy rule applies to all of them.
+ *
+ * Kept apart from the routing tags used elsewhere in this file, which must stay
+ * exact — routing picks a verifier entry point (bare DCAP vs. the vTPM path),
+ * while the *policy class* must not depend on which cloud stamped the evidence.
+ * Conflating the two is how az-tdx used to escape the measurement policy
+ * outright: its MRTD surfaces as `claims.launch_digest` and it carries
+ * `platform_data.rtmr_*` exactly like bare TDX, yet an image tuple or an
+ * RTMR[3] pin was refused as "not TDX" — leaving an az-tdx deployment on
+ * MRTD-only policy with no pin available and no warning that the guest kernel
+ * and rootfs went unmeasured.
+ */
+const TDX_PLATFORMS = new Set(["tdx", "az-tdx", "gcp-tdx"]);
+
+/** Whether a platform tag names Intel TDX, whatever the cloud prefix. */
+function isTdxPlatform(platform: string): boolean {
+  return TDX_PLATFORMS.has(platform.trim().toLowerCase());
+}
+
+/** How the TDX-only policy rules name the platforms they accept. */
+const TDX_PLATFORM_LIST = [...TDX_PLATFORMS].map((p) => JSON.stringify(p)).join(" | ");
+
 /** The TDX verifier reports the registers under claims.platform_data. */
 function rtmrFromClaims(result: WasmVerifyResult, idx: number): unknown {
   const pd = result.claims.platform_data as Record<string, unknown> | undefined;
@@ -243,31 +268,46 @@ const CLAIM_REGISTER_HEX = /^[0-9a-f]{96}$/;
  * go through {@link verifyAttestation} / {@link verifyEvidence}.
  */
 export function enforceTdxImagePins(result: WasmVerifyResult, image: TdxImage): string[] {
-  const pinned: string[] = [];
-  for (const [idx, meaning, want] of [
-    [1, "guest kernel", image.rtmr1],
-    [2, "guest rootfs", image.rtmr2],
-  ] as const) {
-    const got = rtmrFromClaims(result, idx);
-    if (typeof got !== "string" || !CLAIM_REGISTER_HEX.test(got)) {
-      fail(
-        "rtmr_denied",
-        `cannot enforce the RTMR[${idx}] pin: the verified claims carry no well-formed ` +
-          `rtmr_${idx} — refusing to report a pin that was never compared`,
-        { details: { register: `rtmr_${idx}`, expected: want, got } },
-      );
-    }
-    if (got !== want) {
-      fail(
-        "rtmr_denied",
-        `RTMR[${idx}] (${meaning}) is ${got}, expected ${want}: the TD is not running the ` +
-          "pinned guest image, even though its launch digest may match",
-        { details: { register: `rtmr_${idx}`, expected: want, got } },
-      );
-    }
-    pinned.push(`${idx}:${want}`);
+  return [
+    enforceRegisterPin(result, 1, "guest kernel", image.rtmr1, "rtmr_denied"),
+    enforceRegisterPin(result, 2, "guest rootfs", image.rtmr2, "rtmr_denied"),
+  ];
+}
+
+/**
+ * Compare one RTMR against a pin, using the VERIFIED claims as the source of
+ * truth. Register-exact lowercase-hex comparison; an absent or malformed claim
+ * fails closed, because a claim that cannot be compared must never read as a
+ * pin that held. Returns the `rtmrsPinned` entry ("<idx>:<hex>").
+ */
+function enforceRegisterPin(
+  result: WasmVerifyResult,
+  idx: number,
+  meaning: string,
+  want: string,
+  code: "rtmr_denied" | "rtmr3_denied",
+): string {
+  const got = rtmrFromClaims(result, idx);
+  if (typeof got !== "string" || !CLAIM_REGISTER_HEX.test(got)) {
+    fail(
+      code,
+      `cannot enforce the RTMR[${idx}] pin: the verified claims carry no well-formed ` +
+        `rtmr_${idx} — refusing to report a pin that was never compared`,
+      { details: { register: `rtmr_${idx}`, expected: want, got } },
+    );
   }
-  return pinned;
+  if (got !== want) {
+    fail(
+      code,
+      idx === 3
+        ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the " +
+            "deployment the pin was taken from"
+        : `RTMR[${idx}] (${meaning}) is ${got}, expected ${want}: the TD is not running the ` +
+            "pinned guest image, even though its launch digest may match",
+      { details: { register: `rtmr_${idx}`, expected: want, got } },
+    );
+  }
+  return `${idx}:${want}`;
 }
 
 /**
@@ -338,10 +378,10 @@ function validatePolicy(policy: VerifyPolicy): void {
     // silently drop is worse than no pin, because the caller believes it is
     // enforcing deployment identity.
     const platform = policy.platform ?? "snp";
-    if (platform !== "tdx") {
+    if (!isTdxPlatform(platform)) {
       fail(
         "invalid_request",
-        `expectedRtmr3 requires platform "tdx" (got ${JSON.stringify(platform)}): the runtime measurement register is TDX-only, so the pin could not be enforced`,
+        `expectedRtmr3 requires a TDX platform (${TDX_PLATFORM_LIST}; got ${JSON.stringify(platform)}): the runtime measurement register is TDX-only, so the pin could not be enforced`,
       );
     }
     if (
@@ -355,10 +395,10 @@ function validatePolicy(policy: VerifyPolicy): void {
     // Same platform rule as expectedRtmr3: a pin the verifier would silently
     // drop is worse than no pin.
     const platform = policy.platform ?? "snp";
-    if (platform !== "tdx") {
+    if (!isTdxPlatform(platform)) {
       fail(
         "invalid_request",
-        `tdxImage requires platform "tdx" (got ${JSON.stringify(platform)}): SNP's launch measurement already covers the full image and has no runtime-register equivalent, so the pin could not be enforced`,
+        `tdxImage requires a TDX platform (${TDX_PLATFORM_LIST}; got ${JSON.stringify(platform)}): SNP's launch measurement already covers the full image and has no runtime-register equivalent, so the pin could not be enforced`,
       );
     }
     requireTdxImage("tdxImage", policy.tdxImage);
@@ -546,25 +586,26 @@ async function verifyHardwareAttestation(
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
-  // The WASM entry point already throws on a mismatch, but do not rely on that
-  // alone: the verifier core only *records* the comparison, and an older or
-  // substituted verifier build that ignored the argument would return a
-  // perfectly valid-looking result with the field absent. Require an explicit
-  // true — `undefined` means the comparison never ran, which is a failure, not
-  // an absence.
-  if (expectedRtmr3 !== undefined && result.rtmr3_match !== true) {
-    fail(
-      "rtmr3_denied",
-      result.rtmr3_match === false
-        ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
-        : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
-      {
-        details: {
-          expected: bytesToHex(expectedRtmr3),
-          got: rtmr3FromClaims(result),
-        },
-      },
-    );
+  if (expectedRtmr3 !== undefined) {
+    // Bare TDX takes the pin as a verifier argument and fails closed inside
+    // WASM, but do not rely on that alone: the verifier core only *records*
+    // the comparison, and an older or substituted build that ignored the
+    // argument would return a perfectly valid-looking result with the field
+    // absent. Require an explicit true — `undefined` means the comparison
+    // never ran, which is a failure, not an absence.
+    if (isTdx && result.rtmr3_match !== true) {
+      fail(
+        "rtmr3_denied",
+        result.rtmr3_match === false
+          ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
+          : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
+        { details: { expected: bytesToHex(expectedRtmr3), got: rtmr3FromClaims(result) } },
+      );
+    }
+    // The vTPM entry point has no RTMR[3] argument, so on az-tdx the verified
+    // claim is where the pin is enforced. Bare TDX runs it too: one comparison
+    // both platforms share, rather than a check that exists on one path only.
+    enforceRegisterPin(result, 3, "deployment identity", bytesToHex(expectedRtmr3), "rtmr3_denied");
   }
   return result;
 }
@@ -721,7 +762,7 @@ export async function verifyAttestation(
   // there the incomplete policy is rejected outright; with a pinned mesh CA
   // cluster identity does not depend on the measurement pins, so the gap is a
   // prominent warning instead.
-  if (wantPlatform === "tdx" && policy.tdxImage === undefined) {
+  if (isTdxPlatform(wantPlatform) && policy.tdxImage === undefined) {
     if (policy.meshCaPem === undefined) {
       fail(
         "measurement_incomplete",
@@ -853,10 +894,10 @@ export async function verifyEvidence(
   }
   let wantRtmr3: Uint8Array | undefined;
   if (opts.expectedRtmr3 !== undefined) {
-    if (!isTdx) {
+    if (!isTdxPlatform(wantPlatform)) {
       fail(
         "invalid_request",
-        `expectedRtmr3 requires platform "tdx" (got ${JSON.stringify(wantPlatform)}): the runtime measurement register is TDX-only, so the pin could not be enforced`,
+        `expectedRtmr3 requires a TDX platform (${TDX_PLATFORM_LIST}; got ${JSON.stringify(wantPlatform)}): the runtime measurement register is TDX-only, so the pin could not be enforced`,
       );
     }
     if (typeof opts.expectedRtmr3 !== "string" || !/^[0-9a-fA-F]{96}$/.test(opts.expectedRtmr3)) {
@@ -867,10 +908,10 @@ export async function verifyEvidence(
   if (opts.tdxImage !== undefined) {
     // Same platform rule as expectedRtmr3: a pin the verifier would silently
     // drop is worse than no pin.
-    if (!isTdx) {
+    if (!isTdxPlatform(wantPlatform)) {
       fail(
         "invalid_request",
-        `tdxImage requires platform "tdx" (got ${JSON.stringify(wantPlatform)}): SNP's launch measurement already covers the full image and has no runtime-register equivalent, so the pin could not be enforced`,
+        `tdxImage requires a TDX platform (${TDX_PLATFORM_LIST}; got ${JSON.stringify(wantPlatform)}): SNP's launch measurement already covers the full image and has no runtime-register equivalent, so the pin could not be enforced`,
       );
     }
     requireTdxImage("tdxImage", opts.tdxImage);
@@ -914,18 +955,23 @@ export async function verifyEvidence(
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
 
-  // Same reasoning as verifyAttestation: the WASM entry point throws on a
-  // mismatch, but an older or substituted verifier build that ignored the
-  // argument would return a valid-looking result with the field absent.
-  // Require an explicit true.
-  if (wantRtmr3 !== undefined && result.rtmr3_match !== true) {
-    fail(
-      "rtmr3_denied",
-      result.rtmr3_match === false
-        ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
-        : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
-      { details: { expected: bytesToHex(wantRtmr3), got: rtmr3FromClaims(result) } },
-    );
+  // Same reasoning as verifyAttestation: on bare TDX the WASM entry point
+  // throws on a mismatch, but an older or substituted verifier build that
+  // ignored the argument would return a valid-looking result with the field
+  // absent, so require an explicit true; and on az-tdx, where the entry point
+  // takes no such argument, the verified claim is what the pin is enforced
+  // against.
+  if (wantRtmr3 !== undefined) {
+    if (isTdx && result.rtmr3_match !== true) {
+      fail(
+        "rtmr3_denied",
+        result.rtmr3_match === false
+          ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
+          : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
+        { details: { expected: bytesToHex(wantRtmr3), got: rtmr3FromClaims(result) } },
+      );
+    }
+    enforceRegisterPin(result, 3, "deployment identity", bytesToHex(wantRtmr3), "rtmr3_denied");
   }
 
   // Measurement allowlist (case-insensitive hex). The image tuple's MRTD is
@@ -947,7 +993,7 @@ export async function verifyEvidence(
   if (opts.expectedRtmr3 !== undefined) {
     rtmrsPinned.push(`3:${opts.expectedRtmr3.toLowerCase()}`);
   }
-  if (isTdx && allow.length > 0 && opts.tdxImage === undefined) {
+  if (isTdxPlatform(wantPlatform) && allow.length > 0 && opts.tdxImage === undefined) {
     warnings.push(
       "TDX measurement policy is not platform-complete: only MRTD (and optionally RTMR[3]) " +
         "is pinned, not RTMR[1]/RTMR[2], so the guest kernel and rootfs are not covered by " +

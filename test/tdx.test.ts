@@ -187,13 +187,14 @@ test('verifyEvidence platform:"tdx" denies a wrong RTMR[3] even when MRTD matche
   );
 });
 
-// The register is TDX-only and the verifier consults it only on the TDX path,
-// so a pin combined with any other platform must be refused up front rather
-// than silently dropped — a pin that looks configured and enforces nothing is
-// worse than no pin.
+// The register is TDX-only, so a pin combined with an SNP platform must be
+// refused up front rather than silently dropped — a pin that looks configured
+// and enforces nothing is worse than no pin. "TDX" is the family, though, not
+// the bare-metal tag: az-tdx carries the same registers and accepts the pin
+// (see az-tdx.test.ts), which is why only the SNP tags appear here.
 test("verifyEvidence refuses an RTMR[3] pin on a non-TDX platform", async () => {
   const { evidence } = await tdxBundle();
-  for (const platform of ["snp", "az-snp", "az-tdx"]) {
+  for (const platform of ["snp", "az-snp"]) {
     await assert.rejects(
       verifyEvidence(evidence, {
         platform,
@@ -348,10 +349,11 @@ test("enforceTdxImagePins fails closed on absent or malformed register claims", 
 
 // Mirror of the expectedRtmr3 platform rule: the registers exist only on TDX
 // (SNP's launch measurement already covers the full image by design), so a
-// tuple combined with any other platform is a policy error, never ignored.
+// tuple combined with an SNP platform is a policy error, never ignored — and,
+// equally, never refused on az-tdx, which has the registers.
 test("verifyEvidence refuses an image tuple on a non-TDX platform", async () => {
   const { evidence } = await tdxBundle();
-  for (const platform of ["snp", "az-snp", "az-tdx"]) {
+  for (const platform of ["snp", "az-snp"]) {
     await assert.rejects(
       verifyEvidence(evidence, {
         platform,
