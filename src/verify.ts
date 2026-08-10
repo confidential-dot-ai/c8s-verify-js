@@ -29,6 +29,21 @@ export interface VerifyPolicy {
   measurements: string[];
   /** default "snp"; also "az-snp" | "az-tdx" | "tdx" (bare-metal Intel TDX) */
   platform?: string;
+  /**
+   * SEV-SNP processor generation ("milan" | "genoa" | "turin"), pinned out of
+   * band. `platform: "snp"` only — az-snp auto-detects it from the report
+   * CPUID and TDX has no such concept, so a pin elsewhere would enforce
+   * nothing and is rejected rather than dropped.
+   *
+   * Optional because the generation is *authenticated*, not merely asserted:
+   * it selects the VCEK/ASK/ARK chain the report is verified against, so a
+   * responder that declares the wrong one fails its own chain check. Left
+   * unset, the value is taken from the response — the only responder-supplied
+   * field that reaches a verification decision. Pinning it turns a mismatch
+   * into a stated policy decision instead of a chain failure, and documents
+   * which silicon the caller believes it is talking to.
+   */
+  generation?: string;
   /** default true: report_data must bind the selected session transcript */
   requireFreshness?: boolean;
   /**
@@ -108,6 +123,12 @@ export interface SessionPubKeyB64 {
 export interface AttestationBundle {
   version: string;
   platform: string;
+  /**
+   * SNP processor generation the responder declares. Not trusted on its own:
+   * it selects the VCEK/ASK/ARK chain the report is verified against, so a
+   * wrong value fails that chain — and {@link VerifyPolicy.generation} pins it
+   * outright when the caller wants the mismatch stated rather than inferred.
+   */
   generation: string;
   nonce: string;
   evidence: Evidence;
@@ -373,6 +394,20 @@ function validatePolicy(policy: VerifyPolicy): void {
       );
     }
   }
+  if (policy.generation !== undefined) {
+    // Same rule as the register pins: a pin the verifier would silently drop
+    // is worse than no pin.
+    const platform = policy.platform ?? "snp";
+    if (typeof policy.generation !== "string" || policy.generation === "") {
+      fail("invalid_request", 'generation must be "milan", "genoa" or "turin" when set');
+    }
+    if (platform !== "snp") {
+      fail(
+        "invalid_request",
+        `generation requires platform "snp" (got ${JSON.stringify(platform)}): az-snp detects it from the report CPUID and TDX has no generation, so the pin could not be enforced`,
+      );
+    }
+  }
   if (policy.expectedRtmr3 !== undefined) {
     // Reject here rather than at verification time: a pin the verifier would
     // silently drop is worse than no pin, because the caller believes it is
@@ -537,6 +572,7 @@ async function verifyHardwareAttestation(
   expected: Uint8Array,
   wantPlatform: string,
   requireFreshness: boolean,
+  pinnedGeneration?: string,
   expectedRtmr3?: Uint8Array,
 ): Promise<WasmVerifyResult> {
   // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
@@ -553,6 +589,21 @@ async function verifyHardwareAttestation(
   // result and warn later; bare snp returns a non-throwing bool either way.
   const failsClosedOnMismatch = isAzSnp || isAzTdx || isTdx;
   const hardAnchor = requireFreshness ? expected : undefined;
+  // `generation` is the one responder-supplied field that reaches a
+  // verification decision. It is safe unpinned because it is authenticated
+  // rather than asserted — it selects the VCEK/ASK/ARK chain the report is
+  // verified against, so a wrong value fails that chain instead of relaxing
+  // anything. When the caller does pin it, the disagreement is reported here
+  // as a policy decision rather than surfacing later as an opaque chain
+  // failure. Checked outside the try so it is not re-wrapped as one.
+  if (pinnedGeneration !== undefined && bundle.generation !== pinnedGeneration) {
+    fail(
+      "verification_failed",
+      `attestation bundle declares SNP generation ${JSON.stringify(bundle.generation)}, ` +
+        `not the pinned ${JSON.stringify(pinnedGeneration)}`,
+      { details: { declared: bundle.generation, pinned: pinnedGeneration } },
+    );
+  }
   let result: WasmVerifyResult;
   try {
     let out: string;
@@ -560,7 +611,7 @@ async function verifyHardwareAttestation(
     else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor);
     else if (isTdx)
       out = await verifyTdx(JSON.stringify(bundle.evidence), hardAnchor, undefined, expectedRtmr3);
-    else out = await verifySnp(bundle.evidence, bundle.generation, expected);
+    else out = await verifySnp(bundle.evidence, pinnedGeneration ?? bundle.generation, expected);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
     if (failsClosedOnMismatch && requireFreshness && isFreshnessMismatch(e)) {
@@ -724,6 +775,7 @@ export async function verifyAttestation(
     identity.transcript,
     wantPlatform,
     requireFreshness,
+    policy.generation,
     policy.expectedRtmr3 === undefined ? undefined : decodeRtmr3(policy.expectedRtmr3),
   );
   // The image tuple's MRTD is an accepted launch digest alongside the

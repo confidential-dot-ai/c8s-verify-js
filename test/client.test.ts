@@ -108,6 +108,17 @@ test("workloadName passes through to the verification policy", () => {
   assert.equal(client.policy.workloadName, "sglang-dev");
 });
 
+test("generation passes through to the verification policy", () => {
+  const client = new C8sClient({
+    baseUrl: "http://lb.test",
+    measurements: ["m"],
+    meshCaPem: "pinned CA",
+    generation: "genoa",
+    fetch: captureFetch([]),
+  });
+  assert.equal(client.policy.generation, "genoa");
+});
+
 test("tdxImage passes through to the verification policy", () => {
   const tdxImage = { mrtd: "1a".repeat(48), rtmr1: "2b".repeat(48), rtmr2: "3c".repeat(48) };
   const client = new C8sClient({

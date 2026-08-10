@@ -701,6 +701,58 @@ test("an az-tdx deployment-class verdict is held to the same image-completeness 
   assert.deepEqual(r.rtmrsPinned, [`1:${zero}`, `2:${zero}`]);
 });
 
+// ---------------------------------------------------------------------------
+// The declared SNP generation
+// ---------------------------------------------------------------------------
+//
+// It is the one responder-supplied field feeding a verification decision. The
+// VCEK chain authenticates it — a wrong value cannot widen anything, only fail
+// — but a caller who wants the mismatch stated rather than inferred can pin it.
+
+test("the declared generation is accepted when it matches the pin, and refused when it does not", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  assert.equal(bundle.generation, "genoa");
+
+  const r = await verifyAttestation(bundle, nonce, policy(meshCaPem, { generation: "genoa" }));
+  assert.equal(r.ok, true);
+
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem, { generation: "milan" })),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "verification_failed" &&
+      e.message.includes("declares SNP generation"),
+  );
+});
+
+// A responder that rewrites the field cannot pick a chain that verifies, so an
+// unpinned generation is authenticated rather than believed. Pinned, it is the
+// pin that decides — the swapped value never reaches the verifier.
+test("a swapped generation fails the VCEK chain even with no pin", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  bundle.generation = "milan";
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "verification_failed",
+  );
+});
+
+// Same rule as the register pins: a pin the verifier could not enforce is
+// refused up front rather than dropped.
+test("a generation pin on a platform that has no generation is refused", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  for (const platform of ["az-snp", "tdx", "az-tdx"]) {
+    await assert.rejects(
+      () => verifyAttestation(bundle, nonce, policy(meshCaPem, { platform, generation: "genoa" })),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      `platform ${platform} must refuse the generation pin`,
+    );
+  }
+});
+
 // SNP is unaffected by the completeness rule (its launch measurement already
 // covers the full image), and — mirroring expectedRtmr3 — an image tuple
 // combined with a non-TDX platform is a policy error, never silently ignored.

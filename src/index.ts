@@ -65,6 +65,13 @@ export interface C8sClientOptions {
   baseUrl: string;
   measurements: string[];
   platform?: string;
+  /**
+   * SEV-SNP processor generation ("milan" | "genoa" | "turin"), pinned out of
+   * band; `platform: "snp"` only. Optional — the generation selects the VCEK
+   * chain the report is verified against, so an unpinned one is authenticated
+   * by that chain rather than believed. See `VerifyPolicy.generation`.
+   */
+  generation?: string;
   requireFreshness?: boolean;
   /**
    * Mesh CA pinned out of band — the specific-cluster anchor. At least one of
@@ -181,6 +188,7 @@ export class C8sClient {
     this.policy = {
       measurements: opts.measurements,
       platform: opts.platform,
+      generation: opts.generation,
       requireFreshness: opts.requireFreshness,
       meshCaPem: hasPem ? opts.meshCaPem : undefined,
       allowlist: opts.allowlist,

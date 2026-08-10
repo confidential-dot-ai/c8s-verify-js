@@ -108,6 +108,16 @@ measurement already covers the whole image, and the platform has no
 runtime-register equivalent by design, so `tdxImage` is TDX-family-only (see
 above) and rejected on the SNP platforms.
 
+On SEV-SNP the response also declares its own processor `generation`. That is
+the one responder-supplied field reaching a verification decision, and it is
+authenticated rather than believed: it selects the VCEK/ASK/ARK chain the
+report is verified against, so a wrong value fails that chain instead of
+weakening anything. Pin it with `generation: "milan" | "genoa" | "turin"` when
+you want a disagreement reported as a policy decision rather than inferred from
+a chain failure. `platform: "snp"` only — az-snp detects it from the report
+CPUID and TDX has no generation, so a pin elsewhere is rejected rather than
+dropped.
+
 The protocol closes the copied-public-chain gap in two ways:
 
 - Hardware evidence commits to the session keys, client nonce, exact mesh leaf,
