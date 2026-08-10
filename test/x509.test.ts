@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { decodePEM } from "../src/pem.js";
 import {
+  LEAF_VALIDITY_SKEW_MS,
   parseCertificate,
   verifyCertChain,
   verifyECDSASignature,
@@ -154,6 +155,71 @@ test("a leaf minted by a well-formed CA still verifies", async () => {
   const { leafDer } = mintLeaf(ca.leafDer, ca.leafKeyPem);
   const chain = await verifyCertChain(leafDer, ca.leafDer);
   assert.equal(chain.ca.subjectCN, "real-ca.c8s.local");
+});
+
+// ---------------------------------------------------------------------------
+// Validity window: certutil.LeafValiditySkew on NotBefore, nothing on NotAfter
+// ---------------------------------------------------------------------------
+//
+// CDS mints mesh leaves with NotBefore = now and no backdating, and re-reads
+// them per request so a get-cert rotation is picked up mid-flight. A browser
+// whose clock trails the issuing TEE therefore sees a NotBefore in its own
+// future for a leaf the server considers perfectly valid. The allowance is
+// pinned from both sides, the way the server's TestCheckValidity pins it.
+
+const MINUTE = 60_000;
+
+/** A CA and a leaf minted with the given validity window, ready to chain. */
+function chainWithValidity(notBefore: Date, notAfter: Date): [Uint8Array, Uint8Array] {
+  const ca = mintSelfSigned({
+    subjectCN: "skew-ca.c8s.local",
+    extensions: [basicConstraintsExt(true), keyUsageExt(true)],
+    notBefore,
+    notAfter,
+  });
+  const { leafDer } = mintLeaf(ca.leafDer, ca.leafKeyPem, { notBefore, notAfter });
+  return [leafDer, ca.leafDer];
+}
+
+test("accepts a NotBefore inside the 5-minute clock-skew allowance", async () => {
+  const at = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const [leaf, ca] = chainWithValidity(
+    new Date(at.getTime() + LEAF_VALIDITY_SKEW_MS - MINUTE),
+    new Date(at.getTime() + 60 * MINUTE),
+  );
+  await assert.doesNotReject(() => verifyCertChain(leaf, ca, { at }));
+});
+
+test("rejects a NotBefore one second beyond the allowance", async () => {
+  const at = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const [leaf, ca] = chainWithValidity(
+    new Date(at.getTime() + LEAF_VALIDITY_SKEW_MS + 1000),
+    new Date(at.getTime() + 60 * MINUTE),
+  );
+  await assert.rejects(
+    () => verifyCertChain(leaf, ca, { at }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_cert",
+  );
+});
+
+test("grants NotAfter no allowance at all: one second past is expired", async () => {
+  const at = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const [leaf, ca] = chainWithValidity(
+    new Date(at.getTime() - 60 * MINUTE),
+    new Date(at.getTime() - 1000),
+  );
+  await assert.rejects(
+    () => verifyCertChain(leaf, ca, { at }),
+    (e: unknown) =>
+      e instanceof C8sVerifyError && e.code === "invalid_cert" && e.message.includes("expired"),
+  );
+  // The same certificate one second earlier is still good, so the rejection is
+  // the boundary and not a blanket refusal.
+  const [leaf2, ca2] = chainWithValidity(
+    new Date(at.getTime() - 60 * MINUTE),
+    new Date(at.getTime()),
+  );
+  await assert.doesNotReject(() => verifyCertChain(leaf2, ca2, { at }));
 });
 
 // ---------------------------------------------------------------------------

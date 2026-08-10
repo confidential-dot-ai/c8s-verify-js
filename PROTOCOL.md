@@ -64,6 +64,12 @@ and `Verify` impose the same rules server-side. Without them, one self-signed
 certificate emitted twice would satisfy the chain check and its
 matched-workload stamp would be attacker-chosen.
 
+Certificate validity uses the server's window (`certutil.CheckValidity`):
+`notBefore` is granted a 5-minute clock-skew allowance, `notAfter` none. CDS
+mints leaves at `now` with no backdating and re-reads them per request, so a
+verifier whose clock trails the issuing TEE would otherwise reject a leaf that
+had just rotated; an expired certificate, by contrast, is simply expired.
+
 The two resulting verdicts are explicitly distinct:
 
 - **Deployment-class** (derived CA): non-empty measurement pins plus exact

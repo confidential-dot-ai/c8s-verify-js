@@ -25,6 +25,17 @@ const OID = {
  */
 const KEY_USAGE_CERT_SIGN = 0x04;
 
+/**
+ * Clock-skew allowance granted to NotBefore, mirroring c8s's
+ * `certutil.LeafValiditySkew`. CDS mints mesh leaves with `NotBefore: now` and
+ * no backdating, and re-reads them per request so a rotation is picked up
+ * mid-flight — so a browser whose clock trails the issuing TEE by a moment
+ * would otherwise reject a perfectly fresh leaf. NotAfter gets NO allowance:
+ * an expired certificate is expired, and these bundles carry no nonce of their
+ * own, so the validity window is the only bound on replaying one.
+ */
+export const LEAF_VALIDITY_SKEW_MS = 5 * 60 * 1000;
+
 const CURVE_BY_OID: Record<string, string> = { [OID.P256]: "P-256", [OID.P384]: "P-384" };
 const CURVE_SIZE: Record<string, number> = { "P-256": 32, "P-384": 48 };
 const SIG_ALG: Record<string, "SHA-256" | "SHA-384"> = {
@@ -381,12 +392,16 @@ export async function verifySignedBy(
     ["leaf", child],
     ["CA", issuer],
   ] as const) {
-    if (at < c.notBefore) {
-      throw new C8sVerifyError("invalid_cert", `${label} certificate is not yet valid`, {
-        details: { notBefore: c.notBefore.toISOString() },
-      });
+    // NotBefore carries LEAF_VALIDITY_SKEW_MS of allowance, NotAfter none —
+    // the exact window certutil.CheckValidity applies server-side.
+    if (at.getTime() + LEAF_VALIDITY_SKEW_MS < c.notBefore.getTime()) {
+      throw new C8sVerifyError(
+        "invalid_cert",
+        `${label} certificate is not yet valid: NotBefore is beyond the ${LEAF_VALIDITY_SKEW_MS / 60000}-minute clock-skew allowance`,
+        { details: { notBefore: c.notBefore.toISOString() } },
+      );
     }
-    if (at > c.notAfter) {
+    if (at.getTime() > c.notAfter.getTime()) {
       throw new C8sVerifyError("invalid_cert", `${label} certificate has expired`, {
         details: { notAfter: c.notAfter.toISOString() },
       });

@@ -52,6 +52,15 @@ export const basicConstraintsExt = (isCA: boolean): number[] =>
 export const keyUsageExt = (certSign: boolean): number[] =>
   SEQ(OID_KEY_USAGE, BOOL(true), OCT(tlv(0x03, certSign ? [0x02, 0x04] : [0x07, 0x80])));
 
+/** DER UTCTime for a Date, at second granularity (YYMMDDHHMMSSZ). */
+function utcTime(at: Date): number[] {
+  const p = (n: number, w = 2): string => String(n).padStart(w, "0");
+  return UTC(
+    `${p(at.getUTCFullYear() % 100)}${p(at.getUTCMonth() + 1)}${p(at.getUTCDate())}` +
+      `${p(at.getUTCHours())}${p(at.getUTCMinutes())}${p(at.getUTCSeconds())}Z`,
+  );
+}
+
 /**
  * Encode a matched-workload extnValue. An independent encoder on purpose: the
  * parser under test must agree with bytes it did not produce (the golden
@@ -91,6 +100,9 @@ function subjectNameDer(certDer: Uint8Array): Uint8Array {
 interface MintOpts {
   subjectCN?: string;
   extensions?: number[][];
+  /** Validity window; defaults to a fixed window that is current for the suite. */
+  notBefore?: Date;
+  notAfter?: Date;
 }
 
 /**
@@ -143,7 +155,10 @@ function mint(
       .toString();
   const spki = new Uint8Array(createPublicKey(keyPem).export({ type: "spki", format: "der" }));
 
-  const validity = SEQ(UTC("260101000000Z"), UTC("280101000000Z"));
+  const validity = SEQ(
+    opts.notBefore ? utcTime(opts.notBefore) : UTC("260101000000Z"),
+    opts.notAfter ? utcTime(opts.notAfter) : UTC("280101000000Z"),
+  );
   const trailing = opts.extensions?.length ? [tlv(0xa3, SEQ(...opts.extensions))] : [];
   const tbs = new Uint8Array(
     SEQ(
