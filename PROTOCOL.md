@@ -151,13 +151,15 @@ shows bare `snp`; the vTPM (`az-snp`, `az-tdx`) and bare `tdx` shapes are
 specified in their sections below. Everything outside `evidence` (and the
 binding recomputation) is platform-independent.
 
-The `version`, `cds_cert_pem`, and `identity_proof` fields are mandatory.
+The `version`, `cds_cert_pem`, `identity_proof`, and `upstream` fields are
+mandatory.
 The LB re-reads the TEE-held mesh leaf, private key, and CA for each request so
 certificate rotation cannot leave the bundle and proof on different credential
 generations. There is no legacy or downgrade path.
 
 `upstream`, `upstream_server_name`, and `upstream_ca_sha256` are the
-destination identity the LB committed into `report_data`. They are
+destination identity the LB committed into `report_data`; all three are always
+present. They are
 **informational**: the client MUST pin the expected destination out of band,
 recompute the transcript with the pin, and treat a mismatch with the served
 fields as fatal — trusting the served values would let the control plane name
@@ -171,7 +173,7 @@ same destination has exactly one commitment and different destinations differ:
 
 - scheme and host lowercased;
 - the default port elided (`:80` for `http`, `:443` for `https`); any other
-  port kept;
+  port kept, and a port outside 1-65535 rejected;
 - one trailing root dot stripped from the host;
 - percent-encoded *unreserved* bytes (ALPHA / DIGIT / `-` / `.` / `_` / `~`)
   decoded and dot-segments resolved (RFC 3986 §6.2.2.3, §5.2.4); trailing
@@ -580,6 +582,8 @@ Any failure aborts before the over-encryption channel is established. The policy
 rejects an empty measurement allowlist, the absence of both anchors (a mesh-CA
 pin and pinned allowlist bytes), or any version other than `c8s/attest-pq/v2` —
 including `c8s/attest-lb/v2` and the retired `c8s/attest-pq/v1` and
-`c8s-verify/v1`. Freshness
+`c8s-verify/v1`. The verifier in this repository currently implements the v1
+binding (it requires `c8s/attest-pq/v1`); v2 verification lands separately with
+the coordinated cutover. Freshness
 enforcement defaults to true; the recorded-evidence demo explicitly disables it
 and reports that downgrade as a warning.
