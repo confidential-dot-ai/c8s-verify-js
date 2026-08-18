@@ -136,7 +136,7 @@ Response is `application/json`:
     "mesh_ca_sha256": "<b64url SHA-256 of issuing CA DER>",
     "signature": "<b64url ASN.1 DER ECDSA signature>"
   },
-  "upstream": "http://c8s-infer.c8s-system.svc.cluster.local:8000", // committed destination; "" when the LB forwards nowhere
+  "upstream": "http://c8s-infer.c8s-system.svc.cluster.local:8000", // committed destination (canonical); "" only in the explicit echo mode
   "upstream_server_name": "",   // https upstreams: the TLS verification name
   "upstream_ca_sha256": ""      // https upstreams: b64url SHA-256 of the CA bundle
 }
@@ -166,6 +166,31 @@ for a plaintext (mesh-wrapped) upstream; `upstream_ca_sha256` is the SHA-256
 of the concatenated `CERTIFICATE` block DERs of the CA bundle file the LB
 verifies its https upstream against, in file order.
 
+`upstream` is the **canonical form** of the LB's `--upstream` base URL, so the
+same destination has exactly one commitment and different destinations differ:
+
+- scheme and host lowercased;
+- the default port elided (`:80` for `http`, `:443` for `https`); any other
+  port kept;
+- one trailing root dot stripped from the host;
+- percent-encoded *unreserved* bytes (ALPHA / DIGIT / `-` / `.` / `_` / `~`)
+  decoded and dot-segments resolved (RFC 3986 §6.2.2.3, §5.2.4); trailing
+  slashes trimmed;
+- userinfo, query, and fragment are rejected at configuration time — a
+  forwarding destination carries none of them.
+
+`upstream_server_name` is likewise lowercased with one trailing root dot
+stripped. A verifier MUST canonicalise its pinned destination with the
+identical rules before recomputing the transcript — a pin canonicalised
+differently on one side is a lie by mismatch. (The Go reference is
+`overenc.CanonicalUpstreamURL` in c8s; the verify CLI applies it to
+`--expected-upstream`.)
+
+An empty `upstream` is a deliberate deployment choice, never a fallback: the
+LB serves it only when started in its explicit attestation-only echo mode
+(`--echo-backend`), and refuses to serve attestation with the destination
+silently unset.
+
 #### Report-data and mesh-identity binding
 
 Define `LP(field) = uint32_be(len(field)) || field`, and:
@@ -193,11 +218,12 @@ string and tunnel AADs below keep the original `c8s-verify/v1` protocol name:
 they are channel separators, not version markers.)
 
 The upstream triple commits where the LB's own forwarding sends decrypted
-traffic: the canonical base URL (empty when it forwards nowhere), and for an
-https upstream the TLS verification server name and CA-bundle hash. A control
-plane that repoints the destination changes the transcript — which is also
-the channel's HKDF salt, so a client pinned to a different destination fails
-verification and cannot open a session record.
+traffic: the canonical base URL (defined above; empty only in the explicit
+attestation-only echo mode), and for an https upstream the TLS verification
+server name and CA-bundle hash. A control plane that repoints the destination
+changes the transcript — which is also the channel's HKDF salt, so a client
+pinned to a different destination fails verification and cannot open a
+session record.
 
 The 64-byte anchor is identical on every platform: SEV-SNP `report_data` and
 the TDX TD-quote `report_data` both carry 64 bytes natively, and the Azure vTPM
