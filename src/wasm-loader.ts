@@ -43,17 +43,37 @@ export function initVerifier(input?: InitInput): Promise<void> {
  * Call the SNP verifier. Initialises the module on first use. Accepts both
  * bare SNP evidence and az-snp (Azure HCL-wrapped) evidence; the latter is
  * unwrapped to the raw SNP report the WASM verifier understands.
+ *
+ * The verifier enforces the full endorsement-key policy (ARK → ASK/ASVK → VEK
+ * chain against the bundled AMD roots, VEK validity period, VEK chip-id/TCB
+ * cross-validation against the report) plus VMPL and debug policy. When
+ * `minTcbJson` is supplied, a reported TCB below the floor fails closed. When
+ * `crlDer` carries the AMD KDS CRL for the generation, its ARK signature and
+ * freshness are verified and the VEK is checked against it — the result's
+ * `collateral_verified` reports whether that ran.
+ *
  * @param evidence bare SNP or az-snp evidence
  * @param generation "milan" | "genoa" | "turin"
- * @returns verification result JSON (or throws on HW/chain failure)
+ * @param expectedReportData raw bytes report_data must equal (reported, not fatal)
+ * @param minTcbJson minimum TCB floor as SnpTcb JSON
+ * @param crlDer DER AMD KDS CRL for the generation
+ * @returns verification result JSON (or throws on HW/chain/policy failure)
  */
 export async function verifySnp(
   evidence: Evidence,
   generation: string,
   expectedReportData?: Uint8Array,
+  minTcbJson?: string,
+  crlDer?: Uint8Array,
 ): Promise<string> {
   await initVerifier();
-  return verify_snp(JSON.stringify(toWasmEvidence(evidence)), generation, expectedReportData);
+  return verify_snp(
+    JSON.stringify(toWasmEvidence(evidence)),
+    generation,
+    expectedReportData,
+    minTcbJson,
+    crlDer,
+  );
 }
 
 /**
@@ -66,18 +86,27 @@ export async function verifySnp(
  * The processor generation is auto-detected from the report CPUID, so no
  * generation argument is needed.
  *
+ * `minTcbJson` and `crlDer` behave exactly as on {@link verifySnp}: a reported
+ * TCB below the floor fails closed, and a supplied AMD KDS CRL is
+ * signature- and freshness-verified before the VCEK is checked against it
+ * (`collateral_verified` in the result says whether that ran).
+ *
  * @param evidenceJson az-snp evidence: { version, tpm_quote, hcl_report, vcek }
  * @param expectedReportData raw bytes the TPM quote extraData must equal
  * @param expectedInitDataHash 32-byte hash to bind against PCR[8]
+ * @param minTcbJson minimum TCB floor as SnpTcb JSON
+ * @param crlDer DER AMD KDS CRL for the report's generation
  * @returns verification result JSON (or throws on any failure)
  */
 export async function verifyAzSnp(
   evidenceJson: string,
   expectedReportData?: Uint8Array,
   expectedInitDataHash?: Uint8Array,
+  minTcbJson?: string,
+  crlDer?: Uint8Array,
 ): Promise<string> {
   await initVerifier();
-  return verify_az_snp(evidenceJson, expectedReportData, expectedInitDataHash);
+  return verify_az_snp(evidenceJson, expectedReportData, expectedInitDataHash, minTcbJson, crlDer);
 }
 
 /**

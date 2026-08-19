@@ -24,6 +24,20 @@ import {
 } from "./workload.js";
 import { requireTdxImage, type TdxImage } from "./manifest.js";
 
+/**
+ * Minimum SEV-SNP TCB floor: security patch levels (SPLs) the reported TCB
+ * must meet or exceed, component by component. Values come from AMD security
+ * bulletins for the deployment's processor generation; `fmc` exists only on
+ * Turin and a floor requiring it rejects reports that do not carry it.
+ */
+export interface SnpMinTcb {
+  bootloader: number;
+  tee: number;
+  snp: number;
+  microcode: number;
+  fmc?: number;
+}
+
 export interface VerifyPolicy {
   /** accepted launch digests (hex sha-384) */
   measurements: string[];
@@ -113,6 +127,37 @@ export interface VerifyPolicy {
    * is rejected rather than silently ignored.
    */
   tdxImage?: TdxImage;
+  /**
+   * Minimum SEV-SNP TCB floor, pinned from AMD security bulletins. A verified
+   * report whose reported TCB is below any component fails closed
+   * (`tcb_denied`). Measurement pinning does not replace this: a genuine,
+   * correctly-measured guest on unpatched platform firmware verifies without
+   * it. SNP platforms only ("snp" | "az-snp") — TDX has its own TCB model, so
+   * the pin is rejected elsewhere rather than silently dropped.
+   */
+  minTcb?: SnpMinTcb;
+  /**
+   * DER-encoded AMD KDS CRL for the deployment's processor generation
+   * (`https://kdsintf.amd.com/vcek/v1/<product>/crl`), fetched or stapled by
+   * the caller — the WASM verifier cannot reach AMD KDS itself. The bytes
+   * need no transport trust: the verifier checks the CRL's signature against
+   * the bundled AMD root and its thisUpdate/nextUpdate freshness window
+   * before trusting it, then requires the VEK to not be revoked. Supplying it
+   * makes revocation part of the verdict (`collateralVerified: true`); a
+   * supplied CRL that cannot be positively verified fails closed
+   * (`collateral_denied`), never as "skipped". SNP platforms only.
+   */
+  snpCrl?: Uint8Array;
+  /**
+   * Require the revocation collateral to be verified for the verdict to pass
+   * (production policy). With this set, a result whose collateral was never
+   * checked fails with `collateral_required` instead of verifying with a
+   * warning. Requires `snpCrl` — requiring collateral while supplying none
+   * could never succeed and is rejected upfront. SNP platforms only: the
+   * browser verifier has no TDX collateral path yet, so requiring it there
+   * is rejected rather than accepted-and-always-failing.
+   */
+  requireCollateral?: boolean;
 }
 
 export interface SessionPubKeyB64 {
@@ -190,6 +235,15 @@ export interface AttestationResult {
   /** true only when the identity transcript is hardware-bound (report_data matched). */
   identityBound: boolean;
   /**
+   * Whether endorsement/revocation collateral was verified as part of this
+   * verdict (for SNP: the AMD KDS CRL's signature and freshness checked, and
+   * the VEK not on it). `false` means revocation was never checked — the
+   * verdict is hardware-signature- and measurement-complete but not
+   * collateral-complete, and a matching warning says so. Set
+   * {@link VerifyPolicy.requireCollateral} to make `false` a failure instead.
+   */
+  collateralVerified: boolean;
+  /**
    * Verified identity transcript hash used as the HKDF context. Hardware-bound
    * only when {@link identityBound} is true.
    */
@@ -241,6 +295,26 @@ function errMessage(e: unknown): string {
 }
 
 /**
+ * The SNP verifiers fail closed (throw) when the reported TCB is below the
+ * supplied floor. Recognise that throw by message so it surfaces as the
+ * precise `tcb_denied` code — a caller telling "unpatched platform" apart
+ * from "broken evidence" needs the codes to differ.
+ */
+function isTcbBelowFloor(e: unknown): boolean {
+  return /below minimum/i.test(errMessage(e));
+}
+
+/**
+ * A supplied CRL that fails any of its own checks (signature, freshness,
+ * parse) or names the VEK throws inside the verifier. Recognise it so the
+ * failure surfaces as `collateral_denied` rather than the generic
+ * `verification_failed` used for chain and signature failures.
+ */
+function isCollateralFailure(e: unknown): boolean {
+  return /CRL check|revoked/i.test(errMessage(e));
+}
+
+/**
  * The TDX platform family, as c8s's `ratls.NormalizePlatform` defines it: the
  * bare-metal tag and the cloud-prefixed ones name one TEE, so every TDX-only
  * policy rule applies to all of them.
@@ -264,6 +338,123 @@ function isTdxPlatform(platform: string): boolean {
 
 /** How the TDX-only policy rules name the platforms they accept. */
 const TDX_PLATFORM_LIST = [...TDX_PLATFORMS].map((p) => JSON.stringify(p)).join(" | ");
+
+/**
+ * The platforms this library's SNP-only policy rules (minTcb, snpCrl,
+ * requireCollateral) apply to — the two SNP routing tags the verifier
+ * dispatches on.
+ */
+const SNP_PLATFORMS = new Set(["snp", "az-snp"]);
+
+/** How the SNP-only policy rules name the platforms they accept. */
+const SNP_PLATFORM_LIST = [...SNP_PLATFORMS].map((p) => JSON.stringify(p)).join(" | ");
+
+/** An SPL component: an integer in a u8's range. */
+function isSpl(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 255;
+}
+
+/**
+ * Validate the SNP collateral/TCB policy fields shared by
+ * {@link VerifyPolicy} and {@link VerifyEvidenceOptions}, failing closed on
+ * any pin the verifier could not enforce.
+ */
+function validateSnpPolicy(
+  platform: string,
+  minTcb: SnpMinTcb | undefined,
+  snpCrl: Uint8Array | undefined,
+  requireCollateral: boolean | undefined,
+): void {
+  const isSnp = SNP_PLATFORMS.has(platform.trim().toLowerCase());
+  if (minTcb !== undefined) {
+    if (!isSnp) {
+      fail(
+        "invalid_request",
+        `minTcb requires an SNP platform (${SNP_PLATFORM_LIST}; got ${JSON.stringify(platform)}): the SEV-SNP TCB floor has no meaning elsewhere, so the pin could not be enforced`,
+      );
+    }
+    const { bootloader, tee, snp, microcode, fmc } = minTcb;
+    if (
+      !isSpl(bootloader) ||
+      !isSpl(tee) ||
+      !isSpl(snp) ||
+      !isSpl(microcode) ||
+      (fmc !== undefined && !isSpl(fmc))
+    ) {
+      fail(
+        "invalid_request",
+        "minTcb components (bootloader, tee, snp, microcode, and optional fmc) must each be an integer 0–255",
+      );
+    }
+  }
+  if (snpCrl !== undefined) {
+    if (!isSnp) {
+      fail(
+        "invalid_request",
+        `snpCrl requires an SNP platform (${SNP_PLATFORM_LIST}; got ${JSON.stringify(platform)}): the AMD KDS CRL vouches for SNP endorsement keys only`,
+      );
+    }
+    if (!(snpCrl instanceof Uint8Array) || snpCrl.length === 0) {
+      fail("invalid_request", "snpCrl must be the non-empty DER bytes of the AMD KDS CRL");
+    }
+  }
+  if (requireCollateral) {
+    if (!isSnp) {
+      fail(
+        "invalid_request",
+        `requireCollateral requires an SNP platform (${SNP_PLATFORM_LIST}; got ${JSON.stringify(platform)}): the browser verifier has no TDX collateral path, so the requirement could never be met`,
+      );
+    }
+    if (snpCrl === undefined) {
+      fail(
+        "invalid_request",
+        "requireCollateral is set but no snpCrl is supplied: the verifier has no collateral to verify, so the requirement could never be met — fetch the AMD KDS CRL and pass it as snpCrl",
+      );
+    }
+  }
+}
+
+/** Serialize a validated minTcb to the SnpTcb JSON the WASM verifier takes. */
+function minTcbJson(minTcb: SnpMinTcb | undefined): string | undefined {
+  if (minTcb === undefined) return undefined;
+  const { bootloader, tee, snp, microcode, fmc } = minTcb;
+  return JSON.stringify({ bootloader, tee, snp, microcode, ...(fmc !== undefined ? { fmc } : {}) });
+}
+
+/**
+ * Enforce the collateral outcome against the policy, using the VERIFIED
+ * result as the source of truth: a supplied CRL (or an explicit
+ * requireCollateral) demands `collateral_verified === true` — a verifier
+ * build that silently dropped the argument must never read as verified.
+ * Returns whether collateral was verified; when it was not and the policy
+ * tolerates that, the gap is surfaced as a warning instead.
+ */
+function enforceCollateralPolicy(
+  result: WasmVerifyResult,
+  platform: string,
+  snpCrl: Uint8Array | undefined,
+  requireCollateral: boolean | undefined,
+  warnings: string[],
+): boolean {
+  const verified = result.collateral_verified === true;
+  if (verified) return true;
+  if (snpCrl !== undefined || requireCollateral) {
+    fail(
+      "collateral_required",
+      "revocation collateral was not verified (no collateral_verified in the result) — refusing to report a collateral policy that was never enforced",
+    );
+  }
+  warnings.push(
+    SNP_PLATFORMS.has(platform.trim().toLowerCase())
+      ? "endorsement-key revocation was not checked: no snpCrl supplied, so an AMD-revoked " +
+          "VEK would still verify. Fetch the AMD KDS CRL for the deployment's generation and " +
+          "pass it as snpCrl (and set requireCollateral in production policy)"
+      : "DCAP collateral (PCK CRL, TCB status, QE identity) was not checked: the browser " +
+          "verifier has no TDX collateral path; use the native verifier where revocation " +
+          "must be part of the verdict",
+  );
+  return false;
+}
 
 /** The TDX verifier reports the registers under claims.platform_data. */
 function rtmrFromClaims(result: WasmVerifyResult, idx: number): unknown {
@@ -438,6 +629,12 @@ function validatePolicy(policy: VerifyPolicy): void {
     }
     requireTdxImage("tdxImage", policy.tdxImage);
   }
+  validateSnpPolicy(
+    policy.platform ?? "snp",
+    policy.minTcb,
+    policy.snpCrl,
+    policy.requireCollateral,
+  );
 }
 
 /** Decode a 96-hex-char RTMR[3] pin. Callers validate the shape first. */
@@ -574,6 +771,8 @@ async function verifyHardwareAttestation(
   requireFreshness: boolean,
   pinnedGeneration?: string,
   expectedRtmr3?: Uint8Array,
+  minTcb?: SnpMinTcb,
+  snpCrl?: Uint8Array,
 ): Promise<WasmVerifyResult> {
   // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
   // + vTPM quote + hardware quote), with the transcript checked against the TPM
@@ -607,11 +806,26 @@ async function verifyHardwareAttestation(
   let result: WasmVerifyResult;
   try {
     let out: string;
-    if (isAzSnp) out = await verifyAzSnp(JSON.stringify(bundle.evidence), hardAnchor);
+    const tcbFloor = minTcbJson(minTcb);
+    if (isAzSnp)
+      out = await verifyAzSnp(
+        JSON.stringify(bundle.evidence),
+        hardAnchor,
+        undefined,
+        tcbFloor,
+        snpCrl,
+      );
     else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor);
     else if (isTdx)
       out = await verifyTdx(JSON.stringify(bundle.evidence), hardAnchor, undefined, expectedRtmr3);
-    else out = await verifySnp(bundle.evidence, pinnedGeneration ?? bundle.generation, expected);
+    else
+      out = await verifySnp(
+        bundle.evidence,
+        pinnedGeneration ?? bundle.generation,
+        expected,
+        tcbFloor,
+        snpCrl,
+      );
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
     if (failsClosedOnMismatch && requireFreshness && isFreshnessMismatch(e)) {
@@ -627,6 +841,18 @@ async function verifyHardwareAttestation(
         "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from",
         { details: { expected: bytesToHex(expectedRtmr3) }, cause: e },
       );
+    }
+    if (minTcb !== undefined && isTcbBelowFloor(e)) {
+      fail(
+        "tcb_denied",
+        "reported SNP TCB is below the pinned minimum: genuine silicon, but platform firmware older than the policy floor",
+        { details: { minTcb }, cause: e },
+      );
+    }
+    if (snpCrl !== undefined && isCollateralFailure(e)) {
+      fail("collateral_denied", `endorsement-key collateral check failed: ${errMessage(e)}`, {
+        cause: e,
+      });
     }
     fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
@@ -777,6 +1003,15 @@ export async function verifyAttestation(
     requireFreshness,
     policy.generation,
     policy.expectedRtmr3 === undefined ? undefined : decodeRtmr3(policy.expectedRtmr3),
+    policy.minTcb,
+    policy.snpCrl,
+  );
+  const collateralVerified = enforceCollateralPolicy(
+    result,
+    wantPlatform,
+    policy.snpCrl,
+    policy.requireCollateral,
+    warnings,
   );
   // The image tuple's MRTD is an accepted launch digest alongside the
   // explicit allowlist; RTMR[1]/[2] are compared exactly below.
@@ -840,6 +1075,7 @@ export async function verifyAttestation(
     reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
     identityBound: result.report_data_match === true,
+    collateralVerified,
     keyAgreementContext: identity.transcript,
     sessionPubKey,
     cert: certInfo(identity.chain),
@@ -896,6 +1132,18 @@ export interface VerifyEvidenceOptions {
    * Requires `platform: "tdx"`.
    */
   tdxImage?: TdxImage;
+  /** Minimum SEV-SNP TCB floor; see {@link VerifyPolicy.minTcb}. SNP only. */
+  minTcb?: SnpMinTcb;
+  /**
+   * DER AMD KDS CRL for the deployment's generation; see
+   * {@link VerifyPolicy.snpCrl}. SNP only.
+   */
+  snpCrl?: Uint8Array;
+  /**
+   * Require the revocation collateral to be verified for the verdict to
+   * pass; see {@link VerifyPolicy.requireCollateral}. Requires `snpCrl`.
+   */
+  requireCollateral?: boolean;
 }
 
 export interface EvidenceResult {
@@ -904,6 +1152,8 @@ export interface EvidenceResult {
   measurement: string;
   reportVersion: number;
   reportDataMatch: boolean | null;
+  /** Whether revocation collateral was verified; see {@link AttestationResult.collateralVerified}. */
+  collateralVerified: boolean;
   claims: WasmClaims;
   /** Register pins this verdict compared exactly; see {@link AttestationResult.rtmrsPinned}. */
   rtmrsPinned?: string[];
@@ -968,16 +1218,19 @@ export async function verifyEvidence(
     }
     requireTdxImage("tdxImage", opts.tdxImage);
   }
+  validateSnpPolicy(wantPlatform, opts.minTcb, opts.snpCrl, opts.requireCollateral);
   const expected = opts.expectedReportData;
 
   // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
   let result: WasmVerifyResult;
   try {
     let out: string;
-    if (isAzSnp) out = await verifyAzSnp(JSON.stringify(evidence), expected);
+    const tcbFloor = minTcbJson(opts.minTcb);
+    if (isAzSnp)
+      out = await verifyAzSnp(JSON.stringify(evidence), expected, undefined, tcbFloor, opts.snpCrl);
     else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected);
     else if (isTdx) out = await verifyTdx(JSON.stringify(evidence), expected, undefined, wantRtmr3);
-    else out = await verifySnp(evidence, opts.generation!, expected);
+    else out = await verifySnp(evidence, opts.generation!, expected, tcbFloor, opts.snpCrl);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
     // The vTPM/tdx verifiers fail closed (throw) on a freshness mismatch when an
@@ -997,6 +1250,18 @@ export async function verifyEvidence(
         { details: { expected: bytesToHex(expected) }, cause: e },
       );
     }
+    if (opts.minTcb !== undefined && isTcbBelowFloor(e)) {
+      fail(
+        "tcb_denied",
+        "reported SNP TCB is below the pinned minimum: genuine silicon, but platform firmware older than the policy floor",
+        { details: { minTcb: opts.minTcb }, cause: e },
+      );
+    }
+    if (opts.snpCrl !== undefined && isCollateralFailure(e)) {
+      fail("collateral_denied", `endorsement-key collateral check failed: ${errMessage(e)}`, {
+        cause: e,
+      });
+    }
     fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
 
@@ -1006,6 +1271,13 @@ export async function verifyEvidence(
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
+  const collateralVerified = enforceCollateralPolicy(
+    result,
+    wantPlatform,
+    opts.snpCrl,
+    opts.requireCollateral,
+    warnings,
+  );
 
   // Same reasoning as verifyAttestation: on bare TDX the WASM entry point
   // throws on a mismatch, but an older or substituted verifier build that
@@ -1075,6 +1347,7 @@ export async function verifyEvidence(
     measurement,
     reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
+    collateralVerified,
     claims: result.claims,
     ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
     warnings,

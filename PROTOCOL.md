@@ -277,9 +277,9 @@ The `evidence` object has the attestation-rs `TdxEvidence` shape:
 The identity binding is carried directly in the TD quote's 64-byte
 `report_data`, recomputed exactly as specified above, and the quote signature
 is verified against the PCK chain embedded in the quote up to the bundled
-Intel root. As with the other WASM entry points, the async collateral checks
-(CRL/TCB/QE identity) are skipped in the browser (`collateral_verified:
-false`). `claims.launch_digest` is the TD launch measurement (MRTD);
+Intel root. The async DCAP collateral checks (CRL/TCB/QE identity) are
+skipped in the browser (`collateral_verified: false`) — TDX has no
+caller-stapled collateral path yet, unlike SNP. `claims.launch_digest` is the TD launch measurement (MRTD);
 `generation` is not applicable and is empty. The runtime measurement
 registers surface as `claims.platform_data.rtmr_0`…`rtmr_3`, each 96
 lowercase hex chars.
@@ -350,10 +350,20 @@ stamped name as a key lookup in the held document's `workloads` map (absent ⇒
 
 ```
 verify_snp(evidenceJson: string, generation: "milan"|"genoa"|"turin",
-           expectedReportData?: Uint8Array) -> string (JSON) | throws
+           expectedReportData?: Uint8Array, minTcbJson?: string,
+           crlDer?: Uint8Array) -> string (JSON) | throws
 ```
 
-- **Throws** (JsError) if VCEK chain or report signature verification fails.
+- **Throws** (JsError) if any enforced check fails: the VEK chain to the
+  bundled AMD roots (ARK → ASK → VCEK, or ARK → ASVK → VLEK, auto-detected),
+  the VEK validity period, the report signature, VMPL != 0 or debug policy,
+  the VEK's chip-id/TCB certificate-extension cross-validation against the
+  report, a reported TCB below the `minTcbJson` floor
+  (`{ "bootloader": N, "tee": N, "snp": N, "microcode": N, "fmc"?: N }`), or
+  — when `crlDer` is supplied — a CRL whose ARK signature, thisUpdate/
+  nextUpdate freshness window, or revocation status rejects the VEK. These
+  are the same endorsement and platform-security checks the native SNP
+  verifier enforces; only VEK network fetching is out (the VEK is inline).
 - On success returns:
   ```jsonc
   {
@@ -361,6 +371,7 @@ verify_snp(evidenceJson: string, generation: "milan"|"genoa"|"turin",
     "platform": "snp",
     "report_version": 3,
     "report_data_match": true,        // bool, or null if no expected provided
+    "collateral_verified": false,     // true iff a CRL was supplied and checked
     "claims": {
       "launch_digest": "<hex sha-384>",
       "report_data": "<hex 64 bytes>",
@@ -376,11 +387,26 @@ The JS policy layer treats verification as **passed** iff: `verify_snp` did not 
 (`signature_valid === true`), `report_data_match === true`, `platform` is acceptable, and
 `claims.launch_digest` ∈ the caller's measurement allowlist (case-insensitive hex).
 
+**Revocation collateral is caller-supplied.** The browser cannot reach AMD
+KDS, so the CRL for the deployment's generation
+(`https://kdsintf.amd.com/vcek/v1/<product>/crl`) is fetched or stapled by the
+caller and passed as `snpCrl` in the JS policy. The bytes need no transport
+trust — the verifier authenticates them against the bundled ARK and rejects
+stale or future-dated lists — but *absence* is honest: without a CRL the
+result carries `collateral_verified: false`, the JS layer surfaces
+`collateralVerified: false` plus a warning, and `requireCollateral` turns
+that into a `collateral_required` failure for production policy. A supplied
+CRL that cannot be positively verified fails closed (`collateral_denied`),
+never as "skipped". A minimum TCB floor (`minTcb`, from AMD security
+bulletins) closes the remaining platform gap: measurement pinning alone
+accepts a genuine, correctly-measured guest on unpatched firmware.
+
 ## WASM verifier I/O (`attestation-rs` `verify_az_snp`)
 
 ```
 verify_az_snp(evidenceJson: string, expectedReportData?: Uint8Array,
-              expectedInitDataHash?: Uint8Array) -> string (JSON) | throws
+              expectedInitDataHash?: Uint8Array, minTcbJson?: string,
+              crlDer?: Uint8Array) -> string (JSON) | throws
 ```
 
 Full Azure vTPM verification of an `AzSnpEvidence` object (above). Unlike `verify_snp`
@@ -391,12 +417,15 @@ hardware report:
 2. Quote `extraData` == `expectedReportData` (the freshness anchor).
 3. PCR digest integrity, and optionally `expectedInitDataHash` bound to PCR[8].
 4. AK-to-TEE binding: `snp.report_data[..32] == SHA-256(runtime_data)`.
-5. VCEK chain to the bundled AMD roots, SNP report signature, and VMPL/debug/TCB policy.
+5. VCEK chain to the bundled AMD roots, VCEK validity period, SNP report
+   signature, VMPL/debug/TCB policy, and the optional `minTcbJson` floor.
+6. When `crlDer` is supplied: the AMD KDS CRL's ARK signature and freshness,
+   then the VCEK's revocation status (same semantics as `verify_snp`).
 
 - **Throws** (JsError) if any check fails.
-- On success returns the same shape as `verify_snp` with `platform: "az-snp"` and an
-  added `collateral_verified: false` (the WASM path skips the async CRL revocation
-  check; `report_data_match` reflects the quote `extraData`, not the SNP report_data).
+- On success returns the same shape as `verify_snp` with `platform: "az-snp"`;
+  `collateral_verified` is true iff a CRL was supplied and checked, and
+  `report_data_match` reflects the quote `extraData`, not the SNP report_data.
 
 The JS policy layer applies the **same** pass/fail rule as for `verify_snp`.
 
@@ -416,8 +445,10 @@ freshness anchor, AK-to-TD binding, and TD-quote signature verification.
 bundled Intel root) and checks `expectedReportData` against the quote's
 `report_data`. Both fail closed (throw) on a freshness mismatch, take no
 `generation`, surface the MRTD as `claims.launch_digest`, and return
-`collateral_verified: false` (the WASM path skips the async CRL/TCB/QE
-collateral checks, like the other entry points).
+`collateral_verified: false` — the browser has no TDX collateral path (the
+DCAP CRL/TCB/QE checks need Intel PCS collateral the caller cannot yet
+staple), unlike the SNP entry points, which accept a caller-supplied AMD CRL.
+The JS layer surfaces the gap as `collateralVerified: false` plus a warning.
 
 The JS policy layer applies the **same** pass/fail rule as for `verify_snp`.
 
