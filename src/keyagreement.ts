@@ -20,6 +20,7 @@ const ML_KEM = { name: "ML-KEM-768" } as const;
 export const MLKEM768_EK_BYTES = 1184; // encapsulation (public) key
 export const MLKEM768_CT_BYTES = 1088; // ciphertext
 export const X25519_PUB_BYTES = 32;
+const SHARED_SECRET_BYTES = 32;
 
 const HKDF_INFO = utf8ToBytes("c8s-verify/v1/over-encryption");
 
@@ -47,17 +48,31 @@ function u8(b: ArrayBuffer | Uint8Array): Uint8Array {
 
 /**
  * Derive the AES-256-GCM session key from the two shared secrets and the
- * verified identity transcript (see PROTOCOL.md "Key agreement").
+ * verified identity transcript (see PROTOCOL.md "Over-encryption channel
+ * (post-quantum hybrid)").
  * @param mlkemSecret 32-byte ML-KEM shared secret
  * @param x25519Secret 32-byte X25519 shared secret
  * @param identityTranscript 48-byte identity transcript hash (HKDF salt)
  * @returns AES-256-GCM key (non-extractable)
  */
-async function deriveChannelKey(
+export async function deriveChannelKey(
   mlkemSecret: Uint8Array,
   x25519Secret: Uint8Array,
   identityTranscript: Uint8Array,
 ): Promise<CryptoKey> {
+  assertTranscriptLength(identityTranscript);
+  if (mlkemSecret.length !== SHARED_SECRET_BYTES) {
+    throw new C8sVerifyError(
+      "key_binding",
+      `ML-KEM shared secret must be ${SHARED_SECRET_BYTES} bytes, got ${mlkemSecret.length}`,
+    );
+  }
+  if (x25519Secret.length !== SHARED_SECRET_BYTES) {
+    throw new C8sVerifyError(
+      "key_binding",
+      `X25519 shared secret must be ${SHARED_SECRET_BYTES} bytes, got ${x25519Secret.length}`,
+    );
+  }
   const ikm = concatBytes(mlkemSecret, x25519Secret);
   const hkdfKey = await subtle().importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
   const bits = await subtle().deriveBits(

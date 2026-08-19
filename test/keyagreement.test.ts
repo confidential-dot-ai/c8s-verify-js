@@ -5,12 +5,14 @@ import {
   generateServerHybridKey,
   clientKeyAgreement,
   serverKeyAgreement,
+  deriveChannelKey,
   MLKEM768_EK_BYTES,
   MLKEM768_CT_BYTES,
   X25519_PUB_BYTES,
 } from "../src/keyagreement.js";
 import { Channel, requestAAD, responseAAD } from "../src/channel.js";
-import { utf8ToBytes, bytesToUtf8 } from "../src/base64.js";
+import { utf8ToBytes, bytesToUtf8, hexToBytes } from "../src/base64.js";
+import { subtle } from "../src/crypto-env.js";
 import { C8sVerifyError } from "../src/errors.js";
 
 test("hybrid KEM produces an identical key on both sides", async () => {
@@ -31,6 +33,64 @@ test("hybrid KEM produces an identical key on both sides", async () => {
   const aad = requestAAD();
   const rec = await c.seal(utf8ToBytes("ping"), aad);
   assert.equal(bytesToUtf8(await s.open(rec, aad)), "ping");
+});
+
+// The cross-repo golden vector: inputs and output MUST stay byte-identical to
+// TestChannelKeyGoldenVector in c8s pkg/overenc/overenc_test.go.
+const GOLDEN_MLKEM_SS = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+const GOLDEN_X25519_SS = "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f";
+const GOLDEN_TRANSCRIPT =
+  "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f";
+const GOLDEN_KEY = "f631405a5e117f1ff53e36c527782a3a1b97186007f277bd494db5d825dc08ab";
+
+test("the key schedule reproduces the Go golden vector", async () => {
+  const probe = "vector";
+  const derived = await deriveChannelKey(
+    hexToBytes(GOLDEN_MLKEM_SS),
+    hexToBytes(GOLDEN_X25519_SS),
+    hexToBytes(GOLDEN_TRANSCRIPT),
+  );
+  const golden = await subtle().importKey(
+    "raw",
+    hexToBytes(GOLDEN_KEY),
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+
+  // The derived key is non-extractable, so seal with it and open with the vector;
+  // a rejection becomes null so the assertion message survives the drift.
+  const aad = requestAAD();
+  const rec = await new Channel(derived).seal(utf8ToBytes(probe), aad);
+  const opened = await new Channel(golden).open(rec, aad).then(bytesToUtf8, () => null);
+  assert.equal(
+    opened,
+    probe,
+    `derived key != ${GOLDEN_KEY}: the key schedule drifted from c8s pkg/overenc ` +
+      `TestChannelKeyGoldenVector (HKDF-SHA256, ikm = mlkem||x25519, salt = transcript, ` +
+      `info = "c8s-verify/v1/over-encryption", L=32)`,
+  );
+});
+
+test("the key schedule rejects an empty transcript", async () => {
+  await assert.rejects(
+    () => deriveChannelKey(new Uint8Array(32), new Uint8Array(32), new Uint8Array(0)),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("the key schedule rejects a nonce-shaped transcript", async () => {
+  await assert.rejects(
+    () => deriveChannelKey(new Uint8Array(32), new Uint8Array(32), new Uint8Array(32)),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("the key schedule rejects a truncated shared secret", async () => {
+  await assert.rejects(
+    () => deriveChannelKey(new Uint8Array(1), new Uint8Array(32), new Uint8Array(48)),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "key_binding",
+  );
 });
 
 test("identity-bound KEM uses the transcript as HKDF context", async () => {
