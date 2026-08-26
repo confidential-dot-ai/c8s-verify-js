@@ -1,6 +1,6 @@
 // The over-encryption channel: AES-256-GCM records on top of the hybrid-derived
-// session key. Each record carries a fresh 12-byte IV. AAD binds requests to their
-// method+path so a record cannot be replayed against a different route.
+// session key. Each record carries a fresh 12-byte IV. AAD separates request
+// from response records and one envelope version from the other.
 
 import { subtle, randomBytes } from "./crypto-env.js";
 import { utf8ToBytes, bytesToUtf8 } from "./base64.js";

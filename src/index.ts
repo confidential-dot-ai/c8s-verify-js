@@ -125,13 +125,20 @@ export interface C8sClientOptions {
 
 export interface RequestInit {
   method?: string;
-  headers?: Record<string, string>;
+  /**
+   * Request headers: a plain record, or ordered [name, value] pairs when a
+   * field repeats (Cookie). Duplicate pairs reach the backend intact.
+   */
+  headers?: Record<string, string> | [string, string][];
   body?: string | Uint8Array;
 }
 
 export interface TunnelResponse {
   status: number;
+  /** First value of each field. Use headersList for repeated fields. */
   headers: Record<string, string>;
+  /** Every header field in response order as [name, value] pairs. */
+  headersList: [string, string][];
   bytes: Uint8Array;
   text: () => string;
 }
@@ -139,7 +146,7 @@ export interface TunnelResponse {
 /** Response envelope decoded from a sealed tunnel record. */
 interface ResponseEnvelope {
   status: number;
-  headers?: Record<string, string>;
+  headers?: [string, string][];
   body?: Uint8Array;
 }
 
@@ -295,11 +302,14 @@ export class Session {
         : typeof init.body === "string"
           ? utf8ToBytes(init.body)
           : init.body;
+    const headerPairs: [string, string][] = Array.isArray(init.headers)
+      ? init.headers
+      : Object.entries(init.headers ?? {});
 
     const envelope = {
       method,
       path,
-      headers: init.headers ?? {},
+      headers: headerPairs,
       body: bodyBytes,
     };
     const reqRecord = await this.channel.seal(cborEncode(envelope), requestAAD());
@@ -316,12 +326,42 @@ export class Session {
     const respEnvelope = cborDecode(
       await this.channel.open(respRecord, responseAAD()),
     ) as unknown as ResponseEnvelope;
+    const headersList = responseHeaderPairs(respEnvelope.headers);
     const bytes = respEnvelope.body ?? new Uint8Array(0);
     return {
       status: respEnvelope.status,
-      headers: respEnvelope.headers ?? {},
+      headers: firstValues(headersList),
+      headersList,
       bytes,
       text: () => bytesToUtf8(bytes),
     };
   }
+}
+
+/** First value of each field, for the collapsed record view. */
+function firstValues(pairs: [string, string][]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of pairs) {
+    if (!(name in out)) out[name] = value;
+  }
+  return out;
+}
+
+/** Validate a response envelope's header pair list, refusing anything else. */
+function responseHeaderPairs(headers: ResponseEnvelope["headers"]): [string, string][] {
+  if (headers === undefined || headers === null) return [];
+  if (!Array.isArray(headers)) {
+    fail("channel_error", "malformed headers in response envelope");
+  }
+  for (const pair of headers) {
+    if (
+      !Array.isArray(pair) ||
+      pair.length !== 2 ||
+      typeof pair[0] !== "string" ||
+      typeof pair[1] !== "string"
+    ) {
+      fail("channel_error", "malformed header pair in response envelope");
+    }
+  }
+  return headers;
 }
