@@ -455,15 +455,19 @@ record):
 The **entire request** is sealed — method, path, headers, and body — so a
 TLS-terminating proxy in front of the LB sees only ciphertext (not even the path or
 `Authorization` header). The sealed plaintext is a CBOR envelope (`body` is a CBOR byte
-string; absent/empty when there is no body):
+string; absent/empty when there is no body). Headers ride as an ordered array of
+`[name, value]` pair arrays, so duplicate fields (`Set-Cookie`) and field order
+survive the tunnel:
 
 ```cbor
 // request (AAD = "c8s-verify/v1/tunnel-request")
-{ "method": "POST", "path": "/v1/chat", "headers": { "content-type": "application/json" },
+{ "method": "POST", "path": "/v1/chat",
+  "headers": [["cookie", "a=1"], ["cookie", "b=2"]],
   "body": h'<raw request body>' }
 
 // response (AAD = "c8s-verify/v1/tunnel-response")
-{ "status": 200, "headers": { ... }, "body": h'<raw response body>' }
+{ "status": 200, "headers": [["set-cookie", "a=1"], ["set-cookie", "b=2"]],
+  "body": h'<raw response body>' }
 ```
 
 **Session lifetime.** The session (and its AES key) is established once —

@@ -57,6 +57,26 @@ test("end-to-end: identity-bound attestation and transcript-keyed channel", asyn
     assert.equal(res.status, 200);
     assert.match(res.text(), /over-encrypted channel/);
     assert.ok(res.text().includes(JSON.stringify(msg)));
+    assert.equal(res.headers["content-type"], "text/plain; charset=utf-8");
+
+    // Duplicate header fields survive the tunnel in both directions: the
+    // mock echoes the request's pairs into the response.
+    const dup = await session.fetch("/v1/echo", {
+      method: "POST",
+      headers: [
+        ["cookie", "a=1"],
+        ["cookie", "b=2"],
+      ],
+      body: "dup",
+    });
+    assert.deepEqual(
+      dup.headersList.filter(([name]) => name === "cookie"),
+      [
+        ["cookie", "a=1"],
+        ["cookie", "b=2"],
+      ],
+    );
+    assert.equal(dup.headers.cookie, "a=1"); // collapsed view keeps the first value
 
     // The retired endpoint and the query selectors are explicit 400s — no
     // alias, no downgrade.

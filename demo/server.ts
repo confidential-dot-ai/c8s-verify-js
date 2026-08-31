@@ -211,6 +211,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       const env = cborDecode(plaintext) as {
         method?: string;
         path?: string;
+        headers?: CborValue;
         body?: Uint8Array;
       };
       const body = env.body ?? new Uint8Array(0);
@@ -218,9 +219,14 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         `LB enclave received ${body.length} bytes over the over-encrypted channel for ` +
           `${env.method} ${env.path}: ${JSON.stringify(bytesToUtf8(body))}`,
       );
+      // Echo the request's header pairs after content-type, so a client can
+      // see its duplicate fields survive the round trip.
       const respEnv: Record<string, CborValue> = {
         status: 200,
-        headers: { "content-type": "text/plain; charset=utf-8" },
+        headers: [
+          ["content-type", "text/plain; charset=utf-8"],
+          ...(Array.isArray(env.headers) ? env.headers : []),
+        ],
         body: reply,
       };
       const out = await channel.seal(cborEncode(respEnv), responseAAD());
