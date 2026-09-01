@@ -195,6 +195,24 @@ proof-of-possession signature → matched-workload stamp (only when
 The same transcript is the HKDF context. Any failure throws a typed
 `C8sVerifyError` and no channel is established.
 
+**Platform TCB and revocation policy (SEV-SNP).** The hardware verification
+enforces the full endorsement-key policy — VEK chain to the bundled AMD
+roots, VEK validity period, VMPL/debug rejection, and the VEK's chip-id/TCB
+cross-validation against the report — but two checks need caller input,
+because measurement pinning cannot provide them:
+
+- `minTcb` pins a minimum SNP TCB (SPLs from AMD security bulletins). Without
+  it, a genuine, correctly-measured guest on unpatched platform firmware
+  verifies. Below the floor fails with `tcb_denied`.
+- `snpCrl` supplies the DER AMD KDS CRL for the deployment's generation
+  (`https://kdsintf.amd.com/vcek/v1/<product>/crl`) — the browser cannot
+  fetch it itself. The verifier authenticates the CRL against the bundled AMD
+  root and rejects stale lists, then requires the VEK to not be revoked
+  (`collateral_denied` otherwise). Without it, revocation is not checked: the
+  result says so (`collateralVerified: false` plus a warning), and
+  `requireCollateral: true` turns that into a `collateral_required` failure
+  for production policy.
+
 ### Lower-level: verifying bare evidence
 
 If you obtain TEE evidence through your own transport (e.g. a discovery document)

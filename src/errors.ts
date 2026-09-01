@@ -25,6 +25,20 @@ export type C8sErrorCode =
   // deployment" needs the codes to differ.
   | "rtmr_denied"
   | "rtmr3_denied"
+  // The verified SNP reported TCB is below the pinned minimum (minTcb): a
+  // genuine report from genuine silicon, running platform firmware older than
+  // the policy floor. Distinct from measurement_denied — the image is fine,
+  // the platform security level is not.
+  | "tcb_denied"
+  // The endorsement-key collateral check ran and rejected: the VEK is revoked
+  // by the AMD CRL, or the supplied CRL is forged, stale, or unparseable. A
+  // collateral check that cannot complete fails closed here, never as
+  // "skipped".
+  | "collateral_denied"
+  // The policy requires revocation collateral to be verified
+  // (requireCollateral) but the verifier never checked it, so the result
+  // cannot be labeled fully verified.
+  | "collateral_required"
   | "invalid_cert"
   | "cert_chain"
   | "identity_binding"

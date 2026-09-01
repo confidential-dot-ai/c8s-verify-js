@@ -15,6 +15,7 @@ import {
   verifyAttestation,
   type AttestationBundle,
   type AttestationResult,
+  type SnpMinTcb,
   type VerifyPolicy,
 } from "./verify.js";
 import { clientKeyAgreement } from "./keyagreement.js";
@@ -37,6 +38,7 @@ export type {
   VerifyEvidenceOptions,
   CertInfo,
   WorkloadInfo,
+  SnpMinTcb,
 } from "./verify.js";
 // The matched-workload stamp: parse the mesh leaf's .1.5 extension and the
 // allowlist document it pins. verifyAttestation applies these automatically
@@ -121,6 +123,25 @@ export interface C8sClientOptions {
    * strongly recommended otherwise. Requires `platform: "tdx"`.
    */
   tdxImage?: TdxImage;
+  /**
+   * Minimum SEV-SNP TCB floor, pinned from AMD security bulletins. A genuine,
+   * correctly-measured guest on platform firmware below the floor is
+   * rejected (`tcb_denied`). SNP platforms only. See `VerifyPolicy.minTcb`.
+   */
+  minTcb?: SnpMinTcb;
+  /**
+   * DER AMD KDS CRL for the deployment's processor generation, fetched or
+   * stapled by the caller. Supplying it makes endorsement-key revocation part
+   * of every connection's verdict. SNP platforms only. See
+   * `VerifyPolicy.snpCrl`.
+   */
+  snpCrl?: Uint8Array;
+  /**
+   * Require the revocation collateral to be verified for the verdict to pass
+   * (production policy). Requires `snpCrl`. See
+   * `VerifyPolicy.requireCollateral`.
+   */
+  requireCollateral?: boolean;
 }
 
 export interface RequestInit {
@@ -203,6 +224,9 @@ export class C8sClient {
       at: opts.at,
       expectedRtmr3: opts.expectedRtmr3,
       tdxImage: opts.tdxImage,
+      minTcb: opts.minTcb,
+      snpCrl: opts.snpCrl,
+      requireCollateral: opts.requireCollateral,
     };
   }
 
