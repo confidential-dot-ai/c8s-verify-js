@@ -9,7 +9,8 @@ import {
 import { C8sVerifyError, fail } from "./errors.js";
 import { NONCE_BYTES } from "./nonce.js";
 import { verifyECDSASignature, type Certificate } from "./x509.js";
-import type { PublicHalves } from "./keyagreement.js";
+import { XWING_CT_BYTES, XWING_EK_BYTES } from "./xwing.js";
+import { SESSION_ID_BYTES } from "./channel.js";
 
 /**
  * Binding identifier of the `attest-pq` response bundle. Each endpoint's
@@ -51,24 +52,35 @@ async function sha256(input: Uint8Array): Promise<Uint8Array> {
 }
 
 /**
- * Compute the v1 report_data transcript shared with c8s/pkg/overenc.
+ * Compute the v1 report_data transcript shared with c8s/pkg/overenc. It
+ * commits the complete key exchange — the client's X-Wing encapsulation key,
+ * the server's ciphertext, the session id, and the nonce — plus the exact
+ * mesh leaf and issuing mesh CA.
  */
 export async function identityTranscriptHash(
-  pub: PublicHalves,
+  xwingEk: Uint8Array,
+  xwingCt: Uint8Array,
+  sessionId: Uint8Array,
   nonce: Uint8Array,
   leafDer: Uint8Array,
   caDer: Uint8Array,
 ): Promise<Uint8Array> {
-  if (pub.x25519.length !== 32) {
+  if (xwingEk.length !== XWING_EK_BYTES) {
     fail(
       "key_binding",
-      `identity transcript X25519 key must be 32 bytes, got ${pub.x25519.length}`,
+      `identity transcript X-Wing key must be ${XWING_EK_BYTES} bytes, got ${xwingEk.length}`,
     );
   }
-  if (pub.mlkem768.length !== 1184) {
+  if (xwingCt.length !== XWING_CT_BYTES) {
     fail(
       "key_binding",
-      `identity transcript ML-KEM key must be 1184 bytes, got ${pub.mlkem768.length}`,
+      `identity transcript X-Wing ciphertext must be ${XWING_CT_BYTES} bytes, got ${xwingCt.length}`,
+    );
+  }
+  if (sessionId.length !== SESSION_ID_BYTES) {
+    fail(
+      "key_binding",
+      `identity transcript session id must be ${SESSION_ID_BYTES} bytes, got ${sessionId.length}`,
     );
   }
   if (nonce.length !== NONCE_BYTES) {
@@ -86,8 +98,9 @@ export async function identityTranscriptHash(
     lengthPrefixed(TRANSCRIPT_DOMAIN),
     lengthPrefixed(await sha256(caDer)),
     lengthPrefixed(await sha256(leafDer)),
-    lengthPrefixed(pub.x25519),
-    lengthPrefixed(pub.mlkem768),
+    lengthPrefixed(xwingEk),
+    lengthPrefixed(xwingCt),
+    lengthPrefixed(sessionId),
     lengthPrefixed(nonce),
   );
   return new Uint8Array(await subtle().digest("SHA-384", encoded));

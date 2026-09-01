@@ -19,12 +19,15 @@ are bound to hardware attestation.
 Instead of putting attestation in the public TLS certificate, the LB exposes a
 challenge-response endpoint:
 
-- The client generates a 32-byte random nonce and requests attestation.
-- The LB's TEE returns fresh evidence committing the nonce, hybrid session keys,
-  and its own mesh identity (each LB holds its own CDS-issued leaf), plus proof
-  that it holds that leaf's private key.
+- The client generates a 32-byte random nonce and a fresh X-Wing keypair, and
+  POSTs the nonce and its encapsulation key to the LB.
+- The LB's TEE encapsulates and returns fresh evidence committing the complete
+  key exchange — the client's key, its own ciphertext, the session id, and the
+  nonce — plus its own mesh identity (each LB holds its own CDS-issued leaf)
+  and proof that it holds that leaf's private key.
 - After verifying the evidence, measurement, pinned CA, and identity proof, the
-  client completes a hybrid quantum-resistant key agreement.
+  client decapsulates and derives the channel keys. The session is live from
+  that one round trip; there is no separate handshake.
 
 Application traffic then travels inside both ordinary TLS and the attested
 AES-256-GCM channel. A malicious outer TLS terminator can relay the exchange but
@@ -120,14 +123,16 @@ dropped.
 
 The protocol closes the copied-public-chain gap in two ways:
 
-- Hardware evidence commits to the session keys, client nonce, exact mesh leaf,
-  and issuing CA in one domain-separated transcript.
+- Hardware evidence commits to both key-exchange messages, the session id,
+  the client nonce, the exact mesh leaf, and the issuing CA in one
+  domain-separated transcript.
 - The mesh leaf signs that transcript, proving possession of the corresponding
   private key. Copying the public certificate chain is no longer sufficient.
 
 The identity signature is ECDSA, so authentication is currently classical. The
-channel key combines X25519 and ML-KEM-768; its recorded-traffic confidentiality
-is post-quantum as long as ML-KEM-768 remains secure.
+channel key agreement is the X-Wing hybrid KEM (X25519 + ML-KEM-768 under the
+draft's SHA3-256 combiner); its recorded-traffic confidentiality is
+post-quantum as long as ML-KEM-768 remains secure.
 
 ## Library
 
@@ -135,9 +140,11 @@ is post-quantum as long as ML-KEM-768 remains secure.
 of the LB's hardware evidence runs in your browser via the
 [`attestation-rs`](https://github.com/confidential-dot-ai/attestation-rs) TEE
 verifier compiled to WebAssembly — AMD SEV-SNP and Intel TDX, bare metal or
-Azure vTPM-wrapped (bundled AMD/Intel trust roots, no network). The only
-runtime dependency is [`mlkem-wasm`](https://github.com/dchest/mlkem-wasm) for
-ML-KEM-768. The exact wire formats are specified in [`PROTOCOL.md`](./PROTOCOL.md).
+Azure vTPM-wrapped (bundled AMD/Intel trust roots, no network). The runtime
+dependencies are [`mlkem-wasm`](https://github.com/dchest/mlkem-wasm) for
+ML-KEM-768 and [`@noble/hashes`](https://github.com/paulmillr/noble-hashes)
+for the SHA-3 primitives the X-Wing combiner needs. The exact wire formats are
+specified in [`PROTOCOL.md`](./PROTOCOL.md).
 
 ```sh
 npm install c8s-verify
@@ -166,9 +173,10 @@ const client = new C8sClient({
   tdxImage: parseImageManifest(imageManifestBytes),
 });
 
-// Generates a nonce, fetches the LB attestation, verifies the TEE evidence,
+// Posts a fresh nonce + X-Wing encapsulation key, verifies the TEE evidence,
 // measurement, identity-bound report_data, pinned mesh certificate chain, and
-// leaf proof of possession, then runs the X25519+ML-KEM-768 handshake.
+// leaf proof of possession, then decapsulates to derive the channel keys —
+// attestation and key exchange are one round trip.
 const session = await client.connect();
 console.log(session.attestation.measurement, session.attestation.cert.sha256);
 
@@ -178,18 +186,24 @@ const res = await session.fetch("/v1/chat", { method: "POST", body: prompt });
 console.log(res.text());
 ```
 
-Attestation and the handshake run **once per session**, not per request: the
-`Session` holds the derived AES-256-GCM channel and its LB session id, and
-every `session.fetch` reuses them. The LB keeps the session for its
-`--session-ttl` idle window (default 5 minutes, refreshed on use); after it
-expires a tunnel request fails with a typed `channel_error` (HTTP 401), and the
-embedding app re-runs `client.connect()` to attest a fresh session.
+Attestation and key exchange are **one request, run once per session** — not
+per application request: the `Session` holds the derived per-direction
+AES-256-GCM channel and its LB session id, and every `session.fetch` reuses
+them. The LB keeps the session for its `--session-ttl` idle window (default 5
+minutes, refreshed on use) and retires it unconditionally at
+`--session-max-age` (default 5 hours); past either limit a tunnel request
+fails with a typed `channel_error` (HTTP 401), and the embedding app re-runs
+`client.connect()` to attest a fresh session. `session.exporter` exposes the
+32-byte channel-binding exporter (also forwarded to the backend as the
+`X-C8s-Exporter` header), so an application can bind bearer tokens to this
+exact attested channel.
 
-What is verified, and in what order: nonce echo → response version is exactly
-`c8s/attest-pq/v1` → served leaf chains to the pinned or transcript-derived mesh
-CA → hardware signature + certificate chain (WASM; SEV-SNP VCEK or TDX DCAP, per
-the policy `platform`) → launch measurement ∈ a non-empty allowlist →
-`report_data` commits the session keys, nonce, leaf, and CA → leaf
+What is verified, and in what order: nonce + `xwing_ek` echo → response version
+is exactly `c8s/attest-pq/v1` → served leaf chains to the pinned or
+transcript-derived mesh CA → hardware signature + certificate chain (WASM;
+SEV-SNP VCEK or TDX DCAP, per the policy `platform`) → launch measurement ∈ a
+non-empty allowlist → `report_data` commits the key exchange, session id,
+nonce, leaf, and CA → leaf
 proof-of-possession signature → matched-workload stamp (only when
 `workloadName`/`allowlist` is pinned, and only after everything else passed).
 The same transcript is the HKDF context. Any failure throws a typed
@@ -317,11 +331,12 @@ browser-check` compiles a browser bundle first (`npm run build:demo`).
   PQ over-encryption channel, the mock LB, the browser demo, and the test suite.
 - **Implemented (server):** the matching c8s endpoints ship as the `c8s cds-attest`
   sidecar, fronted by the existing tls-lb nginx (chart flag `tlsLb.attest.enabled`):
-  it serves `/.well-known/c8s/attest-pq` + the over-encryption handshake and
+  it serves `/.well-known/c8s/attest-pq` (attestation + X-Wing key exchange in
+  one POST) plus the over-encrypted tunnel, and
   returns the exact identity chain in each bundle; a bundle is fetched once per
   session, so the chain does not ride every application request. Go↔JS interop
   is verified end to end (`c8s/pkg/overenc`, `c8s/internal/cmds/cdsattest`).
-- **Pending (tracked separately):** the live `--attestation-service-url` binding on a
+- **Pending (tracked separately):** the live `--attestation-api-url` binding on a
   real TEE node, routing over-encrypted *application* traffic through nginx to the
   sidecar (today the standalone sidecar handles it directly), and the `TEErminator`
   Flow B/C HTTP clients (Flow A + session caching are done).

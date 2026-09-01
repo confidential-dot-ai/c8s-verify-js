@@ -4,6 +4,14 @@ This document specifies the browser-facing attestation + over-encryption protoco
 between a JavaScript client (`c8s-verify-js`) and a C8s **Load Balancer (LB)**.
 It is the canonical contract implemented by the Go LB and the JavaScript client.
 
+The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**,
+**RECOMMENDED**, **MAY**, and **OPTIONAL** in this document are to be
+interpreted as described in [BCP 14](https://www.rfc-editor.org/info/bcp14)
+when, and only when, they appear in all capitals.
+
+Conforming implementations MUST reproduce the [interoperability
+vectors](#interoperability-vectors) exactly.
+
 ## Terminology
 
 | Term | Meaning | c8s component (PLAN.md alias) |
@@ -22,7 +30,8 @@ entirely on the returned payload:
 1. The LB returns **raw TEE evidence** (AMD SEV-SNP or Intel TDX, bare metal or
    Azure vTPM-wrapped) whose hardware freshness anchor — `report_data` for the
    bare platforms, the vTPM quote's `extraData` for the Azure ones — binds the
-   LB's per-session public key, the client's nonce, the exact mesh leaf,
+   **complete key exchange** (the client's X-Wing encapsulation key and the
+   LB's ciphertext), the session id, the client's nonce, the exact mesh leaf,
    and the issuing mesh CA.
 2. The client verifies the evidence **directly in the browser** with the
    `attestation-rs` verifier compiled to WASM (bundled AMD ARK/ASK and Intel
@@ -37,9 +46,11 @@ entirely on the returned payload:
    stamp** off the chain-verified mesh leaf (see "Matched-workload extension"),
    checks the stamped allowlist digest against its pinned canonical allowlist
    bytes, and resolves the stamped name.
-5. Only then does the client derive a **post-quantum hybrid over-encryption channel** to
-   the attested per-session key, so all subsequent application traffic is end-to-end
-   confidential to the LB's TEE regardless of the outer TLS terminator.
+5. Only then does the client decapsulate the attested X-Wing ciphertext and
+   derive the **post-quantum hybrid over-encryption channel**, so all
+   subsequent application traffic is end-to-end confidential to the LB's TEE
+   regardless of the outer TLS terminator. The session is live from the one
+   attestation round trip — there is no separate handshake.
 
 The user only verifies the **LB**; C8s's internal RA-TLS mesh transitively vouches for
 the backend pods the LB talks to.
@@ -94,14 +105,33 @@ All under the `/.well-known/c8s/` namespace.
 Returns the CDS EAR-signing JWKS (ES256, `kid` = RFC 7638 thumbprint), republished from
 the CDS, for the optional EAR-verification path.
 
-### `GET /.well-known/c8s/attest-pq?nonce=<b64url>`
+### `POST /.well-known/c8s/attest-pq`
 
-`nonce` is the client's fresh 32-byte random challenge, base64url (unpadded).
-The endpoint takes no other parameter — there is **no version or binding
-negotiation and no fallback**: a request carrying a `pq` or `binding` parameter
-is rejected with `400 invalid_request`, and the former
-`/.well-known/c8s/attestation` endpoint returns `400 invalid_request` after the
-cutover (no alias, no downgrade).
+The client-first attestation + key-exchange request, `application/json`:
+
+```jsonc
+{
+  "nonce": "<b64url 32-byte fresh random challenge>",
+  "xwing_ek": "<b64url 1216-byte X-Wing encapsulation key>"
+}
+```
+
+Both fields are REQUIRED and exactly sized: the nonce MUST be 32 bytes and
+`xwing_ek` MUST be 1216 bytes; anything else is refused with
+`400 invalid_request` rather than truncated or padded. Both MUST be fresh per
+request; the client MUST NOT reuse a nonce or a keypair across sessions. The
+server bounds the request body (8 KiB).
+
+The endpoint takes no other field or parameter — there is **no version, suite,
+or binding negotiation and no fallback**: a `GET` (the pre-client-first shape),
+the retired two-step `POST /.well-known/c8s/handshake`, and the former
+`/.well-known/c8s/attestation` endpoint all return `400 invalid_request`
+(no alias, no downgrade).
+
+The response commits the server's X-Wing ciphertext and the minted session id
+in the same hardware report as the client's key and nonce, and the session is
+established server-side when the response leaves — the exchange completes in
+one round trip.
 
 A sibling endpoint, `GET /.well-known/c8s/attest-lb?nonce=…` (binding id
 `c8s/attest-lb/v1`), exists for **native clients only**: it binds the exact
@@ -125,10 +155,9 @@ Response is `application/json`:
   },
   "cds_cert_pem": "-----BEGIN CERTIFICATE-----\n...", // exact mesh leaf + issuing CA
   "ear": "<optional CDS-issued EAR JWT>",             // defined but not yet populated by the LB
-  "session_pubkey": {
-    "x25519":   "<b64url 32-byte X25519 public key>",
-    "mlkem768": "<b64url 1184-byte ML-KEM-768 encapsulation key>"
-  },
+  "xwing_ek": "<echoed b64url 1216-byte client encapsulation key>",
+  "xwing_ct": "<b64url 1120-byte X-Wing ciphertext>",
+  "session_id": "<b64url 16-byte session identifier>",
   "identity_proof": {
     "algorithm": "ecdsa-sha384",
     "leaf_sha256": "<b64url SHA-256 of leaf DER>",
@@ -147,10 +176,13 @@ shows bare `snp`; the vTPM (`az-snp`, `az-tdx`) and bare `tdx` shapes are
 specified in their sections below. Everything outside `evidence` (and the
 binding recomputation) is platform-independent.
 
-The `version`, `cds_cert_pem`, and `identity_proof` fields are mandatory.
-The LB re-reads the TEE-held mesh leaf, private key, and CA for each request so
-certificate rotation cannot leave the bundle and proof on different credential
-generations. There is no legacy or downgrade path.
+The `version`, `cds_cert_pem`, `xwing_ek`, `xwing_ct`, `session_id`, and
+`identity_proof` fields are mandatory. A live client MUST check that `nonce`
+and `xwing_ek` exactly echo the values it sent (`xwing_ek` is echoed so a
+saved bundle stays verifiable offline; in that offline mode the result is not
+a freshness proof). The LB re-reads the TEE-held mesh leaf, private key, and
+CA for each request so certificate rotation cannot leave the bundle and proof
+on different credential generations. There is no legacy or downgrade path.
 
 #### Report-data and mesh-identity binding
 
@@ -163,13 +195,20 @@ ca_hash   = SHA-256(issuing_mesh_CA_DER)
 transcript = LP("c8s-verify/v1")
           || LP(ca_hash(32))
           || LP(leaf_hash(32))
-          || LP(x25519_pub_raw(32))
-          || LP(mlkem768_pub_raw(1184))
+          || LP(xwing_ek(1216))
+          || LP(xwing_ct(1120))
+          || LP(session_id(16))
           || LP(nonce(32))
 
 transcript_hash = SHA-384(transcript)
 report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
 ```
+
+The transcript commits **both key-exchange messages**: tampering with either
+the client's encapsulation key or the server's ciphertext anywhere on the path
+changes `transcript_hash` and therefore fails the hardware `report_data`
+match, the proof-of-possession signature, and the key schedule (whose salt is
+`transcript_hash`) simultaneously.
 
 The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
 is deliberately unchanged by the endpoint move (as are the HKDF info string and
@@ -200,14 +239,16 @@ cluster's public certificates, but cannot sign its own session transcript with t
 victim leaf's private key.
 
 The identity proof is currently ECDSA, so cluster authentication is **classical**.
-The over-encryption key agreement remains X25519 + ML-KEM-768 hybrid: recorded
-traffic retains post-quantum confidentiality as long as ML-KEM-768 remains secure,
-but the protocol does not claim post-quantum authentication.
+The over-encryption key agreement is the X-Wing hybrid KEM (X25519 +
+ML-KEM-768): recorded traffic retains post-quantum confidentiality as long as
+ML-KEM-768 remains secure, but the protocol does not claim post-quantum
+authentication.
 
-> Note: a live LB binds the session key into a fresh hardware report per session. The
-> demo/mock and the offline test fixtures use **recorded real evidence** with a fixed
-> `report_data`; in that mode the client verifies the hardware signature + measurement
-> for real and exercises the binding math against the fixture's recorded value.
+> Note: a live LB binds the key exchange into a fresh hardware report per session.
+> The demo/mock and the offline test fixtures use **recorded real evidence** with a
+> fixed `report_data`; in that mode the client verifies the hardware signature +
+> measurement for real and exercises the binding math against the fixture's
+> recorded value.
 
 #### `platform: "az-snp"` (Azure Confidential VM, vTPM)
 
@@ -454,21 +495,45 @@ The JS policy layer applies the **same** pass/fail rule as for `verify_snp`.
 
 ## Over-encryption channel (post-quantum hybrid)
 
-Hybrid KEM = **X25519** (classical, WebCrypto) **+ ML-KEM-768** (post-quantum,
-`mlkem-wasm`). Construction follows the TLS `X25519MLKEM768` convention.
+Key agreement is **X-Wing**
+([draft-connolly-cfrg-xwing-kem-10](https://datatracker.ietf.org/doc/html/draft-connolly-cfrg-xwing-kem-10)):
+X25519 + ML-KEM-768 under the draft's SHA3-256 combiner, which binds the
+X25519 ciphertext and recipient key into the shared secret. Byte lengths:
+encapsulation key 1216 (ML-KEM-768 ek 1184 ‖ X25519 pk 32), ciphertext 1120
+(ML-KEM-768 ct 1088 ‖ X25519 ephemeral pk 32), shared secret 32. An
+incompatible X-Wing revision MUST NOT reuse this protocol's identifiers.
 
-1. Client encapsulates against the attested ML-KEM key:
-   `(mlkem_ct, mlkem_ss) = ML-KEM-768.Encaps(session_pubkey.mlkem768)`.
-2. Client generates ephemeral X25519 keypair; `x25519_ss = ECDH(client_x25519_priv, session_pubkey.x25519)`.
-3. Combined secret: `ikm = mlkem_ss (32B) || x25519_ss (32B)`.
-4. Derive the **AES-256-GCM** key:
-   `HKDF-SHA256(ikm, salt = transcript_hash, info = "c8s-verify/v1/over-encryption", L = 32)`.
-5. **Handshake** — `POST /.well-known/c8s/handshake` with
-   `{ "nonce": "<b64url>", "client_x25519": "<b64url 32B>", "mlkem_ct": "<b64url 1088B>" }`.
-   The LB selects the pending session key by nonce, decapsulates + ECDHs to the same
-   AES-256-GCM key, and returns `{ "session_id": "<opaque>" }`.
+1. Client generates a fresh X-Wing keypair and sends `xwing_ek` in the
+   attest-pq POST (above).
+2. Server encapsulates — `(xwing_ct, ss) = X-Wing.Encaps(xwing_ek)` — and
+   commits `xwing_ek`, `xwing_ct`, and the minted `session_id` in the
+   transcript.
+3. Client verifies the bundle (echoes, evidence, chain, proof), then
+   decapsulates: `ss = X-Wing.Decaps(dk, xwing_ct)`. Decapsulation MUST use
+   the draft's implicit rejection: an invalid ciphertext yields a
+   non-matching secret, never an error, so the divergence surfaces as an AEAD
+   failure on the first record rather than as a decapsulation oracle.
+4. Both ends derive the key schedule with **HKDF-SHA256**, `ikm = ss`,
+   `salt = transcript_hash` (48 bytes), one output per exact `info` string:
 
-Byte lengths (ML-KEM-768): encapsulation key 1184, ciphertext 1088, shared secret 32.
+   | Output | `info` (exact ASCII) | Length |
+   |---|---|---:|
+   | `c2s_key` | `c8s-verify/v1/c2s-key` | 32 |
+   | `s2c_key` | `c8s-verify/v1/s2c-key` | 32 |
+   | `c2s_iv` | `c8s-verify/v1/c2s-iv` | 4 |
+   | `s2c_iv` | `c8s-verify/v1/s2c-iv` | 4 |
+   | `exporter` | `c8s-verify/v1/exporter` | 32 |
+
+   `c2s_key`/`s2c_key` are AES-256-GCM keys (client-to-server /
+   server-to-client); `c2s_iv`/`s2c_iv` are the per-direction nonce prefixes.
+
+**Channel-binding exporter.** `exporter` is derived by both ends and never
+sent on the wire; because the HKDF salt is the identity transcript hash, it is
+bound to the attested identity and to this exact session. The LB forwards it
+to the backend as the `X-C8s-Exporter` header (b64url, stripping any
+client-supplied value first), so an application MAY bind bearer credentials to
+it: a token bound to one channel's exporter is useless replayed over any other
+channel.
 
 ## Over-encrypted application tunnel
 
@@ -476,12 +541,34 @@ All application traffic flows through a single endpoint, **`POST /.well-known/c8
 with header `X-C8s-Session: <session_id>` and `Content-Type: application/cbor`. The body
 and the response are **CBOR** (RFC 8949), not JSON — so the body and the AES-GCM
 ciphertext ride as raw byte strings with no base64 inflation. The body is one
-AES-256-GCM record, a CBOR map with two byte-string fields (fresh random 12-byte IV per
-record):
+AES-256-GCM record, a CBOR map with an unsigned sequence number and a
+byte-string ciphertext:
 
 ```cbor
-{ "iv": h'<12 bytes>', "ct": h'<ciphertext+tag>' }
+{ "seq": <uint ≥ 1>, "ct": h'<ciphertext+tag>' }
 ```
+
+Record protection, for direction `dir` (`c2s` for requests, `s2c` for
+responses) and sequence `seq`:
+
+```
+nonce = iv(dir)(4) || be64(seq)                 // deterministic 96-bit GCM nonce
+AAD   = tag(dir) || session_id(16) || be64(seq)
+        tag(c2s) = "c8s-verify/v1/tunnel-request"
+        tag(s2c) = "c8s-verify/v1/tunnel-response"
+ct    = AES-256-GCM-Seal(key(dir), nonce, plaintext, AAD)
+```
+
+The client allocates request sequences starting at 1, strictly increasing;
+sequence 0 is invalid in both directions. **A response record MUST echo its
+request's sequence**, and the client MUST reject a response whose sequence
+does not equal the request it answers — this is what stops the untrusted
+terminator crossing the responses of two concurrent requests. The server
+enforces a 64-record sliding replay window over authenticated request
+sequences: a duplicate, or a sequence 64 or more positions behind the highest
+accepted one, is rejected. Clients SHOULD keep fewer than 64 requests
+outstanding so reordered valid requests cannot fall outside the window. A
+sequence MUST NOT be reused under one session's keys.
 
 The **entire request** is sealed — method, path, headers, and body — so a
 TLS-terminating proxy in front of the LB sees only ciphertext (not even the path or
@@ -491,24 +578,28 @@ string; absent/empty when there is no body). Headers ride as an ordered array of
 survive the tunnel:
 
 ```cbor
-// request (AAD = "c8s-verify/v1/tunnel-request")
+// request
 { "method": "POST", "path": "/v1/chat",
   "headers": [["cookie", "a=1"], ["cookie", "b=2"]],
   "body": h'<raw request body>' }
 
-// response (AAD = "c8s-verify/v1/tunnel-response")
+// response
 { "status": 200, "headers": [["set-cookie", "a=1"], ["set-cookie", "b=2"]],
   "body": h'<raw response body>' }
 ```
 
-**Session lifetime.** The session (and its AES key) is established once —
-attestation + handshake — and reused for every subsequent tunnel record; no
-per-request re-attestation. The LB expires a session after an idle TTL
-(refreshed on use; `--session-ttl`, default 5 minutes) and a tunnel request on
-an unknown or expired session returns HTTP 401 `channel_error`, upon which the
-client establishes a fresh session. The LB also enforces exact-record replay
-protection over a bounded set of seen records; a session that somehow exceeds
-that bound fails closed and must be re-established.
+**Session lifetime.** The session (and its key schedule) is established once —
+one attest-pq round trip — and reused for every subsequent tunnel record; no
+per-request re-attestation. Two independent limits retire it:
+
+- **Idle TTL** (`--session-ttl`, default 5 minutes), refreshed on use.
+- **Absolute max age** (`--session-max-age`, default 5 hours), never
+  refreshed: however busy a session is, its keys retire this long after
+  establishment. Without it, whoever keeps records flowing could keep one
+  key schedule alive indefinitely.
+
+A tunnel request on an unknown or expired session returns HTTP 401
+`channel_error`, upon which the client establishes a fresh session.
 
 **Termination + forwarding.** The LB (the `c8s cds-attest` sidecar) opens the record,
 reconstructs the HTTP request, and forwards it **as plaintext** to the backend — over
@@ -543,3 +634,19 @@ pin and pinned allowlist bytes), or any version other than `c8s/attest-pq/v1` �
 including `c8s/attest-lb/v1` and the retired `c8s-verify/v1`. Freshness
 enforcement defaults to true; the recorded-evidence demo explicitly disables it
 and reports that downgrade as a warning.
+
+## Interoperability vectors
+
+[`test-vectors/attest_pq_channel_vectors.json`](test-vectors/attest_pq_channel_vectors.json)
+is the normative cross-language golden vector, shared verbatim with c8s
+`pkg/overenc/testdata/` (regenerated there with `go test ./pkg/overenc -update`
+after a deliberate contract change). Given the recorded X-Wing seed and
+ciphertext, everything downstream is deterministic; a conforming
+implementation MUST reproduce the encapsulation key expanded from the seed,
+the decapsulated shared secret, the identity transcript hash, every key-
+schedule output (both keys, both IV prefixes, the exporter), and the sealed
+request and response records byte for byte. `test/vectors.test.ts` runs this
+check here; `TestChannelGoldenVectors` runs it in Go.
+
+The identity-transcript golden value for all-repeated-byte inputs is pinned
+by `test/identity.test.ts` and Go's `TestIdentityTranscriptHashBindsEveryField`.

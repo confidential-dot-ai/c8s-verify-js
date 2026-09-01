@@ -2,8 +2,8 @@
 
 This walks through running the **real `c8s` Go attestation + over-encryption sidecar**
 (`c8s cds-attest`) and driving it with the **`c8s-verify-js` browser client**. It exercises
-the whole `c8s-verify/v1` protocol — SEV-SNP attestation, the post-quantum hybrid
-handshake, and the CBOR over-encrypted application tunnel — across two independent
+the whole `c8s/attest-pq/v1` protocol — SEV-SNP attestation, the X-Wing key
+exchange, and the CBOR over-encrypted application tunnel — across two independent
 implementations (Go and JavaScript). If the echo round-trips, the wire formats match.
 
 > This is the integration counterpart to the JS-only e2e test (`npm test`, which runs the
@@ -31,12 +31,11 @@ setup steps below would look wrong in production:
 
 | Concern | Real cluster | This offline demo |
 | --- | --- | --- |
-| **SNP evidence** | The sidecar pulls **live** evidence from the attestation-api; the TEE binds the session key into a fresh hardware report each session. | A **recorded** evidence fixture (`demo/fixtures/snp-evidence-genoa.json`, real hardware-signed evidence from attestation-rs). Its `report_data` is a fixed test value, so it can't bind *this* session — hence `requireFreshness: false`. |
-| **Certificates** | The in-TEE **CDS** holds the mesh-CA key and issues the LB leaf (via get-cert / the raTLS mesh). The tls-lb **nginx serves `cds-cert.pem` statically**, so the sidecar runs **without** `--cds-cert-file`. | There is no CDS, so we use a **pre-generated openssl chain** (`mesh-ca.crt` + `cds-leaf.crt`, made by `npm run gen-fixtures`) and hand it to the sidecar via `--cds-cert-file` — the flag exists for exactly this dev/standalone case. |
+| **SNP evidence** | The sidecar pulls **live** evidence from the attestation-api; the TEE binds the complete key exchange into a fresh hardware report each session. | A **recorded** evidence fixture (`demo/fixtures/snp-evidence-genoa.json`, real hardware-signed evidence from attestation-rs). Its `report_data` is a fixed test value, so it can't bind *this* session — hence `requireFreshness: false`. |
+| **Certificates** | The in-TEE **CDS** holds the mesh-CA key and issues the LB leaf (via get-cert / the raTLS mesh); the sidecar reads the leaf, its key, and the CA from the get-cert volume per request. | There is no CDS, so we use a **pre-generated openssl chain** (`mesh-ca.crt` + `cds-leaf.crt` + `cds-leaf.key`, made by `npm run gen-fixtures`) and hand it to the sidecar via the `--mesh-identity-*` flags. |
 
 So **step 2 below is not how certs come to be** — in a real cluster you'd start the cluster,
-let the CDS generate the mesh CA and issue the LB leaf, and never touch these files. Here we
-only *reconstruct the PEM that nginx would otherwise serve* from committed test certs. The
+let the CDS generate the mesh CA and issue the LB leaf, and never touch these files. The
 hardware signature, launch measurement, and the X.509 chain are still verified **for real**
 by the client; only their *origin* is faked.
 
@@ -53,32 +52,32 @@ cd ../c8s
 go build -o build/c8s ./cmd/c8s      # or: make build
 ```
 
-## 2. Assemble the CDS certificate chain (demo stand-in)
+## 2. The CDS certificate chain (demo stand-in)
 
-> In a real cluster you skip this entirely: the CDS issues the LB leaf and the tls-lb nginx
-> serves `cds_cert_pem` statically, so the sidecar runs without `--cds-cert-file`. Offline
-> there is no CDS, so we hand the sidecar a pre-generated chain instead — see the table
+> In a real cluster you never touch these files: the CDS issues the LB leaf and get-cert
+> provisions the leaf, key, and CA the sidecar reads per request. Offline there is no CDS,
+> so step 3 hands the sidecar the pre-generated fixture chain instead — see the table
 > above. (If `demo/fixtures/` is missing, run `npm run gen-fixtures` first.)
 
-The served `cds_cert_pem` is the LB leaf followed by the mesh CA. Concatenate the two demo
-certs into one PEM, in that order, exactly as the JS mock server builds it:
-
-```bash
-cat ../c8s-verify-js/demo/fixtures/cds-leaf.crt \
-    ../c8s-verify-js/demo/fixtures/mesh-ca.crt \
-    > /tmp/c8s-demo-cds-cert.pem
-```
+The served `cds_cert_pem` is the LB leaf followed by the mesh CA; the sidecar assembles it
+from `--mesh-identity-cert-file` and `--mesh-identity-ca-file`, and signs each session
+transcript with `--mesh-identity-key-file` to prove possession of the leaf key.
 
 ## 3. Run the real Go server
 
-Still in `c8s`, point it at this repo's recorded fixture and the cert chain. With no
-`--upstream` it uses the built-in echo backend, which is all the demo needs:
+Still in `c8s`, point it at this repo's recorded fixture and the fixture chain. With no
+`--upstream` it uses the built-in echo backend, which is all the demo needs.
+`--front-door-mode webpki` states that no TEE-held serving key fronts this demo, so the
+sidecar serves attest-pq only and refuses the native-client attest-lb binding:
 
 ```bash
 ./build/c8s cds-attest \
   --port 8800 \
   --evidence-fixture ../c8s-verify-js/demo/fixtures/snp-evidence-genoa.json \
-  --cds-cert-file   /tmp/c8s-demo-cds-cert.pem \
+  --mesh-identity-cert-file ../c8s-verify-js/demo/fixtures/cds-leaf.crt \
+  --mesh-identity-key-file  ../c8s-verify-js/demo/fixtures/cds-leaf.key \
+  --mesh-identity-ca-file   ../c8s-verify-js/demo/fixtures/mesh-ca.crt \
+  --front-door-mode webpki \
   --generation genoa --platform snp \
   --log-level info
 ```
@@ -95,10 +94,12 @@ Leave it running. The endpoints it now serves:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET  /.well-known/c8s/attestation?nonce=…` | attestation bundle (evidence + session pubkey + cert) |
-| `POST /.well-known/c8s/handshake` | PQ hybrid key agreement → session id |
+| `POST /.well-known/c8s/attest-pq` | attestation + X-Wing key exchange in one round trip → session id (the bundle carries the evidence and the CDS leaf + mesh CA chain) |
 | `POST /.well-known/c8s/tunnel` | CBOR over-encrypted application traffic |
-| `GET  /.well-known/c8s/cds-cert.pem` | the CDS leaf + mesh CA chain |
+| `GET  /.well-known/c8s/attest-lb?nonce=…` | native-client TLS-leaf binding (refused in webpki mode; browsers use attest-pq) |
+
+The retired `GET /attestation` and `POST /handshake` paths stay registered only to return
+an explicit `400` — no alias, no downgrade.
 
 ## 4. Drive it with the JS client
 
@@ -127,7 +128,7 @@ const client = new C8sClient({
   requireFreshness: DEMO_REQUIRE_FRESHNESS, // false: recorded fixture is not live-bound
 });
 
-const session = await client.connect();   // attestation + verify + PQ handshake
+const session = await client.connect();   // one attest-pq round trip: attest + verify + key exchange
 console.log("platform   :", session.attestation.platform);
 console.log("measurement:", session.attestation.measurement);
 console.log("cert CN    :", session.attestation.cert.subjectCN);
@@ -167,7 +168,10 @@ python3 -m http.server 9000
 # terminal B: sidecar forwarding decrypted traffic to it
 ./build/c8s cds-attest --port 8800 \
   --evidence-fixture ../c8s-verify-js/demo/fixtures/snp-evidence-genoa.json \
-  --cds-cert-file   /tmp/c8s-demo-cds-cert.pem \
+  --mesh-identity-cert-file ../c8s-verify-js/demo/fixtures/cds-leaf.crt \
+  --mesh-identity-key-file  ../c8s-verify-js/demo/fixtures/cds-leaf.key \
+  --mesh-identity-ca-file   ../c8s-verify-js/demo/fixtures/mesh-ca.crt \
+  --front-door-mode webpki \
   --generation genoa --platform snp \
   --upstream http://localhost:9000
 ```
@@ -184,7 +188,7 @@ verification).
 | --- | --- |
 | `measurement_denied` | Fixture/`generation` mismatch. The fixture is **genoa**; keep `--generation genoa` and the default `DEMO_MEASUREMENTS`. |
 | `report_data_mismatch` | You left freshness on. The recorded fixture isn't live-bound — use `requireFreshness: false` (as above). |
-| `invalid_cert` / chain error | `cds_cert_pem` not assembled. Re-run step 2 (leaf **then** mesh CA, in that order). |
+| `invalid_cert` / chain error | Mismatched fixture certs. The three `--mesh-identity-*` files must come from one `npm run gen-fixtures` run (it regenerates leaf, key, and CA together). |
 | `attestation endpoint returned HTTP …` | Server not running, or wrong `--port` / `baseUrl`. |
 | one of `--attestation-api-url` or `--evidence-fixture` is required | The sidecar refuses to start without an evidence source; pass `--evidence-fixture` for the demo. |
 | `channel_error` on `session.fetch` | Go and JS on **different** tunnel wire formats. Both must be on the CBOR tunnel (this client + a `c8s` build that uses CBOR records — see `PROTOCOL.md` §"Over-encrypted application tunnel"). |

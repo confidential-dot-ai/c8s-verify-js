@@ -4,8 +4,8 @@
 //
 // TEST/DEMO ONLY. It mirrors c8s's own test/mock-cds: it serves REAL recorded
 // SNP hardware evidence (verified for real by the WASM verifier) but does not run
-// inside a TEE, so it cannot bind a live session key into a fresh hardware report.
-// Everything else — the PQ hybrid handshake, the mesh identity proof, and the
+// inside a TEE, so it cannot bind a live key exchange into a fresh hardware report.
+// Everything else — the X-Wing key exchange, the mesh identity proof, and the
 // AES-256-GCM over-encryption channel — is real. Because the recorded report_data
 // can never match a fresh transcript, the demo explicitly disables freshness.
 
@@ -15,12 +15,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, normalize, extname } from "node:path";
 import { Buffer } from "node:buffer";
 
-import {
-  generateServerHybridKey,
-  serverKeyAgreement,
-  type ServerKeys,
-} from "../src/keyagreement.js";
-import { Channel, requestAAD, responseAAD, type WireRecord } from "../src/channel.js";
+import { deriveChannel, xwingEncapsulate, XWING_EK_BYTES } from "../src/keyagreement.js";
+import { type Channel, type WireRecord } from "../src/channel.js";
 import { cborEncode, cborDecode, type CborValue } from "../src/cbor.js";
 import { bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8 } from "../src/base64.js";
 import { decodePEM } from "../src/pem.js";
@@ -46,18 +42,16 @@ const leafDer = decodePEM(leafPem, "CERTIFICATE")[0];
 const caDer = decodePEM(meshCaPem, "CERTIFICATE")[0];
 
 // ---- session state ----------------------------------------------------------
-interface PendingEntry {
-  priv: ServerKeys;
-  transcript: Uint8Array;
+interface SessionEntry {
+  channel: Channel;
   createdAt: number;
 }
-const pending = new Map<string, PendingEntry>();
-const sessions = new Map<string, Channel>();
+const sessions = new Map<string, SessionEntry>();
 const TTL_MS = 5 * 60 * 1000;
 
 function sweep(): void {
   const now = Date.now();
-  for (const [k, v] of pending) if (now - v.createdAt > TTL_MS) pending.delete(k);
+  for (const [k, v] of sessions) if (now - v.createdAt > TTL_MS) sessions.delete(k);
 }
 
 // ---- helpers ----------------------------------------------------------------
@@ -126,21 +120,27 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       });
     }
 
+    // The pre-client-first GET shape: an explicit 400, mirroring the sidecar.
     if (req.method === "GET" && p === "/.well-known/c8s/attest-pq") {
-      if (url.searchParams.has("pq") || url.searchParams.has("binding")) {
-        return json(res, 400, {
-          error: "invalid_request",
-          message: "attest-pq takes no pq or binding parameter",
-        });
-      }
+      return json(res, 400, {
+        error: "invalid_request",
+        message: "attest-pq is client-first: POST a JSON body with nonce and xwing_ek",
+      });
+    }
+
+    if (req.method === "POST" && p === "/.well-known/c8s/attest-pq") {
       sweep();
-      const nonceB64 = url.searchParams.get("nonce");
-      if (!nonceB64) return json(res, 400, { error: "invalid_request", message: "missing nonce" });
+      const body = JSON.parse(await readBody(req)) as { nonce?: string; xwing_ek?: string };
+      if (typeof body.nonce !== "string" || typeof body.xwing_ek !== "string") {
+        return json(res, 400, { error: "invalid_request", message: "missing nonce or xwing_ek" });
+      }
       let nonce: Uint8Array;
+      let xwingEk: Uint8Array;
       try {
-        nonce = base64UrlToBytes(nonceB64);
+        nonce = base64UrlToBytes(body.nonce);
+        xwingEk = base64UrlToBytes(body.xwing_ek);
       } catch {
-        return json(res, 400, { error: "invalid_request", message: "nonce is not base64url" });
+        return json(res, 400, { error: "invalid_request", message: "fields are not base64url" });
       }
       if (nonce.length !== NONCE_BYTES) {
         return json(res, 400, {
@@ -148,45 +148,51 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
           message: `nonce must be ${NONCE_BYTES} bytes, got ${nonce.length}`,
         });
       }
+      if (xwingEk.length !== XWING_EK_BYTES) {
+        return json(res, 400, {
+          error: "invalid_request",
+          message: `xwing_ek must be ${XWING_EK_BYTES} bytes, got ${xwingEk.length}`,
+        });
+      }
 
-      // Fresh per-session hybrid key. A real LB asks the hardware to bind this
-      // identity transcript into report_data; the recorded fixture cannot, so
-      // report_data_match is always false against the mock.
-      const { priv, pub } = await generateServerHybridKey();
-      const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
+      // Encapsulate to the client's key and commit the whole exchange in the
+      // transcript. A real LB asks the hardware to bind this transcript into
+      // report_data; the recorded fixture cannot, so report_data_match is
+      // always false against the mock.
+      const { ct, sharedSecret } = await xwingEncapsulate(xwingEk);
+      const sessionId = crypto.getRandomValues(new Uint8Array(16));
+      const minted = await mintIdentityProof(
+        xwingEk,
+        ct,
+        sessionId,
+        nonce,
+        leafDer,
+        caDer,
+        leafKeyPem,
+      );
+      const channel = await deriveChannel("server", sharedSecret, minted.transcript, sessionId);
+      const sessionIdB64 = bytesToBase64Url(sessionId);
+      sessions.set(sessionIdB64, { channel, createdAt: Date.now() });
       const bundle: Record<string, unknown> = {
         ...minted.bundleFields,
         platform: "snp",
         generation: "genoa",
-        nonce: nonceB64,
+        nonce: body.nonce,
         evidence: snpEvidence,
         cds_cert_pem: cdsCertPem,
-        session_pubkey: {
-          x25519: bytesToBase64Url(pub.x25519),
-          mlkem768: bytesToBase64Url(pub.mlkem768),
-        },
+        xwing_ek: body.xwing_ek,
+        xwing_ct: bytesToBase64Url(ct),
+        session_id: sessionIdB64,
       };
-      pending.set(nonceB64, { priv, transcript: minted.transcript, createdAt: Date.now() });
       return json(res, 200, bundle);
     }
 
-    if (req.method === "POST" && p === "/.well-known/c8s/handshake") {
-      const body = JSON.parse(await readBody(req));
-      const entry = pending.get(body.nonce);
-      if (!entry)
-        return json(res, 400, { error: "invalid_request", message: "unknown or expired nonce" });
-      pending.delete(body.nonce);
-      const key = await serverKeyAgreement(
-        entry.priv,
-        {
-          clientX25519: base64UrlToBytes(body.client_x25519),
-          mlkemCiphertext: base64UrlToBytes(body.mlkem_ct),
-        },
-        entry.transcript,
-      );
-      const sessionId = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
-      sessions.set(sessionId, new Channel(key));
-      return json(res, 200, { session_id: sessionId });
+    // The retired two-step handshake: an explicit 400, mirroring the sidecar.
+    if (p === "/.well-known/c8s/handshake") {
+      return json(res, 400, {
+        error: "invalid_request",
+        message: "the handshake endpoint is gone: attest-pq establishes the session in one POST",
+      });
     }
 
     // Over-encryption termination: open the sealed request envelope, "forward"
@@ -194,8 +200,9 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
     // the reconstructed plaintext request to the upstream over the raTLS mesh.
     if (req.method === "POST" && p === "/.well-known/c8s/tunnel") {
       const sid = req.headers["x-c8s-session"];
-      const channel = typeof sid === "string" ? sessions.get(sid) : undefined;
-      if (!channel) return json(res, 401, { error: "channel_error", message: "no session" });
+      const entry = typeof sid === "string" ? sessions.get(sid) : undefined;
+      if (!entry) return json(res, 401, { error: "channel_error", message: "no session" });
+      const channel = entry.channel;
       let record: WireRecord;
       try {
         record = cborDecode(await readBodyBytes(req)) as unknown as WireRecord;
@@ -204,7 +211,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       }
       let plaintext: Uint8Array;
       try {
-        plaintext = await channel.open(record, requestAAD());
+        plaintext = await channel.openRequest(record);
       } catch {
         return json(res, 400, { error: "channel_error", message: "decrypt failed" });
       }
@@ -229,8 +236,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         ],
         body: reply,
       };
-      const out = await channel.seal(cborEncode(respEnv), responseAAD());
-      return cbor(res, 200, out);
+      const out = await channel.sealResponse(cborEncode(respEnv), record.seq);
+      return cbor(res, 200, { seq: out.seq, ct: out.ct });
     }
 
     // Static demo assets (index.html, /dist/*, /wasm/*, /node_modules/*).

@@ -7,8 +7,7 @@
 import { generateNonce } from "../src/nonce.js";
 import { verifyAttestation, type AttestationResult } from "../src/verify.js";
 import { initVerifier } from "../src/wasm-loader.js";
-import { clientKeyAgreement } from "../src/keyagreement.js";
-import { Channel, requestAAD, responseAAD } from "../src/channel.js";
+import { deriveChannel, generateXWingKeyPair, xwingDecapsulate } from "../src/keyagreement.js";
 import { cborEncode, cborDecode } from "../src/cbor.js";
 import {
   bytesToBase64Url,
@@ -26,13 +25,13 @@ const tamperEl = document.getElementById("tamper") as HTMLInputElement;
 type StepState = "run" | "ok" | "bad" | "warn" | "pending";
 
 const STEPS: [string, string][] = [
-  ["nonce", "Generate a fresh random nonce"],
-  ["fetch", "Fetch attestation bundle from the LB"],
+  ["nonce", "Generate a nonce and an X-Wing keypair"],
+  ["fetch", "POST the key exchange, get the bundle"],
   ["wasm", "Verify SEV-SNP hardware evidence (WASM)"],
   ["measure", "Check launch measurement against allowlist"],
-  ["binding", "Bind session key + nonce (freshness)"],
+  ["binding", "Bind the full key exchange + nonce (freshness)"],
   ["cert", "Verify CDS certificate chains to mesh CA"],
-  ["handshake", "PQ hybrid key agreement (X25519 + ML-KEM-768)"],
+  ["channel", "Decapsulate (X-Wing) and derive the channel"],
   ["echo", "Send an over-encrypted request"],
 ];
 
@@ -70,15 +69,21 @@ async function run(): Promise<void> {
   try {
     await initVerifier();
 
-    // 1. nonce
+    // 1. nonce + client key exchange
     set("nonce", "run");
     const nonce = generateNonce();
-    set("nonce", "ok", `nonce = ${bytesToBase64Url(nonce)}`);
+    const keyPair = await generateXWingKeyPair();
+    set("nonce", "ok", `nonce = ${bytesToBase64Url(nonce)}\nX-Wing ek = ${keyPair.ek.length}B`);
 
-    // 2. fetch bundle
+    // 2. client-first POST: nonce + encapsulation key, bundle back.
     set("fetch", "run");
-    const bundleRes = await fetch(`${PREFIX}/attest-pq?nonce=${bytesToBase64Url(nonce)}`, {
-      headers: { accept: "application/json" },
+    const bundleRes = await fetch(`${PREFIX}/attest-pq`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        nonce: bytesToBase64Url(nonce),
+        xwing_ek: bytesToBase64Url(keyPair.ek),
+      }),
     });
     if (!bundleRes.ok) throw new Error(`HTTP ${bundleRes.status}`);
     const bundle = await bundleRes.json();
@@ -104,11 +109,16 @@ async function run(): Promise<void> {
     set("wasm", "run");
     let result!: AttestationResult;
     try {
-      result = await verifyAttestation(bundle, nonce, {
-        measurements: DEMO_MEASUREMENTS,
-        requireFreshness: DEMO_REQUIRE_FRESHNESS,
-        meshCaPem: pinnedCa,
-      });
+      result = await verifyAttestation(
+        bundle,
+        nonce,
+        {
+          measurements: DEMO_MEASUREMENTS,
+          requireFreshness: DEMO_REQUIRE_FRESHNESS,
+          meshCaPem: pinnedCa,
+        },
+        keyPair.ek,
+      );
     } catch (e) {
       // Attribute the failure to the right step.
       const err = e as { code?: string; message?: string };
@@ -159,28 +169,22 @@ async function run(): Promise<void> {
         `mesh-CA sha256=${result.cert.caSha256.slice(0, 32)}… (pinned)`,
     );
 
-    // 7. handshake
-    set("handshake", "run");
-    const { key, handshake } = await clientKeyAgreement(
-      result.sessionPubKey,
+    // 7. decapsulate the attested ciphertext and derive the channel: no second
+    // round trip — the session went live when the bundle was minted.
+    set("channel", "run");
+    const session_id = bundle.session_id as string;
+    const sharedSecret = await xwingDecapsulate(keyPair, result.keyExchange.xwingCt);
+    const channel = await deriveChannel(
+      "client",
+      sharedSecret,
       result.keyAgreementContext,
+      result.keyExchange.sessionId,
     );
-    const hsRes = await fetch(`${PREFIX}/handshake`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        nonce: bytesToBase64Url(nonce),
-        client_x25519: bytesToBase64Url(handshake.clientX25519),
-        mlkem_ct: bytesToBase64Url(handshake.mlkemCiphertext),
-      }),
-    });
-    const { session_id } = await hsRes.json();
-    const channel = new Channel(key);
     set(
-      "handshake",
+      "channel",
       "ok",
-      `ML-KEM-768 ct ${handshake.mlkemCiphertext.length}B + X25519 ${handshake.clientX25519.length}B\n` +
-        `→ HKDF-SHA256 → AES-256-GCM · session ${session_id.slice(0, 16)}…`,
+      `X-Wing ct ${result.keyExchange.xwingCt.length}B → SHA3-256 combiner → HKDF-SHA256\n` +
+        `→ AES-256-GCM per direction · session ${session_id.slice(0, 16)}…`,
     );
 
     // 8. over-encrypted request through the tunnel (full request envelope sealed).
@@ -194,18 +198,20 @@ async function run(): Promise<void> {
       headers: { "content-type": "text/plain" },
       body: utf8ToBytes(msg),
     };
-    const rec = await channel.seal(cborEncode(envelope), requestAAD());
+    const rec = await channel.sealRequest(cborEncode(envelope));
     const echoRes = await fetch(`${PREFIX}/tunnel`, {
       method: "POST",
       headers: { "content-type": "application/cbor", "x-c8s-session": session_id },
-      body: cborEncode(rec),
+      body: cborEncode({ seq: rec.seq, ct: rec.ct }),
     });
     if (!echoRes.ok) throw new Error(`tunnel returned HTTP ${echoRes.status}`);
     const respRec = cborDecode(new Uint8Array(await echoRes.arrayBuffer())) as unknown as {
-      iv: Uint8Array;
+      seq: number;
       ct: Uint8Array;
     };
-    const respEnv = cborDecode(await channel.open(respRec, responseAAD())) as { body?: Uint8Array };
+    const respEnv = cborDecode(await channel.openResponse(respRec, rec.seq)) as {
+      body?: Uint8Array;
+    };
     const plain = bytesToUtf8(respEnv.body ?? new Uint8Array(0));
     set("echo", "ok", `sent (sealed envelope): ${JSON.stringify(msg)}\nrecv (opened): ${plain}`);
   } catch (e) {

@@ -160,11 +160,6 @@ export interface VerifyPolicy {
   requireCollateral?: boolean;
 }
 
-export interface SessionPubKeyB64 {
-  x25519: string;
-  mlkem768: string;
-}
-
 export interface AttestationBundle {
   version: string;
   platform: string;
@@ -179,7 +174,12 @@ export interface AttestationBundle {
   evidence: Evidence;
   cds_cert_pem: string;
   ear?: string;
-  session_pubkey: SessionPubKeyB64;
+  /** Echo of the client's X-Wing encapsulation key (base64url, 1216 bytes). */
+  xwing_ek: string;
+  /** The server's X-Wing ciphertext (base64url, 1120 bytes). */
+  xwing_ct: string;
+  /** The session identifier (base64url, 16 bytes), committed by report_data. */
+  session_id: string;
   identity_proof: MeshIdentityProof;
 }
 
@@ -244,11 +244,12 @@ export interface AttestationResult {
    */
   collateralVerified: boolean;
   /**
-   * Verified identity transcript hash used as the HKDF context. Hardware-bound
+   * Verified identity transcript hash used as the HKDF salt. Hardware-bound
    * only when {@link identityBound} is true.
    */
   keyAgreementContext: Uint8Array;
-  sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array };
+  /** The decoded, echo-checked key exchange: our ek, the server's ct, the session id. */
+  keyExchange: KeyExchangeEcho;
   cert: CertInfo;
   claims: WasmClaims;
   /**
@@ -644,16 +645,28 @@ function decodeRtmr3(hex: string): Uint8Array {
   return out;
 }
 
-function decodeSessionPublicKey(
+/** The decoded key-exchange half of the bundle. */
+export interface KeyExchangeEcho {
+  xwingEk: Uint8Array;
+  xwingCt: Uint8Array;
+  sessionId: Uint8Array;
+}
+
+function decodeKeyExchange(
   bundle: AttestationBundle,
   nonce: Uint8Array,
-): { x25519: Uint8Array; mlkem768: Uint8Array } {
+  expectedEk: Uint8Array | undefined,
+): KeyExchangeEcho {
   if (
     typeof bundle?.nonce !== "string" ||
-    typeof bundle?.session_pubkey?.x25519 !== "string" ||
-    typeof bundle?.session_pubkey?.mlkem768 !== "string"
+    typeof bundle?.xwing_ek !== "string" ||
+    typeof bundle?.xwing_ct !== "string" ||
+    typeof bundle?.session_id !== "string"
   ) {
-    fail("invalid_request", "attestation bundle is missing nonce or session_pubkey fields");
+    fail(
+      "invalid_request",
+      "attestation bundle is missing nonce, xwing_ek, xwing_ct, or session_id fields",
+    );
   }
 
   let echoed: Uint8Array;
@@ -666,14 +679,23 @@ function decodeSessionPublicKey(
     fail("nonce_mismatch", "attestation bundle nonce does not match the nonce we sent");
   }
 
+  let decoded: KeyExchangeEcho;
   try {
-    return {
-      x25519: base64UrlToBytes(bundle.session_pubkey.x25519),
-      mlkem768: base64UrlToBytes(bundle.session_pubkey.mlkem768),
+    decoded = {
+      xwingEk: base64UrlToBytes(bundle.xwing_ek),
+      xwingCt: base64UrlToBytes(bundle.xwing_ct),
+      sessionId: base64UrlToBytes(bundle.session_id),
     };
   } catch (cause) {
-    fail("invalid_request", "attestation bundle session_pubkey is not base64url", { cause });
+    fail("invalid_request", "attestation bundle key-exchange fields are not base64url", { cause });
   }
+  // Exactly like the nonce echo: a live client sent its own encapsulation key
+  // and must see it committed, or the evidence speaks for someone else's
+  // exchange. Offline re-verification of a saved bundle passes undefined.
+  if (expectedEk !== undefined && !constantTimeEqual(decoded.xwingEk, expectedEk)) {
+    fail("key_binding", "attestation bundle xwing_ek does not echo the key we sent");
+  }
+  return decoded;
 }
 
 function isMeshIdentityProof(proof: MeshIdentityProof | undefined): proof is MeshIdentityProof {
@@ -688,7 +710,7 @@ function isMeshIdentityProof(proof: MeshIdentityProof | undefined): proof is Mes
 
 async function prepareIdentity(
   bundle: AttestationBundle,
-  sessionPubKey: { x25519: Uint8Array; mlkem768: Uint8Array },
+  keyExchange: KeyExchangeEcho,
   nonce: Uint8Array,
   policy: VerifyPolicy,
   warnings: string[],
@@ -756,7 +778,9 @@ async function prepareIdentity(
   }
   const chain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
   const transcript = await identityTranscriptHash(
-    sessionPubKey,
+    keyExchange.xwingEk,
+    keyExchange.xwingCt,
+    keyExchange.sessionId,
     nonce,
     chain.leaf.der,
     chain.ca.der,
@@ -984,18 +1008,23 @@ async function verifyWorkloadPolicy(
  *
  * @param bundle the LB attest-pq response
  * @param nonce the nonce WE generated and sent
+ * @param policy the verification policy
+ * @param expectedXwingEk the X-Wing encapsulation key WE sent; the bundle must
+ *   echo it exactly. Omit only when re-verifying a saved bundle offline, where
+ *   the result is not a freshness or key-binding proof for this caller.
  */
 export async function verifyAttestation(
   bundle: AttestationBundle,
   nonce: Uint8Array,
   policy: VerifyPolicy,
+  expectedXwingEk?: Uint8Array,
 ): Promise<AttestationResult> {
   validatePolicy(policy);
   const warnings: string[] = [];
   const wantPlatform = policy.platform ?? "snp";
   const requireFreshness = policy.requireFreshness !== false;
-  const sessionPubKey = decodeSessionPublicKey(bundle, nonce);
-  const identity = await prepareIdentity(bundle, sessionPubKey, nonce, policy, warnings);
+  const keyExchange = decodeKeyExchange(bundle, nonce, expectedXwingEk);
+  const identity = await prepareIdentity(bundle, keyExchange, nonce, policy, warnings);
   const result = await verifyHardwareAttestation(
     bundle,
     identity.transcript,
@@ -1077,7 +1106,7 @@ export async function verifyAttestation(
     identityBound: result.report_data_match === true,
     collateralVerified,
     keyAgreementContext: identity.transcript,
-    sessionPubKey,
+    keyExchange,
     cert: certInfo(identity.chain),
     claims: result.claims,
     workload,

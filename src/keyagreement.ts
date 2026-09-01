@@ -1,164 +1,115 @@
-// Post-quantum hybrid key agreement: X25519 (classical, WebCrypto) + ML-KEM-768
-// (post-quantum, mlkem-wasm), combined per the TLS X25519MLKEM768 convention and
-// run through HKDF-SHA256 to an AES-256-GCM key.
-//
-// The LB publishes a per-session hybrid public key (attested via report_data).
-// The client *encapsulates* against it; the LB *decapsulates*. Both sides derive
-// the same AES key. The classical and PQ halves are concatenated so the channel
-// stays secure as long as EITHER primitive holds.
+// The channel key schedule: HKDF-SHA256 over the X-Wing shared secret, salted
+// with the verified identity transcript hash so every output — including the
+// channel-binding exporter — is bound to the attested identity. Must match Go
+// pkg/overenc.
 
-import mlkem from "mlkem-wasm";
 import { subtle } from "./crypto-env.js";
-import { concatBytes, utf8ToBytes } from "./base64.js";
-import { C8sVerifyError } from "./errors.js";
+import { utf8ToBytes } from "./base64.js";
+import { newChannel, type Channel, type ChannelKeys, type ChannelRole } from "./channel.js";
 // Runtime-safe: identity.js only type-imports from this module, so no cycle.
 import { assertTranscriptLength } from "./identity.js";
+import { C8sVerifyError } from "./errors.js";
 
-const ML_KEM = { name: "ML-KEM-768" } as const;
+export {
+  XWING_EK_BYTES,
+  XWING_CT_BYTES,
+  XWING_SS_BYTES,
+  generateXWingKeyPair,
+  xwingKeyPairFromSeed,
+  xwingDecapsulate,
+  xwingEncapsulate,
+} from "./xwing.js";
+export type { XWingKeyPair } from "./xwing.js";
 
-// ML-KEM-768 fixed sizes (bytes).
-export const MLKEM768_EK_BYTES = 1184; // encapsulation (public) key
-export const MLKEM768_CT_BYTES = 1088; // ciphertext
-export const X25519_PUB_BYTES = 32;
+const KEY_BYTES = 32;
+const IV_PREFIX_BYTES = 4;
+const EXPORTER_BYTES = 32;
+const SS_BYTES = 32;
 
-const HKDF_INFO = utf8ToBytes("c8s-verify/v1/over-encryption");
+const INFO_C2S_KEY = utf8ToBytes("c8s-verify/v1/c2s-key");
+const INFO_S2C_KEY = utf8ToBytes("c8s-verify/v1/s2c-key");
+const INFO_C2S_IV = utf8ToBytes("c8s-verify/v1/c2s-iv");
+const INFO_S2C_IV = utf8ToBytes("c8s-verify/v1/s2c-iv");
+const INFO_EXPORTER = utf8ToBytes("c8s-verify/v1/exporter");
 
-/** Raw public halves of the LB's hybrid key. */
-export interface PublicHalves {
-  x25519: Uint8Array;
-  mlkem768: Uint8Array;
-}
-
-/** The client's contribution sent to the LB to complete the handshake. */
-export interface Handshake {
-  clientX25519: Uint8Array;
-  mlkemCiphertext: Uint8Array;
-}
-
-/** Server-side (LB) private key handles. */
-export interface ServerKeys {
-  x25519Priv: CryptoKey;
-  mlkemPriv: CryptoKey;
-}
-
-function u8(b: ArrayBuffer | Uint8Array): Uint8Array {
-  return b instanceof Uint8Array ? b : new Uint8Array(b);
-}
-
-/**
- * Derive the AES-256-GCM session key from the two shared secrets and the
- * verified identity transcript (see PROTOCOL.md "Key agreement").
- * @param mlkemSecret 32-byte ML-KEM shared secret
- * @param x25519Secret 32-byte X25519 shared secret
- * @param identityTranscript 48-byte identity transcript hash (HKDF salt)
- * @returns AES-256-GCM key (non-extractable)
- */
-async function deriveChannelKey(
-  mlkemSecret: Uint8Array,
-  x25519Secret: Uint8Array,
-  identityTranscript: Uint8Array,
-): Promise<CryptoKey> {
-  const ikm = concatBytes(mlkemSecret, x25519Secret);
-  const hkdfKey = await subtle().importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+async function hkdfExpand(
+  hkdfKey: CryptoKey,
+  salt: Uint8Array,
+  info: Uint8Array,
+  bytes: number,
+): Promise<Uint8Array> {
   const bits = await subtle().deriveBits(
-    { name: "HKDF", hash: "SHA-256", salt: identityTranscript, info: HKDF_INFO },
+    { name: "HKDF", hash: "SHA-256", salt, info },
     hkdfKey,
-    256,
+    bytes * 8,
   );
-  return subtle().importKey("raw", bits, { name: "AES-GCM", length: 256 }, false, [
+  return new Uint8Array(bits);
+}
+
+async function importAesKey(raw: Uint8Array): Promise<CryptoKey> {
+  return subtle().importKey("raw", raw, { name: "AES-GCM", length: 256 }, false, [
     "encrypt",
     "decrypt",
   ]);
 }
 
 /**
- * Client side: encapsulate against the LB's attested hybrid public key and derive
- * the session key.
+ * Derive the full channel key schedule and assemble this end's Channel.
  *
- * @param peerPub raw public halves
- * @param identityTranscript verified identity transcript hash
+ * @param role which end this is: the browser client, or the server half used
+ *   by the mock LB and tests
+ * @param sharedSecret 32-byte X-Wing shared secret
+ * @param identityTranscript verified 48-byte identity transcript hash (salt)
+ * @param sessionId 16-byte session id, committed by the transcript
  */
-export async function clientKeyAgreement(
-  peerPub: PublicHalves,
+export async function deriveChannel(
+  role: ChannelRole,
+  sharedSecret: Uint8Array,
   identityTranscript: Uint8Array,
-): Promise<{ key: CryptoKey; handshake: Handshake }> {
+  sessionId: Uint8Array,
+): Promise<Channel> {
   assertTranscriptLength(identityTranscript);
-  if (peerPub.mlkem768.length !== MLKEM768_EK_BYTES) {
+  if (sharedSecret.length !== SS_BYTES) {
     throw new C8sVerifyError(
       "key_binding",
-      `ML-KEM encapsulation key must be ${MLKEM768_EK_BYTES} bytes, got ${peerPub.mlkem768.length}`,
+      `shared secret must be ${SS_BYTES} bytes, got ${sharedSecret.length}`,
     );
   }
-  if (peerPub.x25519.length !== X25519_PUB_BYTES) {
-    throw new C8sVerifyError(
-      "key_binding",
-      `X25519 public key must be ${X25519_PUB_BYTES} bytes, got ${peerPub.x25519.length}`,
-    );
-  }
-
-  // PQ half: import the LB's ML-KEM encapsulation key and encapsulate.
-  const ek = await mlkem.importKey("raw-public", peerPub.mlkem768, ML_KEM, true, [
-    "encapsulateBits",
-  ]);
-  const { sharedKey: mlkemSecret, ciphertext: mlkemCt } = await mlkem.encapsulateBits(ML_KEM, ek);
-
-  // Classical half: ephemeral X25519, ECDH against the LB's X25519 key.
-  const clientPair = (await subtle().generateKey({ name: "X25519" }, true, [
-    "deriveBits",
-  ])) as CryptoKeyPair;
-  const clientX25519 = u8(await subtle().exportKey("raw", clientPair.publicKey));
-  const peerX25519 = await subtle().importKey("raw", peerPub.x25519, { name: "X25519" }, false, []);
-  const x25519Secret = u8(
-    await subtle().deriveBits({ name: "X25519", public: peerX25519 }, clientPair.privateKey, 256),
-  );
-
-  const key = await deriveChannelKey(u8(mlkemSecret), x25519Secret, identityTranscript);
-  return { key, handshake: { clientX25519, mlkemCiphertext: u8(mlkemCt) } };
+  const hkdfKey = await subtle().importKey("raw", sharedSecret, "HKDF", false, ["deriveBits"]);
+  const keys: ChannelKeys = {
+    c2sKey: await importAesKey(
+      await hkdfExpand(hkdfKey, identityTranscript, INFO_C2S_KEY, KEY_BYTES),
+    ),
+    s2cKey: await importAesKey(
+      await hkdfExpand(hkdfKey, identityTranscript, INFO_S2C_KEY, KEY_BYTES),
+    ),
+    c2sIv: await hkdfExpand(hkdfKey, identityTranscript, INFO_C2S_IV, IV_PREFIX_BYTES),
+    s2cIv: await hkdfExpand(hkdfKey, identityTranscript, INFO_S2C_IV, IV_PREFIX_BYTES),
+    exporter: await hkdfExpand(hkdfKey, identityTranscript, INFO_EXPORTER, EXPORTER_BYTES),
+  };
+  return newChannel(role, keys, sessionId);
 }
 
 /**
- * LB / server side: decapsulate the client's ciphertext and ECDH against the
- * client's X25519 public key to derive the same session key. Used by the mock LB
- * and by tests.
+ * Derive the raw key-schedule outputs without importing them into AEAD
+ * handles. For the interoperability-vector tests, which compare the bytes.
  */
-export async function serverKeyAgreement(
-  serverKeys: ServerKeys,
-  handshake: Handshake,
+export async function deriveRawKeySchedule(
+  sharedSecret: Uint8Array,
   identityTranscript: Uint8Array,
-): Promise<CryptoKey> {
-  assertTranscriptLength(identityTranscript);
-  const mlkemSecret = u8(
-    await mlkem.decapsulateBits(ML_KEM, serverKeys.mlkemPriv, handshake.mlkemCiphertext),
-  );
-  const clientPub = await subtle().importKey(
-    "raw",
-    handshake.clientX25519,
-    { name: "X25519" },
-    false,
-    [],
-  );
-  const x25519Secret = u8(
-    await subtle().deriveBits({ name: "X25519", public: clientPub }, serverKeys.x25519Priv, 256),
-  );
-  return deriveChannelKey(mlkemSecret, x25519Secret, identityTranscript);
-}
-
-/**
- * Generate a fresh LB-side hybrid keypair and return both the private handles and
- * the raw public halves to publish. Used by the mock LB.
- */
-export async function generateServerHybridKey(): Promise<{
-  priv: ServerKeys;
-  pub: PublicHalves;
+): Promise<{
+  c2sKey: Uint8Array;
+  s2cKey: Uint8Array;
+  c2sIv: Uint8Array;
+  s2cIv: Uint8Array;
+  exporter: Uint8Array;
 }> {
-  const x = (await subtle().generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;
-  const x25519 = u8(await subtle().exportKey("raw", x.publicKey));
-
-  const m = await mlkem.generateKey(ML_KEM, true, ["encapsulateBits", "decapsulateBits"]);
-  const mlkem768 = u8(await mlkem.exportKey("raw-public", m.publicKey));
-
+  const hkdfKey = await subtle().importKey("raw", sharedSecret, "HKDF", false, ["deriveBits"]);
   return {
-    priv: { x25519Priv: x.privateKey, mlkemPriv: m.privateKey },
-    pub: { x25519, mlkem768 },
+    c2sKey: await hkdfExpand(hkdfKey, identityTranscript, INFO_C2S_KEY, KEY_BYTES),
+    s2cKey: await hkdfExpand(hkdfKey, identityTranscript, INFO_S2C_KEY, KEY_BYTES),
+    c2sIv: await hkdfExpand(hkdfKey, identityTranscript, INFO_C2S_IV, IV_PREFIX_BYTES),
+    s2cIv: await hkdfExpand(hkdfKey, identityTranscript, INFO_S2C_IV, IV_PREFIX_BYTES),
+    exporter: await hkdfExpand(hkdfKey, identityTranscript, INFO_EXPORTER, EXPORTER_BYTES),
   };
 }

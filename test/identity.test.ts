@@ -24,7 +24,9 @@ async function fixtureProof(): Promise<{
   const leaf = parseCertificate(decodePEM(leafPem, "CERTIFICATE")[0]);
   const ca = parseCertificate(decodePEM(meshCaPem, "CERTIFICATE")[0]);
   const { transcript, proof } = await mintIdentityProof(
-    { x25519: new Uint8Array(32).fill(0x11), mlkem768: new Uint8Array(1184).fill(0x22) },
+    new Uint8Array(1216).fill(0x11),
+    new Uint8Array(1120).fill(0x22),
+    new Uint8Array(16).fill(0x44),
     new Uint8Array(32).fill(0x33),
     leaf.der,
     ca.der,
@@ -35,14 +37,16 @@ async function fixtureProof(): Promise<{
 
 test("v1 transcript matches the Go cross-language vector", async () => {
   const transcript = await identityTranscriptHash(
-    { x25519: new Uint8Array(32).fill(0x11), mlkem768: new Uint8Array(1184).fill(0x22) },
+    new Uint8Array(1216).fill(0x11),
+    new Uint8Array(1120).fill(0x22),
+    new Uint8Array(16).fill(0x44),
     new Uint8Array(32).fill(0x33),
     new TextEncoder().encode("leaf-der"),
     new TextEncoder().encode("ca-der"),
   );
   assert.equal(
     bytesToHex(transcript),
-    "0f1adeacacf9a6586aa102432616634e0307bdeb982aa295c0c8862e449b74c8bec6fda53529e58b84f1ad2cc15e481d",
+    "0825f574219c593d55c84deef941c516cdecb09f6ef33e8f9fdbd5728ada3764d85d20eccaa835f9512b64dd2ab1d35f",
   );
 });
 

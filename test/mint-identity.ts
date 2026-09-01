@@ -13,7 +13,6 @@ import {
   identityTranscriptHash,
   type MeshIdentityProof,
 } from "../src/identity.js";
-import type { PublicHalves } from "../src/keyagreement.js";
 
 export interface IdentityBundleFields {
   version: string;
@@ -32,13 +31,22 @@ export interface MintedIdentityProof {
  * stamp, so the mock LB and test fixtures cannot drift apart.
  */
 export async function mintIdentityProof(
-  pub: PublicHalves,
+  xwingEk: Uint8Array,
+  xwingCt: Uint8Array,
+  sessionId: Uint8Array,
   nonce: Uint8Array,
   leafDer: Uint8Array,
   caDer: Uint8Array,
   leafKeyPem: string,
 ): Promise<MintedIdentityProof> {
-  const transcript = await identityTranscriptHash(pub, nonce, leafDer, caDer);
+  const transcript = await identityTranscriptHash(
+    xwingEk,
+    xwingCt,
+    sessionId,
+    nonce,
+    leafDer,
+    caDer,
+  );
   const proof: MeshIdentityProof = {
     algorithm: IDENTITY_PROOF_ALGORITHM,
     leaf_sha256: await certificateHashBase64Url(leafDer),
