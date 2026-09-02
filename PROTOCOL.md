@@ -1,4 +1,4 @@
-# c8s-verify wire protocol (`attest-pq`, binding `c8s/attest-pq/v1`)
+# c8s-verify wire protocol (`attest-pq`, binding `c8s/attest-pq/v2`)
 
 This document specifies the browser-facing attestation + over-encryption protocol
 between a JavaScript client (`c8s-verify-js`) and a C8s **Load Balancer (LB)**.
@@ -23,7 +23,7 @@ entirely on the returned payload:
    Azure vTPM-wrapped) whose hardware freshness anchor — `report_data` for the
    bare platforms, the vTPM quote's `extraData` for the Azure ones — binds the
    LB's per-session public key, the client's nonce, the exact mesh leaf,
-   and the issuing mesh CA.
+   the issuing mesh CA, and the upstream destination identity (below).
 2. The client verifies the evidence **directly in the browser** with the
    `attestation-rs` verifier compiled to WASM (bundled AMD ARK/ASK and Intel
    TDX roots, VCEK/DCAP collateral supplied inline — no network during
@@ -104,18 +104,19 @@ is rejected with `400 invalid_request`, and the former
 cutover (no alias, no downgrade).
 
 A sibling endpoint, `GET /.well-known/c8s/attest-lb?nonce=…` (binding id
-`c8s/attest-lb/v1`), exists for **native clients only**: it binds the exact
-outer TLS serving leaf into the hardware evidence and authorizes ordinary TLS
-after per-handshake verification. Browsers cannot see peer certificates, so
-`c8s-verify-js` neither implements it nor accepts its response shape — a bundle
-whose `version` is not exactly `c8s/attest-pq/v1` is rejected even when its
-evidence is otherwise valid.
+`c8s/attest-lb/v2`), exists for **native clients only**: it binds the exact
+outer TLS serving leaf and the same upstream destination identity into the
+hardware evidence, and authorizes ordinary TLS after per-handshake
+verification (see "attest-lb transcript" below). Browsers cannot see peer
+certificates, so `c8s-verify-js` neither implements it nor accepts its
+response shape — a bundle whose `version` is not exactly `c8s/attest-pq/v2`
+is rejected even when its evidence is otherwise valid.
 
 Response is `application/json`:
 
 ```jsonc
 {
-  "version": "c8s/attest-pq/v1",
+  "version": "c8s/attest-pq/v2",
   "platform": "snp",            // "snp" | "az-snp" | "az-tdx" | "tdx"
   "generation": "genoa",        // AMD gen for the bare-SNP WASM verifier (milan|genoa|turin); empty for the other platforms
   "nonce": "<echoed b64url>",   // MUST equal the request nonce
@@ -134,7 +135,10 @@ Response is `application/json`:
     "leaf_sha256": "<b64url SHA-256 of leaf DER>",
     "mesh_ca_sha256": "<b64url SHA-256 of issuing CA DER>",
     "signature": "<b64url ASN.1 DER ECDSA signature>"
-  }
+  },
+  "upstream": "http://c8s-infer.c8s-system.svc.cluster.local:8000", // committed destination (canonical); "" only in the explicit echo mode
+  "upstream_server_name": "",   // https upstreams: the TLS verification name
+  "upstream_ca_sha256": ""      // https upstreams: b64url SHA-256 of the CA bundle
 }
 ```
 
@@ -147,10 +151,47 @@ shows bare `snp`; the vTPM (`az-snp`, `az-tdx`) and bare `tdx` shapes are
 specified in their sections below. Everything outside `evidence` (and the
 binding recomputation) is platform-independent.
 
-The `version`, `cds_cert_pem`, and `identity_proof` fields are mandatory.
+The `version`, `cds_cert_pem`, `identity_proof`, and `upstream` fields are
+mandatory.
 The LB re-reads the TEE-held mesh leaf, private key, and CA for each request so
 certificate rotation cannot leave the bundle and proof on different credential
 generations. There is no legacy or downgrade path.
+
+`upstream`, `upstream_server_name`, and `upstream_ca_sha256` are the
+destination identity the LB committed into `report_data`; all three are always
+present. They are
+**informational**: the client MUST pin the expected destination out of band,
+recompute the transcript with the pin, and treat a mismatch with the served
+fields as fatal — trusting the served values would let the control plane name
+any destination. `upstream_server_name` and `upstream_ca_sha256` are empty
+for a plaintext (mesh-wrapped) upstream; `upstream_ca_sha256` is the SHA-256
+of the concatenated `CERTIFICATE` block DERs of the CA bundle file the LB
+verifies its https upstream against, in file order.
+
+`upstream` is the **canonical form** of the LB's `--upstream` base URL, so the
+same destination has exactly one commitment and different destinations differ:
+
+- scheme and host lowercased;
+- the default port elided (`:80` for `http`, `:443` for `https`); any other
+  port kept, and a port outside 1-65535 rejected;
+- one trailing root dot stripped from the host;
+- percent-encoded *unreserved* bytes (ALPHA / DIGIT / `-` / `.` / `_` / `~`)
+  decoded and dot-segments resolved (RFC 3986 §6.2.2.3, §5.2.4); trailing
+  slashes trimmed;
+- userinfo, query, and fragment are rejected at configuration time — a
+  forwarding destination carries none of them.
+
+`upstream_server_name` is likewise lowercased with one trailing root dot
+stripped. A verifier MUST canonicalise its pinned destination with the
+identical rules before recomputing the transcript — a pin canonicalised
+differently on one side is a lie by mismatch. (The Go reference is
+`overenc.CanonicalUpstreamURL` in c8s; the verify CLI applies it to
+`--expected-upstream`.)
+
+An empty `upstream` is a deliberate deployment choice, never a fallback: the
+LB serves it only when started in its explicit attestation-only echo mode
+(`--echo-backend`), and refuses to serve attestation with the destination
+silently unset.
 
 #### Report-data and mesh-identity binding
 
@@ -160,21 +201,31 @@ Define `LP(field) = uint32_be(len(field)) || field`, and:
 leaf_hash = SHA-256(leaf_certificate_DER)
 ca_hash   = SHA-256(issuing_mesh_CA_DER)
 
-transcript = LP("c8s-verify/v1")
+transcript = LP("c8s/attest-pq/v2")
           || LP(ca_hash(32))
           || LP(leaf_hash(32))
           || LP(x25519_pub_raw(32))
           || LP(mlkem768_pub_raw(1184))
           || LP(nonce(32))
+          || LP(upstream)
+          || LP(upstream_server_name)
+          || LP(upstream_ca_sha256(0 or 32))
 
 transcript_hash = SHA-384(transcript)
 report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
 ```
 
-The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
-is deliberately unchanged by the endpoint move (as are the HKDF info string and
-tunnel AADs below): only the bundle's `version` field carries the endpoint
-binding id `c8s/attest-pq/v1`.
+The transcript's domain tag is the endpoint's binding id. (The HKDF info
+string and tunnel AADs below keep the original `c8s-verify/v1` protocol name:
+they are channel separators, not version markers.)
+
+The upstream triple commits where the LB's own forwarding sends decrypted
+traffic: the canonical base URL (defined above; empty only in the explicit
+attestation-only echo mode), and for an https upstream the TLS verification
+server name and CA-bundle hash. A control plane that repoints the destination
+changes the transcript — which is also the channel's HKDF salt, so a client
+pinned to a different destination fails verification and cannot open a
+session record.
 
 The 64-byte anchor is identical on every platform: SEV-SNP `report_data` and
 the TDX TD-quote `report_data` both carry 64 bytes natively, and the Azure vTPM
@@ -208,6 +259,31 @@ but the protocol does not claim post-quantum authentication.
 > demo/mock and the offline test fixtures use **recorded real evidence** with a fixed
 > `report_data`; in that mode the client verifies the hardware signature + measurement
 > for real and exercises the binding math against the fixture's recorded value.
+
+#### attest-lb transcript (`c8s/attest-lb/v2`, native clients)
+
+The sibling endpoint's transcript replaces the session-key fields with the
+exact outer serving leaf — the certificate the client observed on its own TLS
+connection:
+
+```
+transcript = LP("c8s/attest-lb/v2")
+          || LP(nonce(32))
+          || LP(SHA-256(serving_leaf_DER))
+          || LP(SHA-256(mesh_leaf_DER))
+          || LP(SHA-256(mesh_CA_DER))
+          || LP(upstream)
+          || LP(upstream_server_name)
+          || LP(upstream_ca_sha256(0 or 32))
+
+transcript_hash = SHA-384(transcript)
+report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
+```
+
+The client recomputes it from the leaf it observed — never the served
+`serving_leaf_sha256` field — plus its out-of-band pinned upstream identity.
+Cross-implementation golden vectors live in c8s
+`pkg/overenc/testdata/attest_lb_transcript_vectors.json`.
 
 #### `platform: "az-snp"` (Azure Confidential VM, vTPM)
 
@@ -511,7 +587,7 @@ protection over a bounded set of seen records; a session that somehow exceeds
 that bound fails closed and must be re-established.
 
 **Termination + forwarding.** The LB (the `c8s cds-attest` sidecar) opens the record,
-reconstructs the HTTP request, and forwards it **as plaintext** to the backend — over
+reconstructs the HTTP request, and forwards it **as plaintext** to the backend the attestation transcript commits — over
 the cluster's raTLS mesh, exactly like any other c8s workload (or with explicit mTLS:
 CDS-issued client cert + mesh-CA verification, mirroring the tls-lb nginx proxy). It
 seals the backend's response back to the client. The over-encryption therefore
@@ -539,7 +615,10 @@ carried the stamp, which is a lifecycle state rather than an attack.
 
 Any failure aborts before the over-encryption channel is established. The policy
 rejects an empty measurement allowlist, the absence of both anchors (a mesh-CA
-pin and pinned allowlist bytes), or any version other than `c8s/attest-pq/v1` —
-including `c8s/attest-lb/v1` and the retired `c8s-verify/v1`. Freshness
+pin and pinned allowlist bytes), or any version other than `c8s/attest-pq/v2` —
+including `c8s/attest-lb/v2` and the retired `c8s/attest-pq/v1` and
+`c8s-verify/v1`. The verifier in this repository currently implements the v1
+binding (it requires `c8s/attest-pq/v1`); v2 verification lands separately with
+the coordinated cutover. Freshness
 enforcement defaults to true; the recorded-evidence demo explicitly disables it
 and reports that downgrade as a warning.

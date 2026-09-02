@@ -14,9 +14,12 @@ import type { PublicHalves } from "./keyagreement.js";
 /**
  * Binding identifier of the `attest-pq` response bundle. Each endpoint's
  * response carries its own identifier and a client requires the one selected
- * by its endpoint — `c8s/attest-lb/v1` (a native-client sibling protocol this
+ * by its endpoint — `c8s/attest-lb/v2` (a native-client sibling protocol this
  * browser library cannot implement) and the retired `c8s-verify/v1` bundle
  * are rejected even when their evidence is otherwise valid.
+ *
+ * This library implements the v1 binding; PROTOCOL.md specifies the v2
+ * binding ahead of the coordinated cutover, which lands separately.
  */
 export const BINDING_ATTEST_PQ = "c8s/attest-pq/v1";
 /**
