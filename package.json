@@ -55,6 +55,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "mlkem-wasm": "^0.0.7"
   },
   "engines": {

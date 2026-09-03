@@ -5,11 +5,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import {
-  generateServerHybridKey,
-  type ServerKeys,
-  type PublicHalves,
-} from "../src/keyagreement.js";
+import { generateXWingKeyPair, xwingEncapsulate, type XWingKeyPair } from "../src/keyagreement.js";
 import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js";
 import type { AttestationBundle } from "../src/verify.js";
 import type { Evidence } from "../src/hcl.js";
@@ -66,17 +62,23 @@ export function loadFixtures(): Promise<Fixtures> {
 
 export interface BuiltBundle {
   bundle: AttestationBundle;
-  priv: ServerKeys;
-  pub: PublicHalves;
+  /** The client keypair whose ek the bundle echoes. */
+  clientKeyPair: XWingKeyPair;
+  /** The shared secret the server derived when encapsulating. */
+  serverSharedSecret: Uint8Array;
+  sessionId: Uint8Array;
   meshCaPem: string;
   transcript: Uint8Array;
 }
 
 /**
- * Build an attestation bundle bound to `nonce`, mirroring the mock LB.
- * `opts.leaf` substitutes a different mesh leaf (e.g. one minted with a
- * matched-workload stamp via mint-cert.ts) for the fixture leaf; the identity
- * proof is minted with its key so the bundle stays internally consistent.
+ * Build an attestation bundle for a client-first exchange bound to `nonce`,
+ * mirroring the mock LB: generate the client keypair (unless given),
+ * encapsulate to it, mint a session id, and commit everything in the
+ * transcript. `opts.leaf` substitutes a different mesh leaf (e.g. one minted
+ * with a matched-workload stamp via mint-cert.ts) for the fixture leaf; the
+ * identity proof is minted with its key so the bundle stays internally
+ * consistent.
  */
 export async function buildBundle(
   nonce: Uint8Array,
@@ -85,6 +87,7 @@ export async function buildBundle(
     leaf?: { leafPem: string; leafKeyPem: string };
     evidence?: Evidence;
     platform?: string;
+    clientKeyPair?: XWingKeyPair;
   } = {},
 ): Promise<BuiltBundle> {
   const fixtures = await loadFixtures();
@@ -92,7 +95,9 @@ export async function buildBundle(
   const leafPem = opts.leaf?.leafPem ?? fixtures.leafPem;
   const leafKeyPem = opts.leaf?.leafKeyPem ?? fixtures.leafKeyPem;
   const leafDer = opts.leaf ? decodePEM(leafPem, "CERTIFICATE")[0] : fixtures.leafDer;
-  const { priv, pub } = await generateServerHybridKey();
+  const clientKeyPair = opts.clientKeyPair ?? (await generateXWingKeyPair());
+  const { ct, sharedSecret } = await xwingEncapsulate(clientKeyPair.ek);
+  const sessionId = crypto.getRandomValues(new Uint8Array(16));
 
   const evidence = JSON.parse(JSON.stringify(opts.evidence ?? snpEvidence));
   if (opts.tamperReport) {
@@ -101,7 +106,15 @@ export async function buildBundle(
     evidence.attestation_report = bytesToBase64(rep);
   }
 
-  const minted = await mintIdentityProof(pub, nonce, leafDer, caDer, leafKeyPem);
+  const minted = await mintIdentityProof(
+    clientKeyPair.ek,
+    ct,
+    sessionId,
+    nonce,
+    leafDer,
+    caDer,
+    leafKeyPem,
+  );
   const bundle: AttestationBundle = {
     ...minted.bundleFields,
     platform: opts.platform ?? "snp",
@@ -109,10 +122,16 @@ export async function buildBundle(
     nonce: bytesToBase64Url(nonce),
     evidence,
     cds_cert_pem: leafPem.trim() + "\n" + meshCaPem.trim() + "\n",
-    session_pubkey: {
-      x25519: bytesToBase64Url(pub.x25519),
-      mlkem768: bytesToBase64Url(pub.mlkem768),
-    },
+    xwing_ek: bytesToBase64Url(clientKeyPair.ek),
+    xwing_ct: bytesToBase64Url(ct),
+    session_id: bytesToBase64Url(sessionId),
   };
-  return { bundle, priv, pub, meshCaPem, transcript: minted.transcript };
+  return {
+    bundle,
+    clientKeyPair,
+    serverSharedSecret: sharedSecret,
+    sessionId,
+    meshCaPem,
+    transcript: minted.transcript,
+  };
 }

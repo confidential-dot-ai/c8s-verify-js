@@ -45,7 +45,7 @@ const STEP: Record<string, number> = {
   measure: 4,
   binding: 5,
   cert: 6,
-  handshake: 7,
+  channel: 7,
   echo: 8,
 };
 
@@ -93,7 +93,7 @@ try {
   expect(ok.measure === "ok", "measurement in allowlist");
   expect(ok.binding === "warn", "freshness shown as warning (recorded fixture)");
   expect(ok.cert === "ok", "CDS cert chains to pinned mesh CA");
-  expect(ok.handshake === "ok", "PQ hybrid handshake completed");
+  expect(ok.channel === "ok", "X-Wing channel derivation completed");
   expect(ok.echo === "ok", "over-encrypted echo round-tripped");
 
   console.log("tamper path:");

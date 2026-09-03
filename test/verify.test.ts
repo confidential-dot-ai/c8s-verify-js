@@ -101,13 +101,22 @@ test("verifies the mesh proof even when recorded evidence disables freshness", a
   assert.deepEqual(result.keyAgreementContext, transcript);
 });
 
-test("rejects session-key substitution after the mesh leaf signs", async () => {
+test("rejects key-exchange substitution after the mesh leaf signs", async () => {
   const nonce = generateNonce();
   const { bundle, meshCaPem } = await buildBundle(nonce);
-  bundle.session_pubkey.x25519 = bytesToBase64Url(new Uint8Array(32).fill(0x55));
+  bundle.xwing_ct = bytesToBase64Url(new Uint8Array(1120).fill(0x55));
   await assert.rejects(
     () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("rejects a bundle that does not echo the client's encapsulation key", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem), new Uint8Array(1216).fill(0x77)),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "key_binding",
   );
 });
 
@@ -218,7 +227,7 @@ test("requires a non-empty measurement allowlist", async () => {
 test("rejects a bundle with malformed base64url fields with a typed error", async () => {
   const nonce = generateNonce();
   const { bundle, meshCaPem } = await buildBundle(nonce);
-  bundle.session_pubkey.mlkem768 = "!!not-base64url!!";
+  bundle.xwing_ct = "!!not-base64url!!";
   await assert.rejects(
     () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",

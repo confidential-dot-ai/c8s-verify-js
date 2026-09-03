@@ -18,8 +18,13 @@ import {
   type SnpMinTcb,
   type VerifyPolicy,
 } from "./verify.js";
-import { clientKeyAgreement } from "./keyagreement.js";
-import { Channel, requestAAD, responseAAD, type WireRecord } from "./channel.js";
+import {
+  deriveChannel,
+  generateXWingKeyPair,
+  xwingDecapsulate,
+  type XWingKeyPair,
+} from "./keyagreement.js";
+import type { Channel, WireRecord } from "./channel.js";
 import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
@@ -235,14 +240,20 @@ export class C8sClient {
   }
 
   /**
-   * Fetch the LB attest-pq bundle for a fresh nonce. There is no fallback,
-   * alias, or `pq`/`binding` parameter — the endpoint is the version selector,
-   * and a server that does not serve it is a server this client cannot verify.
+   * POST the client-first attest-pq request — the fresh nonce and our X-Wing
+   * encapsulation key — and return the bundle. There is no fallback, alias,
+   * or version parameter: the endpoint is the version selector, and a server
+   * that does not serve it is a server this client cannot verify.
    */
-  async fetchAttestation(nonce: Uint8Array): Promise<AttestationBundle> {
-    const params = new URLSearchParams({ nonce: bytesToBase64Url(nonce) });
-    const url = `${this._url(this.prefix)}/attest-pq?${params.toString()}`;
-    const res = await this.fetch(url, { headers: { accept: "application/json" } });
+  async fetchAttestation(nonce: Uint8Array, keyPair: XWingKeyPair): Promise<AttestationBundle> {
+    const res = await this.fetch(`${this._url(this.prefix)}/attest-pq`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        nonce: bytesToBase64Url(nonce),
+        xwing_ek: bytesToBase64Url(keyPair.ek),
+      }),
+    });
     if (!res.ok) {
       fail("verification_failed", `attestation endpoint returned HTTP ${res.status}`);
     }
@@ -250,41 +261,30 @@ export class C8sClient {
   }
 
   /**
-   * Run the full flow: fetch attestation, verify it, and establish the
-   * over-encrypted channel.
+   * Run the full flow in one round trip: send our key exchange, verify the
+   * returned evidence (which commits both sides of it), decapsulate, and
+   * derive the over-encrypted channel. The session is live on return.
    */
   async connect(): Promise<Session> {
     const nonce = generateNonce();
-    const bundle = await this.fetchAttestation(nonce);
-    const attestation = await verifyAttestation(bundle, nonce, this.policy);
+    const keyPair = await generateXWingKeyPair();
+    const bundle = await this.fetchAttestation(nonce, keyPair);
+    const attestation = await verifyAttestation(bundle, nonce, this.policy, keyPair.ek);
 
-    const { key, handshake } = await clientKeyAgreement(
-      attestation.sessionPubKey,
+    const sharedSecret = await xwingDecapsulate(keyPair, attestation.keyExchange.xwingCt);
+    const channel = await deriveChannel(
+      "client",
+      sharedSecret,
       attestation.keyAgreementContext,
+      attestation.keyExchange.sessionId,
     );
-
-    // Register the channel with the LB; it derives the identical key.
-    const hsRes = await this.fetch(`${this._url(this.prefix)}/handshake`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        nonce: bytesToBase64Url(nonce),
-        client_x25519: bytesToBase64Url(handshake.clientX25519),
-        mlkem_ct: bytesToBase64Url(handshake.mlkemCiphertext),
-      }),
-    });
-    if (!hsRes.ok) {
-      fail("channel_error", `handshake endpoint returned HTTP ${hsRes.status}`);
-    }
-    const { session_id: sessionId } = (await hsRes.json()) as { session_id?: string };
-    if (!sessionId) fail("channel_error", "handshake did not return a session id");
 
     return new Session({
       baseUrl: this.baseUrl,
       prefix: this.prefix,
       fetch: this.fetch,
-      channel: new Channel(key),
-      sessionId,
+      channel,
+      sessionId: bundle.session_id,
       attestation,
     });
   }
@@ -312,6 +312,16 @@ export class Session {
   }
 
   /**
+   * Channel-binding exporter (32 bytes): derived by both ends from the shared
+   * secret under the attested transcript, never sent on the wire. The sidecar
+   * hands the backend the same value as the X-C8s-Exporter header, so an
+   * application can bind bearer credentials to this exact channel.
+   */
+  get exporter(): Uint8Array {
+    return this.channel.exporter;
+  }
+
+  /**
    * Make an over-encrypted request to the LB. The entire request — method, path,
    * headers, and body — is sealed with AES-256-GCM and sent to the tunnel
    * endpoint, so a TLS-terminating proxy in front of the LB sees only ciphertext.
@@ -336,19 +346,19 @@ export class Session {
       headers: headerPairs,
       body: bodyBytes,
     };
-    const reqRecord = await this.channel.seal(cborEncode(envelope), requestAAD());
+    const reqRecord = await this.channel.sealRequest(cborEncode(envelope));
 
     const res = await this._fetch(`${this.baseUrl}${this.prefix}/tunnel`, {
       method: "POST",
       headers: { "content-type": "application/cbor", "x-c8s-session": this.sessionId },
-      body: cborEncode(reqRecord),
+      body: cborEncode({ seq: reqRecord.seq, ct: reqRecord.ct }),
     });
     if (!res.ok) {
       fail("channel_error", `over-encrypted request returned HTTP ${res.status}`);
     }
     const respRecord = cborDecode(new Uint8Array(await res.arrayBuffer())) as unknown as WireRecord;
     const respEnvelope = cborDecode(
-      await this.channel.open(respRecord, responseAAD()),
+      await this.channel.openResponse(respRecord, reqRecord.seq),
     ) as unknown as ResponseEnvelope;
     const headersList = responseHeaderPairs(respEnvelope.headers);
     const bytes = respEnvelope.body ?? new Uint8Array(0);

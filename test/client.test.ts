@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { C8sClient } from "../src/index.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { generateNonce } from "../src/nonce.js";
+import { generateXWingKeyPair } from "../src/keyagreement.js";
 
 /** A fetch stub that records request URLs and returns an empty JSON body. */
 function captureFetch(urls: string[]): typeof fetch {
@@ -24,7 +25,7 @@ function captureFetch(urls: string[]): typeof fetch {
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const readAllowlist = () => readFile(join(FIXTURES, "cds-allowlist.json"));
 
-test("fetchAttestation requests attest-pq with only a nonce — no negotiation", async () => {
+test("fetchAttestation POSTs attest-pq with only nonce and xwing_ek — no negotiation", async () => {
   const urls: string[] = [];
   const client = new C8sClient({
     baseUrl: "http://lb.test",
@@ -32,12 +33,12 @@ test("fetchAttestation requests attest-pq with only a nonce — no negotiation",
     meshCaPem: "pinned CA",
     fetch: captureFetch(urls),
   });
-  await client.fetchAttestation(generateNonce());
+  const keyPair = await generateXWingKeyPair();
+  await client.fetchAttestation(generateNonce(), keyPair);
   const url = new URL(urls[0]);
   assert.equal(url.pathname, "/.well-known/c8s/attest-pq");
-  assert.deepEqual([...url.searchParams.keys()], ["nonce"]);
-  // 32-byte nonce is 43 chars of unpadded base64url.
-  assert.equal(url.searchParams.get("nonce")?.length, 43);
+  // The challenge travels in the body, not the query — no negotiation surface.
+  assert.deepEqual([...url.searchParams.keys()], []);
 });
 
 // ---------------------------------------------------------------------------
