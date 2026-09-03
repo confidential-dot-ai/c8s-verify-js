@@ -21,6 +21,7 @@ import { identityTranscriptHash } from "../src/identity.js";
 import { bytesToHex, hexToBytes } from "../src/base64.js";
 
 interface ChannelVectors {
+  front_door_mode: string;
   xwing_seed_hex: string;
   xwing_ek_hex: string;
   xwing_ct_hex: string;
@@ -65,6 +66,7 @@ test("channel golden vectors match the Go implementation byte for byte", async (
   // Identity transcript.
   const sessionId = hexToBytes(v.session_id_hex);
   const transcript = await identityTranscriptHash(
+    v.front_door_mode,
     kp.ek,
     ct,
     sessionId,

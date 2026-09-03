@@ -53,11 +53,12 @@ async function sha256(input: Uint8Array): Promise<Uint8Array> {
 
 /**
  * Compute the v1 report_data transcript shared with c8s/pkg/overenc. It
- * commits the complete key exchange — the client's X-Wing encapsulation key,
- * the server's ciphertext, the session id, and the nonce — plus the exact
- * mesh leaf and issuing mesh CA.
+ * commits the front-door mode and the complete key exchange — the client's
+ * X-Wing encapsulation key, the server's ciphertext, the session id, and the
+ * nonce — plus the exact mesh leaf and issuing mesh CA.
  */
 export async function identityTranscriptHash(
+  frontDoorMode: string,
   xwingEk: Uint8Array,
   xwingCt: Uint8Array,
   sessionId: Uint8Array,
@@ -65,6 +66,9 @@ export async function identityTranscriptHash(
   leafDer: Uint8Array,
   caDer: Uint8Array,
 ): Promise<Uint8Array> {
+  if (frontDoorMode === "") {
+    fail("identity_binding", "identity transcript requires a front-door mode");
+  }
   if (xwingEk.length !== XWING_EK_BYTES) {
     fail(
       "key_binding",
@@ -96,6 +100,7 @@ export async function identityTranscriptHash(
   // Most-stable fields first so a signer can reuse the hash state across sessions.
   const encoded = concatBytes(
     lengthPrefixed(TRANSCRIPT_DOMAIN),
+    lengthPrefixed(utf8ToBytes(frontDoorMode)),
     lengthPrefixed(await sha256(caDer)),
     lengthPrefixed(await sha256(leafDer)),
     lengthPrefixed(xwingEk),

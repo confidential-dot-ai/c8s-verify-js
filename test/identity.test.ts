@@ -24,6 +24,7 @@ async function fixtureProof(): Promise<{
   const leaf = parseCertificate(decodePEM(leafPem, "CERTIFICATE")[0]);
   const ca = parseCertificate(decodePEM(meshCaPem, "CERTIFICATE")[0]);
   const { transcript, proof } = await mintIdentityProof(
+    "cds",
     new Uint8Array(1216).fill(0x11),
     new Uint8Array(1120).fill(0x22),
     new Uint8Array(16).fill(0x44),
@@ -37,6 +38,7 @@ async function fixtureProof(): Promise<{
 
 test("v1 transcript matches the Go cross-language vector", async () => {
   const transcript = await identityTranscriptHash(
+    "cds",
     new Uint8Array(1216).fill(0x11),
     new Uint8Array(1120).fill(0x22),
     new Uint8Array(16).fill(0x44),
@@ -46,7 +48,27 @@ test("v1 transcript matches the Go cross-language vector", async () => {
   );
   assert.equal(
     bytesToHex(transcript),
-    "0825f574219c593d55c84deef941c516cdecb09f6ef33e8f9fdbd5728ada3764d85d20eccaa835f9512b64dd2ab1d35f",
+    "003e433637125a49cb2136a5e8148f6de5fd16c43caa11bcc79e49865da4c5e32625e54f7a9a33476954eb7f745fcae3",
+  );
+});
+
+test("the front-door mode is committed: another mode changes the transcript", async () => {
+  const args = [
+    new Uint8Array(1216).fill(0x11),
+    new Uint8Array(1120).fill(0x22),
+    new Uint8Array(16).fill(0x44),
+    new Uint8Array(32).fill(0x33),
+    new TextEncoder().encode("leaf-der"),
+    new TextEncoder().encode("ca-der"),
+  ] as const;
+  const acme = await identityTranscriptHash("acme", ...args);
+  assert.equal(
+    bytesToHex(acme),
+    "594e10d4d384724391d9fa215d90e2169029aa47f4091d9155b9970d0ebb38a4112518dce87db42cb837bbc71986c81a",
+  );
+  await assert.rejects(
+    () => identityTranscriptHash("", ...args),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
   );
 });
 

@@ -173,6 +173,8 @@ export interface AttestationBundle {
   nonce: string;
   evidence: Evidence;
   cds_cert_pem: string;
+  /** Credential model terminating the front door ("cds" | "webpki" | "acme"), committed by the transcript. */
+  front_door_mode: string;
   ear?: string;
   /** Echo of the client's X-Wing encapsulation key (base64url, 1216 bytes). */
   xwing_ek: string;
@@ -250,6 +252,8 @@ export interface AttestationResult {
   keyAgreementContext: Uint8Array;
   /** The decoded, echo-checked key exchange: our ek, the server's ct, the session id. */
   keyExchange: KeyExchangeEcho;
+  /** The front-door credential model the endpoint committed into the verified transcript. */
+  frontDoorMode: string;
   cert: CertInfo;
   claims: WasmClaims;
   /**
@@ -538,6 +542,7 @@ interface PreparedIdentity {
   chain: ChainResult;
   proof: MeshIdentityProof;
   transcript: Uint8Array;
+  frontDoorMode: string;
 }
 
 function validatePolicy(policy: VerifyPolicy): void {
@@ -732,6 +737,9 @@ async function prepareIdentity(
   if (typeof bundle.cds_cert_pem !== "string" || bundle.cds_cert_pem.trim() === "") {
     fail("identity_binding", "attestation response omitted cds_cert_pem");
   }
+  if (typeof bundle.front_door_mode !== "string" || bundle.front_door_mode === "") {
+    fail("identity_binding", "attestation response omitted front_door_mode");
+  }
 
   const leafBlocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
   if (leafBlocks.length === 0) {
@@ -778,6 +786,7 @@ async function prepareIdentity(
   }
   const chain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
   const transcript = await identityTranscriptHash(
+    bundle.front_door_mode,
     keyExchange.xwingEk,
     keyExchange.xwingCt,
     keyExchange.sessionId,
@@ -785,7 +794,7 @@ async function prepareIdentity(
     chain.leaf.der,
     chain.ca.der,
   );
-  return { chain, proof: bundle.identity_proof, transcript };
+  return { chain, proof: bundle.identity_proof, transcript, frontDoorMode: bundle.front_door_mode };
 }
 
 async function verifyHardwareAttestation(
@@ -1107,6 +1116,7 @@ export async function verifyAttestation(
     collateralVerified,
     keyAgreementContext: identity.transcript,
     keyExchange,
+    frontDoorMode: identity.frontDoorMode,
     cert: certInfo(identity.chain),
     claims: result.claims,
     workload,

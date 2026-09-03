@@ -154,6 +154,7 @@ Response is `application/json`:
     "cert_chain": { "vcek": "<base64 DER VCEK>" }
   },
   "cds_cert_pem": "-----BEGIN CERTIFICATE-----\n...", // exact mesh leaf + issuing CA
+  "front_door_mode": "cds" | "webpki" | "acme",      // credential model terminating public TLS, committed by the transcript
   "ear": "<optional CDS-issued EAR JWT>",             // defined but not yet populated by the LB
   "xwing_ek": "<echoed b64url 1216-byte client encapsulation key>",
   "xwing_ct": "<b64url 1120-byte X-Wing ciphertext>",
@@ -176,8 +177,8 @@ shows bare `snp`; the vTPM (`az-snp`, `az-tdx`) and bare `tdx` shapes are
 specified in their sections below. Everything outside `evidence` (and the
 binding recomputation) is platform-independent.
 
-The `version`, `cds_cert_pem`, `xwing_ek`, `xwing_ct`, `session_id`, and
-`identity_proof` fields are mandatory. A live client MUST check that `nonce`
+The `version`, `cds_cert_pem`, `front_door_mode`, `xwing_ek`, `xwing_ct`,
+`session_id`, and `identity_proof` fields are mandatory. A live client MUST check that `nonce`
 and `xwing_ek` exactly echo the values it sent (`xwing_ek` is echoed so a
 saved bundle stays verifiable offline; in that offline mode the result is not
 a freshness proof). The LB re-reads the TEE-held mesh leaf, private key, and
@@ -193,6 +194,7 @@ leaf_hash = SHA-256(leaf_certificate_DER)
 ca_hash   = SHA-256(issuing_mesh_CA_DER)
 
 transcript = LP("c8s-verify/v1")
+          || LP(front_door_mode)
           || LP(ca_hash(32))
           || LP(leaf_hash(32))
           || LP(xwing_ek(1216))

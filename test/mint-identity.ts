@@ -16,6 +16,7 @@ import {
 
 export interface IdentityBundleFields {
   version: string;
+  front_door_mode: string;
   identity_proof: MeshIdentityProof;
 }
 
@@ -31,6 +32,7 @@ export interface MintedIdentityProof {
  * stamp, so the mock LB and test fixtures cannot drift apart.
  */
 export async function mintIdentityProof(
+  frontDoorMode: string,
   xwingEk: Uint8Array,
   xwingCt: Uint8Array,
   sessionId: Uint8Array,
@@ -40,6 +42,7 @@ export async function mintIdentityProof(
   leafKeyPem: string,
 ): Promise<MintedIdentityProof> {
   const transcript = await identityTranscriptHash(
+    frontDoorMode,
     xwingEk,
     xwingCt,
     sessionId,
@@ -63,6 +66,7 @@ export async function mintIdentityProof(
     proof,
     bundleFields: {
       version: BINDING_ATTEST_PQ,
+      front_door_mode: frontDoorMode,
       identity_proof: proof,
     },
   };
