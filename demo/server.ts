@@ -161,7 +161,10 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       // always false against the mock.
       const { ct, sharedSecret } = await xwingEncapsulate(xwingEk);
       const sessionId = crypto.getRandomValues(new Uint8Array(16));
+      // The mock LB fronts a cds deployment (TEST.md's real-sidecar demo
+      // states webpki instead; attest-pq is served either way).
       const minted = await mintIdentityProof(
+        "cds",
         xwingEk,
         ct,
         sessionId,

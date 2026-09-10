@@ -36,6 +36,40 @@ test("verifies a well-formed bundle (recorded evidence)", async () => {
   assert.equal(r.measurement, DEMO_MEASUREMENTS[0]);
   assert.equal(r.cert.subjectCN, "lb.demo.c8s.local");
   assert.equal(r.cert.issuerCN, "c8s-demo-mesh-ca");
+  assert.equal(r.frontDoorMode, "cds");
+});
+
+test("rejects a bundle that omits front_door_mode", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  delete (bundle as Partial<AttestationBundle>).front_door_mode;
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+// The advertised mode is what the client commits into its recomputed
+// transcript: a bundle minted (signed) under a different mode fails the
+// proof-of-possession check, so a relay cannot re-serve it under another mode.
+test("rejects a bundle whose advertised front_door_mode differs from the committed one", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, {
+    frontDoorMode: "acme",
+    transcriptFrontDoorMode: "cds",
+  });
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("verifies an acme front-door bundle (recorded evidence)", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { frontDoorMode: "acme" });
+  const r = await verifyAttestation(bundle, nonce, policy(meshCaPem));
+  assert.equal(r.ok, true);
+  assert.equal(r.frontDoorMode, "acme");
 });
 
 test("rejects a nonce mismatch", async () => {

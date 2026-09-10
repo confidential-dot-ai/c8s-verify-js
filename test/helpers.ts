@@ -88,6 +88,11 @@ export async function buildBundle(
     evidence?: Evidence;
     platform?: string;
     clientKeyPair?: XWingKeyPair;
+    // frontDoorMode is the mode the response advertises (default "cds");
+    // transcriptFrontDoorMode overrides what the proof/evidence commit, so a
+    // test can serve a bundle whose advertised and committed modes disagree.
+    frontDoorMode?: string;
+    transcriptFrontDoorMode?: string;
   } = {},
 ): Promise<BuiltBundle> {
   const fixtures = await loadFixtures();
@@ -106,7 +111,9 @@ export async function buildBundle(
     evidence.attestation_report = bytesToBase64(rep);
   }
 
+  const frontDoorMode = opts.frontDoorMode ?? "cds";
   const minted = await mintIdentityProof(
+    opts.transcriptFrontDoorMode ?? frontDoorMode,
     clientKeyPair.ek,
     ct,
     sessionId,
@@ -117,6 +124,7 @@ export async function buildBundle(
   );
   const bundle: AttestationBundle = {
     ...minted.bundleFields,
+    front_door_mode: frontDoorMode,
     platform: opts.platform ?? "snp",
     generation: "genoa",
     nonce: bytesToBase64Url(nonce),
