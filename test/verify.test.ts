@@ -889,3 +889,21 @@ test("pinned policies require a report_data-bound rollout state", async () => {
     (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
   );
 });
+
+test("trustRouterCa verifies on the transcript-committed CA and reports it as derived", async () => {
+  const nonce = generateNonce();
+  const { bundle } = await buildBundle(nonce, { rollout: ROLLOUT });
+  const result = await verifyAttestation(bundle, nonce, {
+    measurements: DEMO_MEASUREMENTS,
+    requireFreshness: false,
+    trustRouterCa: true,
+  });
+  assert.equal(result.trustClass, "deployment-class");
+});
+
+test("a null cds_state is treated as absent", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  (bundle as { cds_state?: unknown }).cds_state = null;
+  await verifyAttestation(bundle, nonce, policy(meshCaPem));
+});

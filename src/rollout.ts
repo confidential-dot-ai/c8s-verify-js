@@ -13,6 +13,13 @@ export interface SignedRolloutState {
   signature: string;
 }
 
+const POLICY_DIGEST = /^sha256:[0-9a-f]{64}$/;
+
+/** Whether d is a policy digest "sha256:<64 lowercase hex>". */
+function isPolicyDigest(d: unknown): d is string {
+  return typeof d === "string" && POLICY_DIGEST.test(d);
+}
+
 /** CDS's allowlist rollout state. `bound` lists every policy digest that may run. */
 export interface RolloutState {
   protocol: number;
@@ -28,8 +35,10 @@ export interface RolloutState {
 }
 
 /** The decoded state bytes, or undefined when the bundle carries no state. */
-export function rolloutStateBytes(signed: SignedRolloutState | undefined): Uint8Array | undefined {
-  if (signed === undefined) {
+export function rolloutStateBytes(
+  signed: SignedRolloutState | null | undefined,
+): Uint8Array | undefined {
+  if (signed === undefined || signed === null) {
     return undefined;
   }
   if (typeof signed?.state !== "string" || typeof signed.signature !== "string") {
@@ -75,8 +84,8 @@ export async function verifyRolloutState(
   } catch (cause) {
     fail("rollout_state_invalid", "cds_state.state is not JSON", { cause });
   }
-  if (!Array.isArray(state?.bound) || !state.bound.every((d) => typeof d === "string")) {
-    fail("rollout_state_invalid", "cds_state carries no bound");
+  if (!Array.isArray(state?.bound) || !state.bound.every(isPolicyDigest)) {
+    fail("rollout_state_invalid", 'cds_state bound must list "sha256:<64 hex>" digests');
   }
   if (state.nonce !== bytesToHex(nonce)) {
     fail("rollout_state_invalid", "cds_state answers another nonce");
@@ -120,10 +129,10 @@ export async function fetchPolicy(
   digest: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Uint8Array> {
-  const hex = digest.startsWith("sha256:") ? digest.slice("sha256:".length) : "";
-  if (!/^[0-9a-f]{64}$/.test(hex)) {
+  if (!isPolicyDigest(digest)) {
     fail("invalid_request", `policy digest ${JSON.stringify(digest)} is not sha256:<64 hex>`);
   }
+  const hex = digest.slice("sha256:".length);
   const res = await fetchImpl(new URL(`/.well-known/c8s/objects/sha256/${hex}`, baseUrl));
   if (!res.ok) {
     fail("verification_failed", `fetching policy ${digest} returned ${res.status}`);

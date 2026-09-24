@@ -48,6 +48,17 @@ test("verifies a CA-signed state bound to the nonce", async () => {
     () => verifyRolloutState(signed, decoded, ca, new Uint8Array(32)),
     code("rollout_state_invalid"),
   );
+
+  const badBytes = utf8ToBytes(JSON.stringify(state({ bound: ["P"], nonce: bytesToHex(nonce) })));
+  const badSigned = {
+    state: bytesToBase64(badBytes),
+    signature: bytesToBase64(sign("sha384", badBytes, { key: caKeyPem, dsaEncoding: "der" })),
+  };
+  await assert.rejects(
+    () => verifyRolloutState(badSigned, badBytes, ca, nonce),
+    code("rollout_state_invalid"),
+  );
+  assert.equal(rolloutStateBytes(null), undefined);
 });
 
 test("enforces policy pins", () => {
@@ -70,8 +81,7 @@ test("fetchPolicy keeps only bytes that hash to the digest", async () => {
     () => fetchPolicy("https://router.example", digest, serve(utf8ToBytes("tampered"))),
     code("allowlist_denied"),
   );
-  await assert.rejects(
-    () => fetchPolicy("https://router.example", "md5:x"),
-    code("invalid_request"),
-  );
+  for (const bad of ["md5:x", `sha256:${"A".repeat(64)}`, 42 as unknown as string]) {
+    await assert.rejects(() => fetchPolicy("https://router.example", bad), code("invalid_request"));
+  }
 });

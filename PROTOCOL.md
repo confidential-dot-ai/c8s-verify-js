@@ -654,7 +654,9 @@ per attested value:
   only when their SHA-256 is that digest.
 
 The mesh CA follows the same rule: pin it (`meshCaPem`), or derive it from
-the served chain by the transcript commitment.
+the served chain by the transcript commitment. A client that pins no anchor at
+all MUST opt in explicitly (`trustRouterCa` here); its verdict rests on the
+measurement pins and names the CA as responder-chosen.
 
 The router also serves, through its RA-TLS-verified CDS proxy:
 
@@ -698,7 +700,8 @@ carried the stamp, which is a lifecycle state rather than an attack.
 
 Any failure aborts before the over-encryption channel is established. The policy
 rejects an empty measurement allowlist, the absence of every anchor (a mesh-CA
-pin, pinned allowlist bytes, or pinned policy digests), or any version other than `c8s/attest-pq/v1` —
+pin, pinned allowlist bytes, pinned policy digests, or the explicit
+`trustRouterCa` opt-in), or any version other than `c8s/attest-pq/v1` —
 including `c8s/attest-lb/v1` and the retired `c8s-verify/v1`. Freshness
 enforcement defaults to true; the recorded-evidence demo explicitly disables it
 and reports that downgrade as a warning.

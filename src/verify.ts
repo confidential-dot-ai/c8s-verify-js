@@ -102,6 +102,14 @@ export interface VerifyPolicy {
    * each policy with {@link fetchPolicy} to check it against its digest.
    */
   pinnedPolicies?: string[];
+  /**
+   * Explicit opt-in to verify with no pinned anchor: the mesh CA is the one
+   * the transcript commits, chosen by the responder, so the verdict is
+   * deployment-class and rests on the measurement pins alone. Use it when
+   * you trust the operator; read `allowlistBound` and check each policy
+   * with {@link fetchPolicy}. Default false: an anchorless policy fails closed.
+   */
+  trustRouterCa?: boolean;
   /** validity reference time (default now) */
   at?: Date;
   /**
@@ -200,7 +208,7 @@ export interface AttestationBundle {
   session_id: string;
   identity_proof: MeshIdentityProof;
   /** CDS rollout state from a pinned-allowlist router, committed by the transcript. */
-  cds_state?: SignedRolloutState;
+  cds_state?: SignedRolloutState | null;
 }
 
 /** Claims block inside the WASM verifier's JSON result. */
@@ -611,13 +619,15 @@ function validatePolicy(policy: VerifyPolicy): void {
   if (
     policy.meshCaPem === undefined &&
     policy.allowlist === undefined &&
-    policy.pinnedPolicies === undefined
+    policy.pinnedPolicies === undefined &&
+    policy.trustRouterCa !== true
   ) {
     fail(
       "identity_binding",
       "verification requires an anchor: pin meshCaPem out of band (specific-cluster), or pin " +
         "the exact canonical allowlist bytes to enforce against the mesh leaf's " +
-        "matched-workload stamp, or pin the accepted policy digests (deployment-class)",
+        "matched-workload stamp, or pin the accepted policy digests, or opt in to " +
+        "trustRouterCa (deployment-class)",
     );
   }
   if (policy.workloadName !== undefined) {

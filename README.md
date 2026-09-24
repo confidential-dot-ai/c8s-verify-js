@@ -47,7 +47,10 @@ anchor: the **mesh CA certificate** (`meshCaPem`), the **canonical allowlist
 document bytes** (`allowlist`) enforced against the mesh leaf's matched-workload
 stamp, or the **accepted policy digests** (`pinnedPolicies`) enforced against the
 attested rollout bound of a pinned-allowlist router (see PROTOCOL.md, "Rollout
-state and pinned allowlists"). It is reasonable to ask why measurement pins alone are not enough.
+state and pinned allowlists"). A caller who trusts the operator can instead set
+`trustRouterCa: true`: the mesh CA is taken from the transcript commitment, the
+verdict is deployment-class, and `allowlistBound` plus `fetchPolicy` give the
+attested policies without pinning any. It is reasonable to ask why measurement pins alone are not enough.
 
 The reason is identity. The CDS and LB images are open source and reproducible—
 that is what makes them auditable, but it also means a valid measurement only proves

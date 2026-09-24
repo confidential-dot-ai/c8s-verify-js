@@ -132,3 +132,27 @@ test("tdxImage passes through to the verification policy", () => {
   });
   assert.deepEqual(client.policy.tdxImage, tdxImage);
 });
+
+test("pinnedPolicies or an explicit trustRouterCa anchors a client", () => {
+  for (const anchor of [
+    { pinnedPolicies: [`sha256:${"a".repeat(64)}`] },
+    { trustRouterCa: true },
+  ]) {
+    new C8sClient({
+      baseUrl: "http://lb.test",
+      measurements: ["m"],
+      fetch: captureFetch([]),
+      ...anchor,
+    });
+  }
+  assert.throws(
+    () =>
+      new C8sClient({
+        baseUrl: "http://lb.test",
+        measurements: ["m"],
+        trustRouterCa: false,
+        fetch: captureFetch([]),
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
+});

@@ -84,7 +84,8 @@ export interface C8sClientOptions {
   requireFreshness?: boolean;
   /**
    * Mesh CA pinned out of band — the specific-cluster anchor. At least one of
-   * `meshCaPem`, `allowlist` and `pinnedPolicies` is required; several is fine.
+   * `meshCaPem`, `allowlist`, `pinnedPolicies` and `trustRouterCa` is
+   * required; several is fine.
    *
    * Multiple PEM blocks mean *each block is independently trusted* as an
    * anchor: the identity proof selects whichever one it names. That is
@@ -110,6 +111,8 @@ export interface C8sClientOptions {
   workloadName?: string;
   /** Accepted policy digests; see {@link VerifyPolicy.pinnedPolicies}. */
   pinnedPolicies?: string[];
+  /** Verify with no pinned anchor; see {@link VerifyPolicy.trustRouterCa}. */
+  trustRouterCa?: boolean;
   at?: Date;
   fetch?: typeof fetch;
   wellKnownPrefix?: string;
@@ -207,12 +210,14 @@ export class C8sClient {
     // at construction, not at the first connection.
     const hasPem = typeof opts.meshCaPem === "string" && opts.meshCaPem.trim() !== "";
     const hasAllowlist = opts.allowlist !== undefined && opts.allowlist.length > 0;
-    if (!hasPem && !hasAllowlist) {
+    const hasPins = opts.pinnedPolicies !== undefined && opts.pinnedPolicies.length > 0;
+    if (!hasPem && !hasAllowlist && !hasPins && opts.trustRouterCa !== true) {
       throw new C8sVerifyError(
         "invalid_request",
         "verification requires an anchor: pass meshCaPem to pin the mesh CA out of band " +
-          "(specific-cluster), or allowlist with the exact canonical allowlist bytes to enforce " +
-          "against the mesh leaf's matched-workload stamp (deployment-class), or both",
+          "(specific-cluster), allowlist with the exact canonical allowlist bytes to enforce " +
+          "against the mesh leaf's matched-workload stamp, pinnedPolicies, or opt in to " +
+          "trustRouterCa (deployment-class)",
       );
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
@@ -231,6 +236,7 @@ export class C8sClient {
       allowlist: opts.allowlist,
       workloadName: opts.workloadName,
       pinnedPolicies: opts.pinnedPolicies,
+      trustRouterCa: opts.trustRouterCa,
       at: opts.at,
       expectedRtmr3: opts.expectedRtmr3,
       tdxImage: opts.tdxImage,
