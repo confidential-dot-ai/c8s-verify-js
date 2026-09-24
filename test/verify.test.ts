@@ -845,3 +845,47 @@ test("verifyAttestation refuses a partial or malformed tuple with invalid_reques
     );
   }
 });
+
+const ROLLOUT = {
+  protocol: 1,
+  authority: "sha256:aa",
+  position: 3,
+  head: "sha256:bb",
+  allowlist_version: "4",
+  policy: `sha256:${"c".repeat(64)}`,
+  bound: [`sha256:${"c".repeat(64)}`],
+  lease_seconds: 30,
+};
+
+test("verifies a bundle whose transcript commits the rollout state", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { rollout: ROLLOUT });
+  const result = await verifyAttestation(bundle, nonce, policy(meshCaPem));
+  // Recorded evidence is not report_data-bound, so the bound is not claimed.
+  assert.equal(result.allowlistBound, undefined);
+});
+
+test("rejects a rollout state the mesh CA did not sign", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { rollout: ROLLOUT });
+  const sig = base64ToBytes(bundle.cds_state!.signature);
+  sig[sig.length - 1] ^= 0x01;
+  bundle.cds_state!.signature = bytesToBase64(sig);
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rollout_state_invalid",
+  );
+});
+
+test("pinned policies require a report_data-bound rollout state", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, { rollout: ROLLOUT });
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem, { pinnedPolicies: ROLLOUT.bound })),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rollout_state_invalid",
+  );
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem, { pinnedPolicies: ["sha256:x"] })),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
+});

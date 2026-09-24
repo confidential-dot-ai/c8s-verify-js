@@ -60,6 +60,8 @@ export type { MatchedWorkload, AllowlistDocument, AllowlistWorkload } from "./wo
 // The TDX image pin: parse a published build-artifact manifest into the
 // mrtd+rtmr1+rtmr2 tuple `tdxImage` enforces.
 export { parseImageManifest } from "./manifest.js";
+export { fetchPolicy } from "./rollout.js";
+export type { RolloutState, SignedRolloutState } from "./rollout.js";
 export type { TdxImage } from "./manifest.js";
 export { decodePEM, decodeOnePEM, encodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
@@ -82,7 +84,7 @@ export interface C8sClientOptions {
   requireFreshness?: boolean;
   /**
    * Mesh CA pinned out of band — the specific-cluster anchor. At least one of
-   * `meshCaPem` and `allowlist` is required; both together is fine.
+   * `meshCaPem`, `allowlist` and `pinnedPolicies` is required; several is fine.
    *
    * Multiple PEM blocks mean *each block is independently trusted* as an
    * anchor: the identity proof selects whichever one it names. That is
@@ -106,6 +108,8 @@ export interface C8sClientOptions {
    * provides.
    */
   workloadName?: string;
+  /** Accepted policy digests; see {@link VerifyPolicy.pinnedPolicies}. */
+  pinnedPolicies?: string[];
   at?: Date;
   fetch?: typeof fetch;
   wellKnownPrefix?: string;
@@ -226,6 +230,7 @@ export class C8sClient {
       meshCaPem: hasPem ? opts.meshCaPem : undefined,
       allowlist: opts.allowlist,
       workloadName: opts.workloadName,
+      pinnedPolicies: opts.pinnedPolicies,
       at: opts.at,
       expectedRtmr3: opts.expectedRtmr3,
       tdxImage: opts.tdxImage,

@@ -23,6 +23,14 @@ import {
   resolveWorkload,
 } from "./workload.js";
 import { requireTdxImage, type TdxImage } from "./manifest.js";
+import {
+  enforcePolicyPins,
+  rolloutStateBytes,
+  stateDigest,
+  verifyRolloutState,
+  type RolloutState,
+  type SignedRolloutState,
+} from "./rollout.js";
 
 /**
  * Minimum SEV-SNP TCB floor: security patch levels (SPLs) the reported TCB
@@ -86,6 +94,14 @@ export interface VerifyPolicy {
    * enforced only after the chain check — which either anchor provides.
    */
   workloadName?: string;
+  /**
+   * Policy digests ("sha256:<hex>") the caller reviewed, pinned out of band.
+   * Every policy in the attested rollout bound must be one of them, and the
+   * router must fence on an activation lease. Serves as the trust anchor
+   * when `meshCaPem` is absent. Without it, the bound is only reported: fetch
+   * each policy with {@link fetchPolicy} to check it against its digest.
+   */
+  pinnedPolicies?: string[];
   /** validity reference time (default now) */
   at?: Date;
   /**
@@ -183,6 +199,8 @@ export interface AttestationBundle {
   /** The session identifier (base64url, 16 bytes), committed by report_data. */
   session_id: string;
   identity_proof: MeshIdentityProof;
+  /** CDS rollout state from a pinned-allowlist router, committed by the transcript. */
+  cds_state?: SignedRolloutState;
 }
 
 /** Claims block inside the WASM verifier's JSON result. */
@@ -262,6 +280,12 @@ export interface AttestationResult {
    * check passed; without a pin the stamp is not read at all.
    */
   workload?: WorkloadInfo;
+  /**
+   * Policy digests that may be running, from the verified, transcript-bound
+   * CDS rollout state. Present only when the bundle carried one and the
+   * report_data matched.
+   */
+  allowlistBound?: string[];
   /**
    * What the verdict identifies. `"specific-cluster"` iff `meshCaPem` was
    * pinned: the chain anchors to a CA the caller chose out of band.
@@ -543,6 +567,7 @@ interface PreparedIdentity {
   proof: MeshIdentityProof;
   transcript: Uint8Array;
   frontDoorMode: string;
+  rollout?: RolloutState;
 }
 
 function validatePolicy(policy: VerifyPolicy): void {
@@ -574,12 +599,25 @@ function validatePolicy(policy: VerifyPolicy): void {
       );
     }
   }
-  if (policy.meshCaPem === undefined && policy.allowlist === undefined) {
+  if (policy.pinnedPolicies !== undefined) {
+    if (
+      !Array.isArray(policy.pinnedPolicies) ||
+      policy.pinnedPolicies.length === 0 ||
+      !policy.pinnedPolicies.every((d) => typeof d === "string" && /^sha256:[0-9a-f]{64}$/.test(d))
+    ) {
+      fail("invalid_request", 'pinnedPolicies must be a non-empty list of "sha256:<64 hex>"');
+    }
+  }
+  if (
+    policy.meshCaPem === undefined &&
+    policy.allowlist === undefined &&
+    policy.pinnedPolicies === undefined
+  ) {
     fail(
       "identity_binding",
       "verification requires an anchor: pin meshCaPem out of band (specific-cluster), or pin " +
         "the exact canonical allowlist bytes to enforce against the mesh leaf's " +
-        "matched-workload stamp (deployment-class)",
+        "matched-workload stamp, or pin the accepted policy digests (deployment-class)",
     );
   }
   if (policy.workloadName !== undefined) {
@@ -785,6 +823,7 @@ async function prepareIdentity(
     }
   }
   const chain = await verifyCertChain(leafBlocks[0], selectedCA, { at: policy.at });
+  const stateBytes = rolloutStateBytes(bundle.cds_state);
   const transcript = await identityTranscriptHash(
     bundle.front_door_mode,
     keyExchange.xwingEk,
@@ -793,8 +832,19 @@ async function prepareIdentity(
     nonce,
     chain.leaf.der,
     chain.ca.der,
+    await stateDigest(stateBytes),
   );
-  return { chain, proof: bundle.identity_proof, transcript, frontDoorMode: bundle.front_door_mode };
+  const rollout =
+    stateBytes === undefined
+      ? undefined
+      : await verifyRolloutState(bundle.cds_state!, stateBytes, chain.ca, nonce);
+  return {
+    chain,
+    proof: bundle.identity_proof,
+    transcript,
+    frontDoorMode: bundle.front_door_mode,
+    rollout,
+  };
 }
 
 async function verifyHardwareAttestation(
@@ -1079,6 +1129,16 @@ export async function verifyAttestation(
   // only once steps 1–5 (versions, evidence, measurement, transcript, proof,
   // chain) have all passed.
   const workload = await verifyWorkloadPolicy(identity.chain.leaf, policy);
+  const identityBound = result.report_data_match === true;
+  if (policy.pinnedPolicies !== undefined) {
+    if (!identityBound) {
+      fail(
+        "rollout_state_invalid",
+        "pinned policies need the rollout state bound to report_data (requireFreshness)",
+      );
+    }
+    enforcePolicyPins(identity.rollout, policy.pinnedPolicies);
+  }
 
   // On TDX, MRTD covers only the TDVF firmware — the guest kernel and rootfs
   // live in RTMR[1]/RTMR[2] — so without the tdxImage tuple the measurement
@@ -1112,7 +1172,7 @@ export async function verifyAttestation(
     measurement,
     reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
-    identityBound: result.report_data_match === true,
+    identityBound,
     collateralVerified,
     keyAgreementContext: identity.transcript,
     keyExchange,
@@ -1120,6 +1180,9 @@ export async function verifyAttestation(
     cert: certInfo(identity.chain),
     claims: result.claims,
     workload,
+    ...(identityBound && identity.rollout !== undefined
+      ? { allowlistBound: identity.rollout.bound }
+      : {}),
     trustClass: policy.meshCaPem !== undefined ? "specific-cluster" : "deployment-class",
     ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
     warnings,

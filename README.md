@@ -42,10 +42,12 @@ model documents the separate assumptions and limitations of that internal hop.
 
 ## How the protocol binds cluster identity
 
-The client pins the **LB measurement** allowlist out of band, plus one of two
-anchors: the **mesh CA certificate** (`meshCaPem`), or the **canonical allowlist
+The client pins the **LB measurement** allowlist out of band, plus at least one
+anchor: the **mesh CA certificate** (`meshCaPem`), the **canonical allowlist
 document bytes** (`allowlist`) enforced against the mesh leaf's matched-workload
-stamp. It is reasonable to ask why measurement pins alone are not enough.
+stamp, or the **accepted policy digests** (`pinnedPolicies`) enforced against the
+attested rollout bound of a pinned-allowlist router (see PROTOCOL.md, "Rollout
+state and pinned allowlists"). It is reasonable to ask why measurement pins alone are not enough.
 
 The reason is identity. The CDS and LB images are open source and reproducible—
 that is what makes them auditable, but it also means a valid measurement only proves

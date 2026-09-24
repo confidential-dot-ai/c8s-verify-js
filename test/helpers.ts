@@ -1,12 +1,20 @@
 // Shared test helpers: load fixtures and build attestation bundles the way the
 // mock LB does, so verification tests can run without an HTTP server.
 
+import { sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { generateXWingKeyPair, xwingEncapsulate, type XWingKeyPair } from "../src/keyagreement.js";
-import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js";
+import {
+  bytesToBase64Url,
+  base64ToBytes,
+  bytesToBase64,
+  bytesToHex,
+  utf8ToBytes,
+} from "../src/base64.js";
+import { stateDigest, type RolloutState } from "../src/rollout.js";
 import type { AttestationBundle } from "../src/verify.js";
 import type { Evidence } from "../src/hcl.js";
 import { decodePEM } from "../src/pem.js";
@@ -93,6 +101,9 @@ export async function buildBundle(
     // test can serve a bundle whose advertised and committed modes disagree.
     frontDoorMode?: string;
     transcriptFrontDoorMode?: string;
+    // rollout adds a cds_state bound to the nonce, signed by the fixture CA
+    // and committed by the transcript.
+    rollout?: Omit<RolloutState, "nonce">;
   } = {},
 ): Promise<BuiltBundle> {
   const fixtures = await loadFixtures();
@@ -112,6 +123,9 @@ export async function buildBundle(
   }
 
   const frontDoorMode = opts.frontDoorMode ?? "cds";
+  const stateBytes = opts.rollout
+    ? utf8ToBytes(JSON.stringify({ ...opts.rollout, nonce: bytesToHex(nonce) }))
+    : undefined;
   const minted = await mintIdentityProof(
     opts.transcriptFrontDoorMode ?? frontDoorMode,
     clientKeyPair.ek,
@@ -121,6 +135,7 @@ export async function buildBundle(
     leafDer,
     caDer,
     leafKeyPem,
+    await stateDigest(stateBytes),
   );
   const bundle: AttestationBundle = {
     ...minted.bundleFields,
@@ -133,6 +148,16 @@ export async function buildBundle(
     xwing_ek: bytesToBase64Url(clientKeyPair.ek),
     xwing_ct: bytesToBase64Url(ct),
     session_id: bytesToBase64Url(sessionId),
+    ...(stateBytes
+      ? {
+          cds_state: {
+            state: bytesToBase64(stateBytes),
+            signature: bytesToBase64(
+              sign("sha384", stateBytes, { key: fixtures.caKeyPem, dsaEncoding: "der" }),
+            ),
+          },
+        }
+      : {}),
   };
   return {
     bundle,
