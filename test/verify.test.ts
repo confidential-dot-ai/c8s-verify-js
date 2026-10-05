@@ -332,6 +332,52 @@ test("verifyEvidence rejects missing options with a typed error", async () => {
   );
 });
 
+test("rejects a platform the verifier does not dispatch on", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const { snpEvidence } = await loadFixtures();
+  for (const platform of ["sev", "gcp-tdx", "SNP", " snp", ""]) {
+    await assert.rejects(
+      () => verifyAttestation(bundle, nonce, policy(meshCaPem, { platform })),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      platform,
+    );
+    await assert.rejects(
+      () =>
+        verifyEvidence(snpEvidence, {
+          platform,
+          generation: "genoa",
+          measurements: DEMO_MEASUREMENTS,
+        }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      platform,
+    );
+  }
+});
+
+test("rejects an at that is not a valid Date", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const { snpEvidence } = await loadFixtures();
+  for (const at of [new Date(Number.NaN), "2026-10-06T00:00:00Z", 1791244800, null]) {
+    await assert.rejects(
+      () => verifyAttestation(bundle, nonce, policy(meshCaPem, { at: at as Date })),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      String(at),
+    );
+    await assert.rejects(
+      () =>
+        verifyEvidence(snpEvidence, {
+          generation: "genoa",
+          measurements: DEMO_MEASUREMENTS,
+          at: at as Date,
+        }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      String(at),
+    );
+  }
+});
+
 // A multi-block meshCaPem means "each of these is independently trusted as an
 // anchor", and selectPinnedCA anchors to whichever one the proof names. That is
 // the documented contract, and also what a caller gets by accident if they pass

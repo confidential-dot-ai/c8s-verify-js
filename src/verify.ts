@@ -401,6 +401,28 @@ const SNP_PLATFORMS = new Set(["snp", "az-snp"]);
 /** How the SNP-only policy rules name the platforms they accept. */
 const SNP_PLATFORM_LIST = [...SNP_PLATFORMS].map((p) => JSON.stringify(p)).join(" | ");
 
+/**
+ * The platform tags the verifier dispatches on, compared exactly: anything
+ * else would fall through to the bare-SNP entry point.
+ */
+const ROUTED_PLATFORMS = new Set(["snp", "az-snp", "tdx", "az-tdx"]);
+
+function validatePlatform(platform: string): void {
+  if (!ROUTED_PLATFORMS.has(platform)) {
+    fail(
+      "invalid_request",
+      `unsupported platform ${JSON.stringify(platform)}: want one of ${[...ROUTED_PLATFORMS].map((p) => JSON.stringify(p)).join(" | ")}`,
+    );
+  }
+}
+
+/** A NaN Date would pass every validity window and serialize as null. */
+function validateAt(at: Date | undefined): void {
+  if (at !== undefined && !(at instanceof Date && Number.isFinite(at.getTime()))) {
+    fail("invalid_request", "at must be a valid Date");
+  }
+}
+
 /** An SPL component: an integer in a u8's range. */
 function isSpl(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 255;
@@ -641,6 +663,8 @@ function validatePolicy(policy: VerifyPolicy): void {
   if (!policy) {
     fail("invalid_request", "verification policy is required");
   }
+  validatePlatform(policy.platform ?? "snp");
+  validateAt(policy.at);
   // The required anchor: a mesh CA pinned out of band, OR canonical allowlist
   // bytes enforced against the stamp on the derived-CA chain. Both together is
   // fine (specific-cluster plus policy skew detection); neither leaves the
@@ -1354,6 +1378,8 @@ export async function verifyEvidence(
   }
   const warnings: string[] = [];
   const wantPlatform = opts.platform ?? "snp";
+  validatePlatform(wantPlatform);
+  validateAt(opts.at);
   const isAzSnp = wantPlatform === "az-snp";
   const isAzTdx = wantPlatform === "az-tdx";
   const isTdx = wantPlatform === "tdx";

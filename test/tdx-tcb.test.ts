@@ -142,6 +142,18 @@ test("TCB policies the verifier could not enforce are refused upfront", async ()
   }
 });
 
+test("an invalid verification time is refused, not serialized as null", async () => {
+  await assert.rejects(
+    verifyEvidence(await evidence(), {
+      platform: "tdx",
+      tdxImage: TDX_IMAGE,
+      tdxCollateral: await collateral(),
+      at: new Date("not a date"),
+    }),
+    code("invalid_request"),
+  );
+});
+
 test("verifyAttestation surfaces the TCB status on the result", async () => {
   const nonce = generateNonce();
   const { bundle, meshCaPem } = await buildBundle(nonce, {
