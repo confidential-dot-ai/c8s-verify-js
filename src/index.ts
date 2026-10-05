@@ -70,7 +70,8 @@ const WELL_KNOWN = "/.well-known/c8s";
 
 export interface C8sClientOptions {
   baseUrl: string;
-  measurements: string[];
+  /** Accepted launch digests (hex SHA-384). Required unless `tdxImage` is set; mutually exclusive with it. */
+  measurements?: string[];
   platform?: string;
   /**
    * SEV-SNP processor generation ("milan" | "genoa" | "turin"), pinned out of
@@ -124,8 +125,9 @@ export interface C8sClientOptions {
    * with the image build (feed the manifest file to `parseImageManifest`).
    * `measurements` alone pins only MRTD — the TDVF firmware — while the guest
    * kernel and rootfs land in RTMR[1]/RTMR[2], so only the tuple identifies
-   * the image. Required for a TDX deployment-class verdict (no `meshCaPem`);
-   * strongly recommended otherwise. Requires `platform: "tdx"`.
+   * the image. Replaces `measurements`. Required for a TDX deployment-class
+   * verdict (no `meshCaPem`); strongly recommended otherwise. Requires a TDX
+   * platform.
    */
   tdxImage?: TdxImage;
   /**

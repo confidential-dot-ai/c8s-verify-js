@@ -130,7 +130,6 @@ test("verifyEvidence(platform:az-tdx) denies a wrong RTMR[1] even though MRTD ma
   await assert.rejects(
     verifyEvidence(await tdxEvidence(), {
       platform: "az-tdx",
-      measurements: [TDX_MRTD],
       tdxImage: { ...AZ_TDX_IMAGE, rtmr1: "ff".repeat(48) },
     }),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr_denied",

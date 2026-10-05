@@ -39,8 +39,12 @@ export interface SnpMinTcb {
 }
 
 export interface VerifyPolicy {
-  /** accepted launch digests (hex sha-384) */
-  measurements: string[];
+  /**
+   * Accepted launch digests (hex SHA-384). Required unless `tdxImage` is set;
+   * the two are mutually exclusive.
+   */
+  measurements?: string[];
+
   /** default "snp"; also "az-snp" | "az-tdx" | "tdx" (bare-metal Intel TDX) */
   platform?: string;
   /**
@@ -113,10 +117,12 @@ export interface VerifyPolicy {
    * each exactly 96 lowercase hex chars, published with the image build (feed
    * a manifest file to {@link parseImageManifest}). `measurements` alone pins
    * only MRTD, which covers the TDVF firmware — the guest kernel and rootfs
-   * land in RTMR[1]/RTMR[2], so only the tuple identifies the image. The
-   * tuple's `mrtd` joins the `measurements` allowlist and `rtmr1`/`rtmr2` are
-   * compared exactly against the verified claims. All three registers or
-   * none: a partial tuple is rejected rather than partially enforced.
+   * land in RTMR[1]/RTMR[2], so only the tuple identifies the image. All three
+   * registers are compared exactly against the verified claims, and the tuple
+   * replaces `measurements` rather than adding to it: a separate launch-digest
+   * list could only admit an image the tuple does not describe, so passing
+   * both is rejected. All three registers or none: a partial tuple is
+   * rejected rather than partially enforced.
    *
    * Required for a TDX deployment-class verdict (no `meshCaPem`), where the
    * measurement policy is the entire anchor; with a pinned mesh CA it is
@@ -477,7 +483,7 @@ const CLAIM_REGISTER_HEX = /^[0-9a-f]{96}$/;
 
 /**
  * Enforce the RTMR[1]/RTMR[2] half of a TDX image pin against the VERIFIED
- * claims (the tuple's MRTD is enforced through the launch-digest allowlist
+ * claims (the tuple's MRTD is enforced as the only accepted launch digest
  * instead). Register-exact lowercase-hex comparison; an absent or malformed
  * claim fails closed — a claim that cannot be compared must never read as a
  * pin that held. Returns the `rtmrsPinned` entries ("<idx>:<hex>") recorded on
@@ -545,12 +551,38 @@ interface PreparedIdentity {
   frontDoorMode: string;
 }
 
-function validatePolicy(policy: VerifyPolicy): void {
-  if (!policy || !Array.isArray(policy.measurements) || policy.measurements.length === 0) {
-    fail("invalid_request", "verification requires a non-empty measurement allowlist");
+/**
+ * The launch digests a verdict accepts. `tdxImage` and `measurements` are
+ * mutually exclusive, as in the c8s and TEErminator verifiers: the tuple pins
+ * MRTD exactly, so a second list could only admit a firmware the tuple's
+ * RTMR[1]/RTMR[2] were never measured under. An empty result means no pin.
+ */
+function acceptedMeasurements(
+  measurements: string[] | undefined,
+  tdxImage: TdxImage | undefined,
+): string[] {
+  if (measurements !== undefined) {
+    if (
+      !Array.isArray(measurements) ||
+      !measurements.every((measurement) => typeof measurement === "string")
+    ) {
+      fail("invalid_request", "measurements must be an array of hex strings");
+    }
+    if (tdxImage !== undefined && measurements.length > 0) {
+      fail(
+        "invalid_request",
+        "measurements and tdxImage are mutually exclusive: the tuple pins MRTD, RTMR[1] and " +
+          "RTMR[2] exactly against one build, so a separate launch-digest list could only " +
+          "admit an image it does not describe",
+      );
+    }
   }
-  if (!policy.measurements.every((measurement) => typeof measurement === "string")) {
-    fail("invalid_request", "measurement allowlist entries must be strings");
+  return tdxImage !== undefined ? [tdxImage.mrtd] : (measurements ?? []);
+}
+
+function validatePolicy(policy: VerifyPolicy): void {
+  if (!policy) {
+    fail("invalid_request", "verification policy is required");
   }
   // The required anchor: a mesh CA pinned out of band, OR canonical allowlist
   // bytes enforced against the stamp on the derived-CA chain. Both together is
@@ -634,6 +666,12 @@ function validatePolicy(policy: VerifyPolicy): void {
       );
     }
     requireTdxImage("tdxImage", policy.tdxImage);
+  }
+  if (acceptedMeasurements(policy.measurements, policy.tdxImage).length === 0) {
+    fail(
+      "invalid_request",
+      "verification requires a non-empty measurement allowlist, or tdxImage on TDX",
+    );
   }
   validateSnpPolicy(
     policy.platform ?? "snp",
@@ -1051,13 +1089,11 @@ export async function verifyAttestation(
     policy.requireCollateral,
     warnings,
   );
-  // The image tuple's MRTD is an accepted launch digest alongside the
-  // explicit allowlist; RTMR[1]/[2] are compared exactly below.
+  // With an image tuple its MRTD is the only accepted launch digest;
+  // RTMR[1]/[2] are compared exactly below.
   const measurement = verifyMeasurement(
     result,
-    policy.tdxImage === undefined
-      ? policy.measurements
-      : [...policy.measurements, policy.tdxImage.mrtd],
+    acceptedMeasurements(policy.measurements, policy.tdxImage),
   );
   const rtmrsPinned: string[] = [];
   if (policy.tdxImage !== undefined) {
@@ -1142,8 +1178,12 @@ export interface VerifyEvidenceOptions {
    * (auto-detected from CPUID) and the TDX platforms
    */
   generation?: string;
-  /** accepted launch digests (hex sha-384); empty = warn only */
+  /**
+   * accepted launch digests (hex sha-384); empty = warn only. Mutually
+   * exclusive with `tdxImage`.
+   */
   measurements?: string[];
+
   /**
    * raw bytes the freshness anchor must equal (e.g. SHA-384(pubkey ‖ nonce));
    * when provided, a mismatch fails closed. For "snp" and "tdx" this is the
@@ -1166,9 +1206,9 @@ export interface VerifyEvidenceOptions {
   /**
    * The complete TDX guest-image pin (mrtd + rtmr1 + rtmr2, each 96 lowercase
    * hex chars; see {@link VerifyPolicy.tdxImage} and `parseImageManifest`).
-   * The tuple's `mrtd` joins the `measurements` allowlist and `rtmr1`/`rtmr2`
-   * are compared exactly; a mismatch or an uncomparable claim fails closed.
-   * Requires `platform: "tdx"`.
+   * All three registers are compared exactly and the tuple replaces
+   * `measurements`; a mismatch or an uncomparable claim fails closed.
+   * Requires a TDX platform.
    */
   tdxImage?: TdxImage;
   /** Minimum SEV-SNP TCB floor; see {@link VerifyPolicy.minTcb}. SNP only. */
@@ -1257,6 +1297,7 @@ export async function verifyEvidence(
     }
     requireTdxImage("tdxImage", opts.tdxImage);
   }
+  const allow = acceptedMeasurements(opts.measurements, opts.tdxImage).map((m) => m.toLowerCase());
   validateSnpPolicy(wantPlatform, opts.minTcb, opts.snpCrl, opts.requireCollateral);
   const expected = opts.expectedReportData;
 
@@ -1337,11 +1378,8 @@ export async function verifyEvidence(
     enforceRegisterPin(result, 3, "deployment identity", bytesToHex(wantRtmr3), "rtmr3_denied");
   }
 
-  // Measurement allowlist (case-insensitive hex). The image tuple's MRTD is
-  // an accepted launch digest alongside the explicit allowlist.
+  // Measurement allowlist (case-insensitive hex), or the image tuple's MRTD.
   const measurement = String(result.claims.launch_digest).toLowerCase();
-  const allow = (opts.measurements ?? []).map((m) => m.toLowerCase());
-  if (opts.tdxImage !== undefined) allow.push(opts.tdxImage.mrtd);
   if (allow.length === 0) {
     warnings.push("no measurement allowlist provided — launch digest was not checked");
   } else if (!allow.includes(measurement)) {

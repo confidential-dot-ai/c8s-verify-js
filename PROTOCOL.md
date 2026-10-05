@@ -333,9 +333,10 @@ into RTMR[2] — so a complete image pin is the tuple **MRTD + RTMR[1] +
 RTMR[2]** from one image-build manifest (a JSON object with `mrtd`, `rtmr1`,
 `rtmr2`, each exactly 96 lowercase hex chars; all three required, unknown
 extra fields allowed). The policy layer (`tdxImage`, or `parseImageManifest`
-over the manifest file) folds the tuple's MRTD into the launch-digest
-allowlist and compares `rtmr1`/`rtmr2` exactly against the verified claims,
-failing closed on a mismatch or an absent/malformed claim. A
+over the manifest file) accepts the tuple's MRTD as the only launch digest
+(the tuple and a `measurements` list are mutually exclusive) and compares
+`rtmr1`/`rtmr2` exactly against the verified claims, failing closed on a
+mismatch or an absent/malformed claim. A
 deployment-class verdict rejects an MRTD-only TDX measurement policy; with a
 pinned mesh CA the gap is a prominent warning instead. SEV-SNP needs no
 equivalent: its launch measurement covers the full image, and the platform

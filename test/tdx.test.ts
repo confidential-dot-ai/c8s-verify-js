@@ -280,6 +280,20 @@ test("a wrong RTMR[1] or RTMR[2] fails with rtmr_denied even when MRTD matches",
     );
   }
 });
+test("verifyEvidence refuses tdxImage next to a measurements list", async () => {
+  const { evidence } = await tdxBundle();
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "tdx",
+      measurements: ["ab".repeat(48)],
+      tdxImage: TDX_IMAGE,
+    }),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "invalid_request" &&
+      e.message.includes("mutually exclusive"),
+  );
+});
 
 // All three registers or none: a partial tuple would silently verify only
 // part of the image, so it is refused up front — as are bad hex, uppercase
