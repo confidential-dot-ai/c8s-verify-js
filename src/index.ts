@@ -10,6 +10,7 @@
 //   console.log(session.attestation.measurement);
 //   const res = await session.fetch("/v1/chat", { method: "POST", body: "..." });
 
+import { enforceOperatorSignatures } from "./rollout.js";
 import { generateNonce } from "./nonce.js";
 import {
   verifyAttestation,
@@ -60,6 +61,13 @@ export type { MatchedWorkload, AllowlistDocument, AllowlistWorkload } from "./wo
 // The TDX image pin: parse a published build-artifact manifest into the
 // mrtd+rtmr1+rtmr2 tuple `tdxImage` enforces.
 export { parseImageManifest } from "./manifest.js";
+export {
+  enforceOperatorSignatures,
+  fetchPolicy,
+  operatorKeySetHash,
+  verifyWriteToken,
+} from "./rollout.js";
+export type { RolloutState, SignedRolloutState } from "./rollout.js";
 export type { TdxImage } from "./manifest.js";
 export { decodePEM, decodeOnePEM, encodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
@@ -82,7 +90,8 @@ export interface C8sClientOptions {
   requireFreshness?: boolean;
   /**
    * Mesh CA pinned out of band — the specific-cluster anchor. At least one of
-   * `meshCaPem` and `allowlist` is required; both together is fine.
+   * `meshCaPem`, `allowlist`, `pinnedPolicies` and `trustRouterCa` is
+   * required; several is fine.
    *
    * Multiple PEM blocks mean *each block is independently trusted* as an
    * anchor: the identity proof selects whichever one it names. That is
@@ -106,6 +115,16 @@ export interface C8sClientOptions {
    * provides.
    */
   workloadName?: string;
+  /** Accepted policy digests; see {@link VerifyPolicy.pinnedPolicies}. */
+  pinnedPolicies?: string[];
+  /** Require an immutable allowlist; see {@link VerifyPolicy.immutable}. */
+  immutable?: boolean;
+  /** Accept operator-signed policies; see {@link VerifyPolicy.trustOperator}. */
+  trustOperator?: boolean;
+  /** Pinned operator key set; see {@link VerifyPolicy.operatorKeysPem}. */
+  operatorKeysPem?: string;
+  /** Verify with no pinned anchor; see {@link VerifyPolicy.trustRouterCa}. */
+  trustRouterCa?: boolean;
   at?: Date;
   fetch?: typeof fetch;
   wellKnownPrefix?: string;
@@ -203,12 +222,20 @@ export class C8sClient {
     // at construction, not at the first connection.
     const hasPem = typeof opts.meshCaPem === "string" && opts.meshCaPem.trim() !== "";
     const hasAllowlist = opts.allowlist !== undefined && opts.allowlist.length > 0;
-    if (!hasPem && !hasAllowlist) {
+    const hasPins = opts.pinnedPolicies !== undefined && opts.pinnedPolicies.length > 0;
+    if (
+      !hasPem &&
+      !hasAllowlist &&
+      !hasPins &&
+      opts.trustOperator !== true &&
+      opts.trustRouterCa !== true
+    ) {
       throw new C8sVerifyError(
         "invalid_request",
         "verification requires an anchor: pass meshCaPem to pin the mesh CA out of band " +
-          "(specific-cluster), or allowlist with the exact canonical allowlist bytes to enforce " +
-          "against the mesh leaf's matched-workload stamp (deployment-class), or both",
+          "(specific-cluster), allowlist with the exact canonical allowlist bytes to enforce " +
+          "against the mesh leaf's matched-workload stamp, pinnedPolicies, or opt in to " +
+          "trustRouterCa (deployment-class)",
       );
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
@@ -226,6 +253,11 @@ export class C8sClient {
       meshCaPem: hasPem ? opts.meshCaPem : undefined,
       allowlist: opts.allowlist,
       workloadName: opts.workloadName,
+      pinnedPolicies: opts.pinnedPolicies,
+      immutable: opts.immutable,
+      trustOperator: opts.trustOperator,
+      operatorKeysPem: opts.operatorKeysPem,
+      trustRouterCa: opts.trustRouterCa,
       at: opts.at,
       expectedRtmr3: opts.expectedRtmr3,
       tdxImage: opts.tdxImage,
@@ -270,6 +302,21 @@ export class C8sClient {
     const keyPair = await generateXWingKeyPair();
     const bundle = await this.fetchAttestation(nonce, keyPair);
     const attestation = await verifyAttestation(bundle, nonce, this.policy, keyPair.ek);
+    if (this.policy.trustOperator === true) {
+      if (attestation.rollout === undefined) {
+        throw new C8sVerifyError(
+          "rollout_state_invalid",
+          "trustOperator needs a router serving the CDS rollout state bound to report_data",
+        );
+      }
+      await enforceOperatorSignatures(
+        attestation.rollout,
+        attestation.measuredPolicies ?? [],
+        this.baseUrl,
+        this.fetch,
+        this.policy.operatorKeysPem,
+      );
+    }
 
     const sharedSecret = await xwingDecapsulate(keyPair, attestation.keyExchange.xwingCt);
     const channel = await deriveChannel(

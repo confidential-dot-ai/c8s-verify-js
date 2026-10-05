@@ -164,6 +164,10 @@ Response is `application/json`:
     "leaf_sha256": "<b64url SHA-256 of leaf DER>",
     "mesh_ca_sha256": "<b64url SHA-256 of issuing CA DER>",
     "signature": "<b64url ASN.1 DER ECDSA signature>"
+  },
+  "cds_state": {                                     // optional; pinned-allowlist routers only
+    "state": "<std base64 of the exact rollout-state JSON bytes>",
+    "signature": "<std base64 ASN.1 DER ECDSA-SHA384 over those bytes, by the mesh CA key>"
   }
 }
 ```
@@ -201,6 +205,7 @@ transcript = LP("c8s-verify/v1")
           || LP(xwing_ct(1120))
           || LP(session_id(16))
           || LP(nonce(32))
+        [ || LP(state_digest) ]        // SHA-384(cds_state bytes)(48), only with cds_state
 
 transcript_hash = SHA-384(transcript)
 report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
@@ -211,6 +216,18 @@ the client's encapsulation key or the server's ciphertext anywhere on the path
 changes `transcript_hash` and therefore fails the hardware `report_data`
 match, the proof-of-possession signature, and the key schedule (whose salt is
 `transcript_hash`) simultaneously.
+
+`state_digest` commits the exact decoded `cds_state.state` bytes, so the
+rollout state is part of the hardware-bound `report_data`, not only of the
+mesh CA's signature. A bundle without `cds_state` omits the field and hashes
+as it did before the field existed. The attest-lb transcript (c8s
+`LBTranscriptHash`) ends with the same optional field.
+
+CDS signs `cds_state` as SHA-384 of `"c8s/rollout-state-challenge/v1"`, a
+zero byte and the state bytes. The state carries `issued_at` and `expires_at`
+(Unix seconds, 60 s apart); a client refuses a state outside that window,
+allowing 2 minutes of clock skew. `operator_keys` is the hash of the key set
+that may write the allowlist, or `"none"` for an immutable allowlist.
 
 The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
 is deliberately unchanged by the endpoint move (as are the HKDF info string and
@@ -611,6 +628,59 @@ seals the backend's response back to the client. The over-encryption therefore
 terminates inside the LB enclave; the LB↔backend hop rides raTLS; the client gets
 end-to-end confidentiality to the enclave regardless of the outer TLS terminator.
 
+## Rollout state and pinned allowlists
+
+A router with `router.attest.pinnedAllowlist` adds `cds_state` to every
+bundle. The decoded `state` bytes are this JSON object:
+
+```jsonc
+{
+  "protocol": 1,
+  "authority": "sha256:<hex>",        // SHA-256 of the mesh CA key's SubjectPublicKeyInfo
+  "position": 3,                      // journal position of head
+  "head": "sha256:<hex>",             // digest of the newest journal event
+  "allowlist_version": "4",
+  "policy": "sha256:<hex>",           // newest published policy
+  "bound": ["sha256:<hex>", ...],     // every policy that may be running
+  "pending": "sha256:<hex>",          // optional: published, not yet enforced
+  "lease_seconds": 30,                // activation lease; 0 means no session fence
+  "nonce": "<hex of the request nonce>"
+}
+```
+
+A client that takes the state MUST verify the signature over the exact
+decoded bytes against the transcript-committed mesh CA key, and MUST require
+`nonce` to equal the hex of its own nonce. It then chooses one of two options
+per attested value:
+
+- **Pin out of band.** The caller supplies the policy digests it reviewed.
+  Every digest in `bound` MUST be pinned, and `lease_seconds` MUST be
+  positive; `report_data` MUST match, since only then is the state attested.
+- **Take it from the router.** The caller reads `bound` and fetches each
+  policy from `GET /.well-known/c8s/objects/sha256/<hex>`, keeping the bytes
+  only when their SHA-256 is that digest.
+
+The mesh CA follows the same rule: pin it (`meshCaPem`), or derive it from
+the served chain by the transcript commitment. A client that pins no anchor at
+all MUST opt in explicitly (`trustRouterCa` here); its verdict rests on the
+measurement pins and names the CA as responder-chosen.
+
+The router also serves, through its RA-TLS-verified CDS proxy:
+
+| Route | Returns |
+|---|---|
+| `GET /.well-known/c8s/objects/sha256/<hex>` | Exact bytes of a policy or journal event |
+| `GET /.well-known/c8s/allowlist/latest` | `{"allowlist_version", "policy"}` |
+| `GET /.well-known/c8s/state` | Signed state without a nonce, same shape as `cds_state` |
+| `POST /.well-known/c8s/state/challenge` | `{"nonce":"<hex>"}` in, nonce-bound signed state out |
+
+A pinned-allowlist router fences traffic on the state. It closes an attest-pq
+session once `bound` holds a digest outside the bound it was opened under, and
+answers 503 on an attest-lb connection opened before the bound last widened.
+It serves nothing while its last state read is older than `lease_seconds`. A
+client that sees its session vanish or a 503 re-attests on a new connection
+and re-checks `bound`.
+
 ## Failure handling
 
 The client MUST fail closed. Typed errors (mirroring c8s error codes) include:
@@ -626,13 +696,19 @@ The workload policy adds `workload_not_attested` (no stamp while a
 workload/allowlist pin is set), `workload_invalid` (malformed or duplicated
 stamp), `workload_denied` (stamped name differs from the pin),
 `workload_unresolved` (stamped name absent from the held document) and
-`allowlist_denied` (stamped digest differs from the held canonical bytes).
+`allowlist_denied` (stamped digest differs from the held canonical bytes, or a
+fetched policy does not hash to its digest). The rollout state adds
+`rollout_state_invalid` (absent where pinned policies need it, malformed, not
+signed by the mesh CA, bound to another nonce, not `report_data`-bound, or
+without an activation lease) and `policy_not_pinned` (a policy in `bound` is
+not pinned).
 `_denied` means a check ran and failed; `_not_attested` means the leaf never
 carried the stamp, which is a lifecycle state rather than an attack.
 
 Any failure aborts before the over-encryption channel is established. The policy
-rejects an empty measurement allowlist, the absence of both anchors (a mesh-CA
-pin and pinned allowlist bytes), or any version other than `c8s/attest-pq/v1` —
+rejects an empty measurement allowlist, the absence of every anchor (a mesh-CA
+pin, pinned allowlist bytes, pinned policy digests, or the explicit
+`trustRouterCa` opt-in), or any version other than `c8s/attest-pq/v1` —
 including `c8s/attest-lb/v1` and the retired `c8s-verify/v1`. Freshness
 enforcement defaults to true; the recorded-evidence demo explicitly disables it
 and reports that downgrade as a warning.

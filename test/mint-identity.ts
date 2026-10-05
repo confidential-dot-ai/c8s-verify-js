@@ -40,6 +40,7 @@ export async function mintIdentityProof(
   leafDer: Uint8Array,
   caDer: Uint8Array,
   leafKeyPem: string,
+  stateDigest?: Uint8Array,
 ): Promise<MintedIdentityProof> {
   const transcript = await identityTranscriptHash(
     frontDoorMode,
@@ -49,6 +50,7 @@ export async function mintIdentityProof(
     nonce,
     leafDer,
     caDer,
+    stateDigest,
   );
   const proof: MeshIdentityProof = {
     algorithm: IDENTITY_PROOF_ALGORITHM,

@@ -67,6 +67,12 @@ export type C8sErrorCode =
   // bytes: CDS decided the match under a different policy document than the
   // one the caller holds.
   | "allowlist_denied"
+  // The bundle's CDS rollout state is absent where pinned policies need it,
+  // malformed, not signed by the mesh CA, or bound to another nonce.
+  | "rollout_state_invalid"
+  // The rollout state is genuine, but a policy that may be running is not in
+  // the caller's pinned set.
+  | "policy_not_pinned"
   | "unsupported";
 
 export interface C8sErrorOptions {

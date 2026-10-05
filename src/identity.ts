@@ -55,7 +55,8 @@ async function sha256(input: Uint8Array): Promise<Uint8Array> {
  * Compute the v1 report_data transcript shared with c8s/pkg/overenc. It
  * commits the front-door mode and the complete key exchange — the client's
  * X-Wing encapsulation key, the server's ciphertext, the session id, and the
- * nonce — plus the exact mesh leaf and issuing mesh CA.
+ * nonce — plus the exact mesh leaf and issuing mesh CA, and last, only when
+ * the bundle carries a CDS rollout state, the SHA-384 of its bytes.
  */
 export async function identityTranscriptHash(
   frontDoorMode: string,
@@ -65,6 +66,7 @@ export async function identityTranscriptHash(
   nonce: Uint8Array,
   leafDer: Uint8Array,
   caDer: Uint8Array,
+  stateDigest: Uint8Array = new Uint8Array(0),
 ): Promise<Uint8Array> {
   if (frontDoorMode === "") {
     fail("identity_binding", "identity transcript requires a front-door mode");
@@ -96,6 +98,12 @@ export async function identityTranscriptHash(
   if (leafDer.length === 0 || caDer.length === 0) {
     fail("identity_binding", "identity transcript requires leaf and CA certificates");
   }
+  if (stateDigest.length !== 0 && stateDigest.length !== IDENTITY_TRANSCRIPT_BYTES) {
+    fail(
+      "identity_binding",
+      `identity transcript state digest must be empty or ${IDENTITY_TRANSCRIPT_BYTES} bytes, got ${stateDigest.length}`,
+    );
+  }
 
   // Most-stable fields first so a signer can reuse the hash state across sessions.
   const encoded = concatBytes(
@@ -107,6 +115,9 @@ export async function identityTranscriptHash(
     lengthPrefixed(xwingCt),
     lengthPrefixed(sessionId),
     lengthPrefixed(nonce),
+    // Present only with a state, so a bundle without one hashes as before the
+    // field existed.
+    stateDigest.length > 0 ? lengthPrefixed(stateDigest) : new Uint8Array(0),
   );
   return new Uint8Array(await subtle().digest("SHA-384", encoded));
 }
