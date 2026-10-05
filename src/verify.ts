@@ -1300,7 +1300,10 @@ export interface VerifyEvidenceOptions {
   tdxCollateral?: TdxCollateral;
   /** Accepted TDX TCB statuses; see {@link VerifyPolicy.tdxTcbStatuses}. */
   tdxTcbStatuses?: TdxTcbStatus[];
-  /** Time `tdxCollateral` must be current at (default now). */
+  /**
+   * Time `tdxCollateral` must be current at (default now). Intel certificate
+   * validity is checked against the current time regardless.
+   */
   at?: Date;
   /**
    * Require the revocation collateral to be verified for the verdict to

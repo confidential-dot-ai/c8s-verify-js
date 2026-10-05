@@ -498,9 +498,9 @@ too unless `collateralJson` carries Intel PCS v4 collateral:
 ```jsonc
 {
   "tcb_info": "<body of GET /tdx/certification/v4/tcb?fmspc=…, verbatim>",
-  "tcb_info_issuer_chain": "<PEM, TCB-Info-Issuer-Chain header>",
+  "tcb_info_issuer_chain": "<PEM, TCB-Info-Issuer-Chain header, URL-decoded>",
   "qe_identity": "<body of GET /tdx/certification/v4/qe/identity, verbatim>",
-  "qe_identity_issuer_chain": "<PEM, SGX-Enclave-Identity-Issuer-Chain header>",
+  "qe_identity_issuer_chain": "<PEM, SGX-Enclave-Identity-Issuer-Chain header, URL-decoded>",
   "pck_crl": "<base64 DER or PEM PCK CRL of the PCK certificate's issuing CA>",
   "root_ca_crl": "<base64 DER or PEM Intel SGX Root CA CRL>",
   "at": 1791244800 // verification time, Unix seconds
@@ -509,8 +509,9 @@ too unless `collateralJson` carries Intel PCS v4 collateral:
 
 The verifier requires Intel's signature on both JSON bodies, `id: "TDX"` and
 the quote's FMSPC on the TCB Info, `id: "TD_QE"` on the QE Identity, both
-CRLs signed by the quote's verified PCK chain, and every item current at
-`at`. It then checks PCK revocation and the QE identity and evaluates the TCB
+CRLs signed by the quote's verified PCK chain, and the TCB Info, QE Identity
+and both CRLs current at `at`; certificate validity (the PCK chain and both
+issuer chains) is checked against the current time. It then checks PCK revocation and the QE identity and evaluates the TCB
 status. On success `collateral_verified` is true and `tcb_status` is
 `{ "tcb_status": "UpToDate" | …, "fmspc": "<hex>", "advisory_ids": [...] }`;
 a collateral failure throws with a `TDX collateral:` prefix, and a `Revoked`

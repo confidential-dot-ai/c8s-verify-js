@@ -147,8 +147,8 @@ export async function verifyAzTdx(
  * The processor generation is irrelevant for TDX, so no generation argument is
  * needed. DCAP collateral checks (PCK CRL, TCB status, TD-QE identity) run
  * only on caller-supplied collateral (`collateralJson`): every item is
- * signature- and freshness-checked, `collateral_verified` becomes `true` and
- * the result carries `tcb_status`; a collateral failure throws with a
+ * signature-checked and the collateral freshness-checked at `at`,
+ * `collateral_verified` becomes `true` and the result carries `tcb_status`; a collateral failure throws with a
  * `TDX collateral:` prefix. Without it the checks are skipped and
  * `collateral_verified` stays `false`.
  *
@@ -164,8 +164,9 @@ export async function verifyAzTdx(
  * @param expectedInitDataHash bytes to bind against MRCONFIGID
  * @param expectedRtmr3 48 raw bytes the TD's RTMR[3] must equal
  * @param collateralJson Intel PCS collateral: { tcb_info, tcb_info_issuer_chain,
- *   qe_identity, qe_identity_issuer_chain, pck_crl, root_ca_crl, at } — bodies
- *   and PEM chains verbatim, CRLs base64, `at` in Unix seconds
+ *   qe_identity, qe_identity_issuer_chain, pck_crl, root_ca_crl, at } — JSON
+ *   bodies verbatim, issuer chains as URL-decoded PEM, CRLs base64, `at` in
+ *   Unix seconds
  * @returns verification result JSON (or throws on any failure)
  */
 export async function verifyTdx(

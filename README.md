@@ -235,9 +235,10 @@ headers URL-decoded to PEM), the PCK CRL of the CA that issued its PCK
 certificate, and the Intel SGX Root CA CRL. Intel PCS sends no CORS headers,
 so fetch it server-side and pass the bytes. The verifier checks Intel's
 signature on every item, that the TCB Info is the TDX one for the quote's
-FMSPC, and that every item is current at `at` (default now); it then
-requires the PCK chain to not be revoked and evaluates the TCB status
-(`collateral_denied` if any of that fails). `tdxTcbStatuses` lists the
+FMSPC, and that the TCB Info, QE Identity and both CRLs are current at `at`
+(default now; Intel certificate validity is always checked against the
+current time); it then requires the PCK chain to not be revoked and
+evaluates the TCB status (`collateral_denied` if any of that fails). `tdxTcbStatuses` lists the
 statuses to accept (default `["UpToDate"]`; others fail with `tcb_denied`,
 and `Revoked` always fails). The evaluated status is on the result as
 `tdxTcb: { status, fmspc, advisoryIds }`; without `tdxCollateral` it is

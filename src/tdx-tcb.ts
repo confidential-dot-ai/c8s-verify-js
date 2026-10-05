@@ -32,7 +32,9 @@ const DEFAULT_ACCEPTED: readonly TdxTcbStatus[] = ["UpToDate"];
  * PCS sends no CORS headers, so a browser cannot fetch it itself. Nothing
  * here is trusted on transport: the verifier checks Intel's signatures on
  * every item, that the TCB Info is the TDX one for the quote's FMSPC, and
- * that every item is current at the verification time.
+ * that the TCB Info, QE Identity and both CRLs are current at the
+ * verification time `at`. Intel certificate validity (the PCK chain and both
+ * issuer chains) is checked against the current time, not `at`.
  *
  * Pass the JSON bodies verbatim — the signatures cover their exact bytes.
  */
