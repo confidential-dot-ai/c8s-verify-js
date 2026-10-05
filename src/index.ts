@@ -29,6 +29,7 @@ import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
 import type { TdxImage } from "./manifest.js";
+import type { TdxCollateral, TdxTcbStatus } from "./tdx-tcb.js";
 
 export { C8sVerifyError } from "./errors.js";
 export type { C8sErrorCode } from "./errors.js";
@@ -61,6 +62,7 @@ export type { MatchedWorkload, AllowlistDocument, AllowlistWorkload } from "./wo
 // mrtd+rtmr1+rtmr2 tuple `tdxImage` enforces.
 export { parseImageManifest } from "./manifest.js";
 export type { TdxImage } from "./manifest.js";
+export type { TdxCollateral, TdxTcbResult, TdxTcbStatus } from "./tdx-tcb.js";
 export { decodePEM, decodeOnePEM, encodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
@@ -145,10 +147,22 @@ export interface C8sClientOptions {
   snpCrl?: Uint8Array;
   /**
    * Require the revocation collateral to be verified for the verdict to pass
-   * (production policy). Requires `snpCrl`. See
+   * (production policy). Requires `snpCrl` or `tdxCollateral`. See
    * `VerifyPolicy.requireCollateral`.
    */
   requireCollateral?: boolean;
+  /**
+   * Intel PCS collateral for the TDX quote, fetched by the caller. Supplying
+   * it makes PCK revocation and the TCB status part of every connection's
+   * verdict (`attestation.tdxTcb`). `platform: "tdx"` only. See
+   * `VerifyPolicy.tdxCollateral`.
+   */
+  tdxCollateral?: TdxCollateral;
+  /**
+   * TDX TCB statuses to accept, default `["UpToDate"]`. Requires
+   * `tdxCollateral`. See `VerifyPolicy.tdxTcbStatuses`.
+   */
+  tdxTcbStatuses?: TdxTcbStatus[];
 }
 
 export interface RequestInit {
@@ -234,6 +248,8 @@ export class C8sClient {
       minTcb: opts.minTcb,
       snpCrl: opts.snpCrl,
       requireCollateral: opts.requireCollateral,
+      tdxCollateral: opts.tdxCollateral,
+      tdxTcbStatuses: opts.tdxTcbStatuses,
     };
   }
 

@@ -1,6 +1,6 @@
 # `src/wasm/` — the attestation-rs verifier (generated, not committed)
 
-This directory holds the WebAssembly build of the attestation-rs SNP / az-snp
+This directory holds the WebAssembly build of the attestation-rs SNP / TDX
 verifier that `src/wasm-loader.ts` imports. **The `.wasm`/`.js` artifacts are
 generated, not committed** — they are `.gitignore`d. A fresh checkout has no
 verifier until you build it from the in-tree source submodule:
@@ -23,9 +23,9 @@ rather than shipped as an opaque binary in git history:
 | | |
 |---|---|
 | Source | `vendor/attestation-rs` submodule (`confidential-dot-ai/attestation-rs`), `crates/attestation-wasm` |
-| Pinned commit | `13039e857e7124a8a8620c6aacaa7217d73a3958` |
+| Pinned commit | `d9e71379d0bf073ad27777342f455ec0c9c678c8` |
 | Build | `wasm-pack build --target web` |
-| Entry points | `verify_snp`, `verify_az_snp` |
+| Entry points | `verify_snp`, `verify_az_snp`, `verify_az_tdx`, `verify_tdx` |
 
 The pin is the `vendor/attestation-rs` submodule gitlink — there is no separate
 pin variable. To move to a newer `attestation-rs`:

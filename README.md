@@ -228,6 +228,23 @@ because measurement pinning cannot provide them:
   `requireCollateral: true` turns that into a `collateral_required` failure
   for production policy.
 
+**Platform TCB and revocation policy (bare-metal TDX).** `tdxCollateral`
+supplies the Intel PCS v4 collateral for the quote's platform: the TCB Info
+for its FMSPC and the TD QE Identity (bodies verbatim, with their issuer-chain
+headers URL-decoded to PEM), the PCK CRL of the CA that issued its PCK
+certificate, and the Intel SGX Root CA CRL. Intel PCS sends no CORS headers,
+so fetch it server-side and pass the bytes. The verifier checks Intel's
+signature on every item, that the TCB Info is the TDX one for the quote's
+FMSPC, and that every item is current at `at` (default now); it then
+requires the PCK chain to not be revoked and evaluates the TCB status
+(`collateral_denied` if any of that fails). `tdxTcbStatuses` lists the
+statuses to accept (default `["UpToDate"]`; others fail with `tcb_denied`,
+and `Revoked` always fails). The evaluated status is on the result as
+`tdxTcb: { status, fmspc, advisoryIds }`; without `tdxCollateral` it is
+absent and `collateralVerified` is `false`. `requireCollateral: true` makes
+the collateral mandatory. `platform: "tdx"` only: the az-tdx entry point has
+no collateral input.
+
 ### Lower-level: verifying bare evidence
 
 If you obtain TEE evidence through your own transport (e.g. a discovery document)
