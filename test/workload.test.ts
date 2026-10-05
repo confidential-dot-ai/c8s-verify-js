@@ -154,12 +154,23 @@ test("a duplicate .1.5 extension fails closed at certificate parse", async () =>
 
 const readAllowlist = () => readFile(join(FIX, "cds-allowlist.json"));
 
+// The fixture is Allowlist.Canonical() output from c8s pkg/allowlist, which
+// has no digests map since c8s#551.
 test("parses the fixture allowlist and resolves a stamped name", async () => {
   const bytes = new Uint8Array(await readAllowlist());
   const doc = parseAllowlist(bytes);
   assert.equal(doc.schema, "c8s.allowlist/v1");
+  assert.ok(!("digests" in doc));
   assert.ok(resolveWorkload(doc, "sglang-dev"));
   assert.ok(resolveWorkload(doc, "sglang-kimi-k3"));
+  assert.ok(resolveWorkload(doc, "ratls-mesh-5118d2342e2c"));
+});
+
+test("a document with unknown fields still parses", () => {
+  const doc = parseAllowlist(
+    '{"schema":"c8s.allowlist/v1","digests":{},"future":1,"workloads":{"api":{}}}',
+  );
+  assert.ok(resolveWorkload(doc, "api"));
 });
 
 test("an absent workload name fails closed with workload_unresolved", async () => {
@@ -182,9 +193,7 @@ test("an absent workload name fails closed with workload_unresolved", async () =
 // over-long name can be carried but never matched.
 test("a served document keeps an over-long legacy workload name", () => {
   const legacy = "a".repeat(64);
-  const doc = parseAllowlist(
-    `{"schema":"c8s.allowlist/v1","digests":{},"workloads":{"${legacy}":{}}}`,
-  );
+  const doc = parseAllowlist(`{"schema":"c8s.allowlist/v1","workloads":{"${legacy}":{}}}`);
   assert.ok(resolveWorkload(doc, legacy));
 });
 
@@ -192,11 +201,11 @@ test("rejects a document that is not schema c8s.allowlist/v1", () => {
   for (const bad of [
     "null",
     "[]",
-    '{"digests":{},"workloads":{}}',
-    '{"schema":"c8s.allowlist/v2","digests":{},"workloads":{}}',
-    '{"schema":"c8s.allowlist/v1","workloads":{}}',
-    '{"schema":"c8s.allowlist/v1","digests":{}}',
-    '{"schema":"c8s.allowlist/v1","digests":{},"workloads":[]}',
+    '{"workloads":{}}',
+    '{"schema":"c8s.allowlist/v2","workloads":{}}',
+    '{"schema":"c8s.allowlist/v1"}',
+    '{"schema":"c8s.allowlist/v1","workloads":[]}',
+    '{"schema":"c8s.allowlist/v1","workloads":null}',
     "not json",
   ]) {
     assert.throws(

@@ -166,11 +166,12 @@ export interface AllowlistWorkload {
   [key: string]: unknown;
 }
 
-/** The `c8s.allowlist/v1` document (the shape `GET /allowlist` serves). */
+/**
+ * The `c8s.allowlist/v1` document (the shape `GET /allowlist` serves).
+ * Unknown fields are ignored, as c8s's own served-document parser does.
+ */
 export interface AllowlistDocument {
   schema: "c8s.allowlist/v1";
-  /** Admitted image digests: `sha256:<64-hex>` → image reference. */
-  digests: Record<string, string>;
   /** Named workload entries; stamp names resolve as key lookups here. */
   workloads: Record<string, AllowlistWorkload>;
 }
@@ -195,15 +196,12 @@ export function parseAllowlist(bytes: Uint8Array | string): AllowlistDocument {
   if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
     fail("invalid_request", "allowlist document is not a JSON object");
   }
-  const { schema, digests, workloads } = doc as Record<string, unknown>;
+  const { schema, workloads } = doc as Record<string, unknown>;
   if (schema !== "c8s.allowlist/v1") {
     fail(
       "invalid_request",
       `allowlist document has schema ${JSON.stringify(schema)}, want "c8s.allowlist/v1"`,
     );
-  }
-  if (digests === null || typeof digests !== "object" || Array.isArray(digests)) {
-    fail("invalid_request", "allowlist document has no digests map");
   }
   if (workloads === null || typeof workloads !== "object" || Array.isArray(workloads)) {
     fail("invalid_request", "allowlist document has no workloads map");
