@@ -14,7 +14,7 @@ import {
 import { generateNonce } from "../src/nonce.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { DEMO_MEASUREMENTS } from "../demo/config.js";
-import { buildBundle, loadFixtures } from "./helpers.js";
+import { buildBundle, loadFixtures, stateWindow } from "./helpers.js";
 import { base64ToBytes, bytesToBase64, bytesToBase64Url } from "../src/base64.js";
 import { certificateHashBase64Url } from "../src/identity.js";
 import { fingerprintSHA256 } from "../src/x509.js";
@@ -855,6 +855,8 @@ const ROLLOUT = {
   policy: `sha256:${"c".repeat(64)}`,
   bound: [`sha256:${"c".repeat(64)}`],
   lease_seconds: 30,
+  operator_keys: "none",
+  ...stateWindow(),
 };
 
 test("verifies a bundle whose transcript commits the rollout state", async () => {

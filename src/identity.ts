@@ -55,8 +55,8 @@ async function sha256(input: Uint8Array): Promise<Uint8Array> {
  * Compute the v1 report_data transcript shared with c8s/pkg/overenc. It
  * commits the front-door mode and the complete key exchange — the client's
  * X-Wing encapsulation key, the server's ciphertext, the session id, and the
- * nonce — plus the exact mesh leaf and issuing mesh CA, and last the SHA-384
- * of the bundle's CDS rollout state bytes (empty when it carries none).
+ * nonce — plus the exact mesh leaf and issuing mesh CA, and last, only when
+ * the bundle carries a CDS rollout state, the SHA-384 of its bytes.
  */
 export async function identityTranscriptHash(
   frontDoorMode: string,
@@ -115,7 +115,9 @@ export async function identityTranscriptHash(
     lengthPrefixed(xwingCt),
     lengthPrefixed(sessionId),
     lengthPrefixed(nonce),
-    lengthPrefixed(stateDigest),
+    // Present only with a state, so a bundle without one hashes as before the
+    // field existed.
+    stateDigest.length > 0 ? lengthPrefixed(stateDigest) : new Uint8Array(0),
   );
   return new Uint8Array(await subtle().digest("SHA-384", encoded));
 }

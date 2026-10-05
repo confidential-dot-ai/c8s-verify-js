@@ -205,7 +205,7 @@ transcript = LP("c8s-verify/v1")
           || LP(xwing_ct(1120))
           || LP(session_id(16))
           || LP(nonce(32))
-          || LP(state_digest)          // SHA-384(cds_state bytes)(48), or empty (0) without cds_state
+        [ || LP(state_digest) ]        // SHA-384(cds_state bytes)(48), only with cds_state
 
 transcript_hash = SHA-384(transcript)
 report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
@@ -219,8 +219,15 @@ match, the proof-of-possession signature, and the key schedule (whose salt is
 
 `state_digest` commits the exact decoded `cds_state.state` bytes, so the
 rollout state is part of the hardware-bound `report_data`, not only of the
-mesh CA's signature. The attest-lb transcript (c8s `LBTranscriptHash`) ends
-with the same field.
+mesh CA's signature. A bundle without `cds_state` omits the field and hashes
+as it did before the field existed. The attest-lb transcript (c8s
+`LBTranscriptHash`) ends with the same optional field.
+
+CDS signs `cds_state` as SHA-384 of `"c8s/rollout-state-challenge/v1"`, a
+zero byte and the state bytes. The state carries `issued_at` and `expires_at`
+(Unix seconds, 60 s apart); a client refuses a state outside that window,
+allowing 2 minutes of clock skew. `operator_keys` is the hash of the key set
+that may write the allowlist, or `"none"` for an immutable allowlist.
 
 The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
 is deliberately unchanged by the endpoint move (as are the HKDF info string and

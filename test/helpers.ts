@@ -12,6 +12,7 @@ import {
   base64ToBytes,
   bytesToBase64,
   bytesToHex,
+  concatBytes,
   utf8ToBytes,
 } from "../src/base64.js";
 import { stateDigest, type RolloutState } from "../src/rollout.js";
@@ -152,9 +153,7 @@ export async function buildBundle(
       ? {
           cds_state: {
             state: bytesToBase64(stateBytes),
-            signature: bytesToBase64(
-              sign("sha384", stateBytes, { key: fixtures.caKeyPem, dsaEncoding: "der" }),
-            ),
+            signature: signState(stateBytes, fixtures.caKeyPem),
           },
         }
       : {}),
@@ -167,4 +166,23 @@ export async function buildBundle(
     meshCaPem,
     transcript: minted.transcript,
   };
+}
+
+/**
+ * Sign rollout state bytes the way CDS signs a nonce-bound state: SHA-384 of
+ * the challenge context, a zero byte and the bytes, by the mesh CA key.
+ */
+export function signState(stateBytes: Uint8Array, caKeyPem: string): string {
+  const message = concatBytes(
+    utf8ToBytes("c8s/rollout-state-challenge/v1"),
+    new Uint8Array([0]),
+    stateBytes,
+  );
+  return bytesToBase64(sign("sha384", message, { key: caKeyPem, dsaEncoding: "der" }));
+}
+
+/** A rollout state's validity window, starting now. */
+export function stateWindow(): { issued_at: number; expires_at: number } {
+  const now = Math.floor(Date.now() / 1000);
+  return { issued_at: now, expires_at: now + 60 };
 }

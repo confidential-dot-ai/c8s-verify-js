@@ -49,7 +49,7 @@ test("v1 transcript matches the Go cross-language vector", async () => {
   );
   assert.equal(
     bytesToHex(transcript),
-    "8f534c54dce6062fbf66e7f9b4317ab98b736786c72f101de5df3b4f1951e090325fccc6f700083b03a132a07d40c9df",
+    "003e433637125a49cb2136a5e8148f6de5fd16c43caa11bcc79e49865da4c5e32625e54f7a9a33476954eb7f745fcae3",
   );
 });
 
@@ -89,7 +89,7 @@ test("the front-door mode is committed: another mode changes the transcript", as
   const acme = await identityTranscriptHash("acme", ...args);
   assert.equal(
     bytesToHex(acme),
-    "37c590018d74c3107c8ff7258888469cdc34e353844b6ec2c77a0f25c3e0f7095e252b7f1b72201e1c48983599a99845",
+    "594e10d4d384724391d9fa215d90e2169029aa47f4091d9155b9970d0ebb38a4112518dce87db42cb837bbc71986c81a",
   );
   await assert.rejects(
     () => identityTranscriptHash("", ...args),
