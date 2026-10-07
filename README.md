@@ -101,8 +101,9 @@ different guest images built against the same firmware share an MRTD. A
 platform-complete image pin is therefore the tuple **mrtd + rtmr1 + rtmr2**,
 published in the image build's manifest — pass it as `tdxImage` (or feed the
 manifest file to `parseImageManifest`; each field is exactly 96 lowercase hex
-chars, all three required). The tuple's `mrtd` joins the `measurements`
-allowlist and `rtmr1`/`rtmr2` are compared exactly against the verified claims
+chars, all three required). The tuple replaces `measurements`, and passing
+both is rejected: its MRTD is the only accepted launch digest, and
+`rtmr1`/`rtmr2` are compared exactly against the verified claims
 (`rtmr_denied` on divergence, failing closed if the claims cannot be compared).
 A deployment-class verdict — where the measurement policy is the entire anchor —
 rejects an MRTD-only TDX policy with `measurement_incomplete`; with a pinned
@@ -155,7 +156,6 @@ import { C8sClient, parseImageManifest } from "c8s-verify";
 
 const client = new C8sClient({
   baseUrl: "https://lb.example.com",
-  measurements: ["<expected hex SHA-384 launch digest>"], // pinned out of band
   meshCaPem: pinnedMeshCaPem,                              // specific-cluster anchor
   //   ^ or/and pass `allowlist` (the exact canonical allowlist bytes) for a
   //     deployment-class anchor enforced against the mesh leaf's
@@ -169,7 +169,8 @@ const client = new C8sClient({
   // Intel TDX only. The complete image pin: MRTD covers just the TDVF firmware,
   // so the guest kernel (rtmr1) and rootfs (rtmr2) are pinned with it as one
   // tuple, taken from the image build's manifest. Required for a
-  // deployment-class verdict (no meshCaPem).
+  // deployment-class verdict (no meshCaPem). On SEV-SNP, pin the launch
+  // digest instead: measurements: ["<expected hex SHA-384 launch digest>"].
   tdxImage: parseImageManifest(imageManifestBytes),
 });
 
@@ -226,6 +227,24 @@ because measurement pinning cannot provide them:
   result says so (`collateralVerified: false` plus a warning), and
   `requireCollateral: true` turns that into a `collateral_required` failure
   for production policy.
+
+**Platform TCB and revocation policy (bare-metal TDX).** `tdxCollateral`
+supplies the Intel PCS v4 collateral for the quote's platform: the TCB Info
+for its FMSPC and the TD QE Identity (bodies verbatim, with their issuer-chain
+headers URL-decoded to PEM), the PCK CRL of the CA that issued its PCK
+certificate, and the Intel SGX Root CA CRL. Intel PCS sends no CORS headers,
+so fetch it server-side and pass the bytes. The verifier checks Intel's
+signature on every item, that the TCB Info is the TDX one for the quote's
+FMSPC, and that the TCB Info, QE Identity and both CRLs are current at `at`
+(default now; Intel certificate validity is always checked against the
+current time); it then requires the PCK chain to not be revoked and
+evaluates the TCB status (`collateral_denied` if any of that fails). `tdxTcbStatuses` lists the
+statuses to accept (default `["UpToDate"]`; others fail with `tcb_denied`,
+and `Revoked` always fails). The evaluated status is on the result as
+`tdxTcb: { status, fmspc, advisoryIds }`; without `tdxCollateral` it is
+absent and `collateralVerified` is `false`. `requireCollateral: true` makes
+the collateral mandatory. `platform: "tdx"` only: the az-tdx entry point has
+no collateral input.
 
 ### Lower-level: verifying bare evidence
 

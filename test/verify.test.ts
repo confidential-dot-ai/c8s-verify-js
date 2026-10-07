@@ -332,6 +332,52 @@ test("verifyEvidence rejects missing options with a typed error", async () => {
   );
 });
 
+test("rejects a platform the verifier does not dispatch on", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const { snpEvidence } = await loadFixtures();
+  for (const platform of ["sev", "gcp-tdx", "SNP", " snp", ""]) {
+    await assert.rejects(
+      () => verifyAttestation(bundle, nonce, policy(meshCaPem, { platform })),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      platform,
+    );
+    await assert.rejects(
+      () =>
+        verifyEvidence(snpEvidence, {
+          platform,
+          generation: "genoa",
+          measurements: DEMO_MEASUREMENTS,
+        }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      platform,
+    );
+  }
+});
+
+test("rejects an at that is not a valid Date", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const { snpEvidence } = await loadFixtures();
+  for (const at of [new Date(Number.NaN), "2026-10-06T00:00:00Z", 1791244800, null]) {
+    await assert.rejects(
+      () => verifyAttestation(bundle, nonce, policy(meshCaPem, { at: at as Date })),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      String(at),
+    );
+    await assert.rejects(
+      () =>
+        verifyEvidence(snpEvidence, {
+          generation: "genoa",
+          measurements: DEMO_MEASUREMENTS,
+          at: at as Date,
+        }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      String(at),
+    );
+  }
+});
+
 // A multi-block meshCaPem means "each of these is independently trusted as an
 // anchor", and selectPinnedCA anchors to whichever one the proof names. That is
 // the documented contract, and also what a caller gets by accident if they pass
@@ -624,10 +670,7 @@ test("TDX deployment-class verdict passes with the full image tuple pinned", asy
     evidence: await tdxEvidence(),
     platform: "tdx",
   });
-  // The tuple's MRTD joins the measurement allowlist, so the explicit list
-  // may pin a different (e.g. previous) image alongside it.
   const r = await verifyAttestation(bundle, nonce, {
-    measurements: ["ab".repeat(48)],
     platform: "tdx",
     requireFreshness: false,
     tdxImage: TDX_IMAGE,
@@ -637,6 +680,45 @@ test("TDX deployment-class verdict passes with the full image tuple pinned", asy
   assert.equal(r.measurement, TDX_MRTD);
   assert.deepEqual(r.rtmrsPinned, [`1:${TDX_IMAGE.rtmr1}`, `2:${TDX_IMAGE.rtmr2}`]);
   assert.ok(!r.warnings.some((w) => w.includes("not platform-complete")));
+});
+
+// The tuple pins MRTD exactly. A launch-digest list next to it would admit a
+// firmware the tuple's RTMR[1]/RTMR[2] were never measured under, so the two
+// are mutually exclusive, as in the c8s and TEErminator verifiers.
+test("tdxImage and a measurements list are mutually exclusive", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, {
+    evidence: await tdxEvidence(),
+    platform: "tdx",
+  });
+  for (const measurements of [["ab".repeat(48)], [TDX_MRTD]]) {
+    await assert.rejects(
+      () =>
+        verifyAttestation(bundle, nonce, {
+          measurements,
+          platform: "tdx",
+          requireFreshness: false,
+          tdxImage: TDX_IMAGE,
+          meshCaPem,
+        }),
+      (e: unknown) =>
+        e instanceof C8sVerifyError &&
+        e.code === "invalid_request" &&
+        e.message.includes("mutually exclusive"),
+    );
+  }
+});
+
+test("a TDX policy needs measurements or tdxImage", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, {
+    evidence: await tdxEvidence(),
+    platform: "tdx",
+  });
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { platform: "tdx", meshCaPem }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
 });
 
 test("a wrong RTMR[1] fails the tuple with rtmr_denied even though MRTD matches", async () => {
@@ -650,7 +732,6 @@ test("a wrong RTMR[1] fails the tuple with rtmr_denied even though MRTD matches"
   await assert.rejects(
     async () =>
       verifyAttestation(bundle, nonce, {
-        measurements: [TDX_MRTD],
         platform: "tdx",
         requireFreshness: false,
         tdxImage: { ...TDX_IMAGE, rtmr1: "ff".repeat(48) },
@@ -689,7 +770,6 @@ test("TDX specific-cluster verdict without the tuple keeps the prominent warning
     platform: "tdx",
   });
   const r2 = await verifyAttestation(bundle2, nonce2, {
-    measurements: [TDX_MRTD],
     platform: "tdx",
     requireFreshness: false,
     tdxImage: TDX_IMAGE,
@@ -738,6 +818,7 @@ test("an az-tdx deployment-class verdict is held to the same image-completeness 
   const zero = "00".repeat(48);
   const r = await verifyAttestation(bundle2, nonce2, {
     ...base,
+    measurements: undefined,
     tdxImage: { mrtd: azMrtd, rtmr1: zero, rtmr2: zero },
   });
   assert.equal(r.trustClass, "deployment-class");

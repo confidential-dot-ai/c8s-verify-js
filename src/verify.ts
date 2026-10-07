@@ -23,6 +23,16 @@ import {
   resolveWorkload,
 } from "./workload.js";
 import { requireTdxImage, type TdxImage } from "./manifest.js";
+import {
+  enforceTdxTcb,
+  isTdxCollateralFailure,
+  tdxCollateralJson,
+  validateTdxTcbPolicy,
+  type TdxCollateral,
+  type TdxTcbResult,
+  type TdxTcbStatus,
+  type WasmTcbStatus,
+} from "./tdx-tcb.js";
 
 /**
  * Minimum SEV-SNP TCB floor: security patch levels (SPLs) the reported TCB
@@ -39,8 +49,11 @@ export interface SnpMinTcb {
 }
 
 export interface VerifyPolicy {
-  /** accepted launch digests (hex sha-384) */
-  measurements: string[];
+  /**
+   * Accepted launch digests (hex SHA-384). Required unless `tdxImage` is set;
+   * the two are mutually exclusive.
+   */
+  measurements?: string[];
   /** default "snp"; also "az-snp" | "az-tdx" | "tdx" (bare-metal Intel TDX) */
   platform?: string;
   /**
@@ -113,10 +126,12 @@ export interface VerifyPolicy {
    * each exactly 96 lowercase hex chars, published with the image build (feed
    * a manifest file to {@link parseImageManifest}). `measurements` alone pins
    * only MRTD, which covers the TDVF firmware — the guest kernel and rootfs
-   * land in RTMR[1]/RTMR[2], so only the tuple identifies the image. The
-   * tuple's `mrtd` joins the `measurements` allowlist and `rtmr1`/`rtmr2` are
-   * compared exactly against the verified claims. All three registers or
-   * none: a partial tuple is rejected rather than partially enforced.
+   * land in RTMR[1]/RTMR[2], so only the tuple identifies the image. All three
+   * registers are compared exactly against the verified claims, and the tuple
+   * replaces `measurements` rather than adding to it: a separate launch-digest
+   * list could only admit an image the tuple does not describe, so passing
+   * both is rejected. All three registers or none: a partial tuple is
+   * rejected rather than partially enforced.
    *
    * Required for a TDX deployment-class verdict (no `meshCaPem`), where the
    * measurement policy is the entire anchor; with a pinned mesh CA it is
@@ -149,13 +164,27 @@ export interface VerifyPolicy {
    */
   snpCrl?: Uint8Array;
   /**
+   * Intel PCS collateral for the quote, fetched by the caller (Intel PCS sends
+   * no CORS headers, so the browser cannot fetch it). Supplying it makes PCK
+   * revocation, TD QE identity and the TCB status part of the verdict
+   * (`collateralVerified: true`, `tdxTcb` set); collateral that cannot be
+   * positively verified at `at` fails closed (`collateral_denied`).
+   * `platform: "tdx"` only.
+   */
+  tdxCollateral?: TdxCollateral;
+  /**
+   * TDX TCB statuses the verdict accepts; any other fails with `tcb_denied`.
+   * Default `["UpToDate"]`. A `Revoked` TCB always fails. Requires
+   * `tdxCollateral`.
+   */
+  tdxTcbStatuses?: TdxTcbStatus[];
+  /**
    * Require the revocation collateral to be verified for the verdict to pass
    * (production policy). With this set, a result whose collateral was never
    * checked fails with `collateral_required` instead of verifying with a
-   * warning. Requires `snpCrl` — requiring collateral while supplying none
-   * could never succeed and is rejected upfront. SNP platforms only: the
-   * browser verifier has no TDX collateral path yet, so requiring it there
-   * is rejected rather than accepted-and-always-failing.
+   * warning. Requires `snpCrl` on SNP or `tdxCollateral` on `platform: "tdx"`
+   * — requiring collateral while supplying none could never succeed and is
+   * rejected upfront, as is any other platform.
    */
   requireCollateral?: boolean;
 }
@@ -207,6 +236,8 @@ export interface WasmVerifyResult {
    * comparison, so `undefined` means "not checked" — never "fine".
    */
   rtmr3_match?: boolean | null;
+  /** The evaluated TDX TCB status; present only when collateral was checked. */
+  tcb_status?: WasmTcbStatus | null;
   claims: WasmClaims;
 }
 
@@ -239,12 +270,19 @@ export interface AttestationResult {
   /**
    * Whether endorsement/revocation collateral was verified as part of this
    * verdict (for SNP: the AMD KDS CRL's signature and freshness checked, and
-   * the VEK not on it). `false` means revocation was never checked — the
-   * verdict is hardware-signature- and measurement-complete but not
+   * the VEK not on it; for TDX: the PCK CRLs, TD QE identity and TCB Info).
+   * `false` means revocation was never checked — the verdict is
+   * hardware-signature- and measurement-complete but not
    * collateral-complete, and a matching warning says so. Set
    * {@link VerifyPolicy.requireCollateral} to make `false` a failure instead.
    */
   collateralVerified: boolean;
+  /**
+   * The TDX TCB status this verdict evaluated and accepted. Present only when
+   * {@link VerifyPolicy.tdxCollateral} was supplied; absent means the TCB
+   * status was not checked.
+   */
+  tdxTcb?: TdxTcbResult;
   /**
    * Verified identity transcript hash used as the HKDF salt. Hardware-bound
    * only when {@link identityBound} is true.
@@ -319,6 +357,15 @@ function isCollateralFailure(e: unknown): boolean {
   return /CRL check|revoked/i.test(errMessage(e));
 }
 
+/** Map a tagged TDX collateral throw to its precise code; no-op otherwise. */
+function failTdxCollateral(e: unknown): void {
+  if (!isTdxCollateralFailure(e)) return;
+  if (errMessage(e).includes("TCB status is Revoked")) {
+    fail("tcb_denied", "TDX TCB status is Revoked", { cause: e });
+  }
+  fail("collateral_denied", `TDX collateral check failed: ${errMessage(e)}`, { cause: e });
+}
+
 /**
  * The TDX platform family, as c8s's `ratls.NormalizePlatform` defines it: the
  * bare-metal tag and the cloud-prefixed ones name one TEE, so every TDX-only
@@ -354,6 +401,28 @@ const SNP_PLATFORMS = new Set(["snp", "az-snp"]);
 /** How the SNP-only policy rules name the platforms they accept. */
 const SNP_PLATFORM_LIST = [...SNP_PLATFORMS].map((p) => JSON.stringify(p)).join(" | ");
 
+/**
+ * The platform tags the verifier dispatches on, compared exactly: anything
+ * else would fall through to the bare-SNP entry point.
+ */
+const ROUTED_PLATFORMS = new Set(["snp", "az-snp", "tdx", "az-tdx"]);
+
+function validatePlatform(platform: string): void {
+  if (!ROUTED_PLATFORMS.has(platform)) {
+    fail(
+      "invalid_request",
+      `unsupported platform ${JSON.stringify(platform)}: want one of ${[...ROUTED_PLATFORMS].map((p) => JSON.stringify(p)).join(" | ")}`,
+    );
+  }
+}
+
+/** A NaN Date would pass every validity window and serialize as null. */
+function validateAt(at: Date | undefined): void {
+  if (at !== undefined && !(at instanceof Date && Number.isFinite(at.getTime()))) {
+    fail("invalid_request", "at must be a valid Date");
+  }
+}
+
 /** An SPL component: an integer in a u8's range. */
 function isSpl(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 255;
@@ -369,6 +438,7 @@ function validateSnpPolicy(
   minTcb: SnpMinTcb | undefined,
   snpCrl: Uint8Array | undefined,
   requireCollateral: boolean | undefined,
+  tdxCollateral: TdxCollateral | undefined,
 ): void {
   const isSnp = SNP_PLATFORMS.has(platform.trim().toLowerCase());
   if (minTcb !== undefined) {
@@ -404,10 +474,19 @@ function validateSnpPolicy(
     }
   }
   if (requireCollateral) {
+    if (platform === "tdx") {
+      if (tdxCollateral === undefined) {
+        fail(
+          "invalid_request",
+          "requireCollateral is set but no tdxCollateral is supplied: the verifier has no collateral to verify, so the requirement could never be met — fetch the Intel PCS collateral and pass it as tdxCollateral",
+        );
+      }
+      return;
+    }
     if (!isSnp) {
       fail(
         "invalid_request",
-        `requireCollateral requires an SNP platform (${SNP_PLATFORM_LIST}; got ${JSON.stringify(platform)}): the browser verifier has no TDX collateral path, so the requirement could never be met`,
+        `requireCollateral requires an SNP platform (${SNP_PLATFORM_LIST}) or "tdx" (got ${JSON.stringify(platform)}): the browser verifier has no collateral path there, so the requirement could never be met`,
       );
     }
     if (snpCrl === undefined) {
@@ -437,26 +516,32 @@ function minTcbJson(minTcb: SnpMinTcb | undefined): string | undefined {
 function enforceCollateralPolicy(
   result: WasmVerifyResult,
   platform: string,
-  snpCrl: Uint8Array | undefined,
+  supplied: boolean,
   requireCollateral: boolean | undefined,
   warnings: string[],
 ): boolean {
   const verified = result.collateral_verified === true;
   if (verified) return true;
-  if (snpCrl !== undefined || requireCollateral) {
+  if (supplied || requireCollateral) {
     fail(
       "collateral_required",
       "revocation collateral was not verified (no collateral_verified in the result) — refusing to report a collateral policy that was never enforced",
     );
   }
+  const p = platform.trim().toLowerCase();
   warnings.push(
-    SNP_PLATFORMS.has(platform.trim().toLowerCase())
+    SNP_PLATFORMS.has(p)
       ? "endorsement-key revocation was not checked: no snpCrl supplied, so an AMD-revoked " +
           "VEK would still verify. Fetch the AMD KDS CRL for the deployment's generation and " +
           "pass it as snpCrl (and set requireCollateral in production policy)"
-      : "DCAP collateral (PCK CRL, TCB status, QE identity) was not checked: the browser " +
-          "verifier has no TDX collateral path; use the native verifier where revocation " +
-          "must be part of the verdict",
+      : p === "tdx"
+        ? "DCAP collateral (PCK CRL, TCB status, QE identity) was not checked: no " +
+          "tdxCollateral supplied, so a revoked PCK certificate or an out-of-date TCB would " +
+          "still verify. Fetch the Intel PCS collateral and pass it as tdxCollateral (and set " +
+          "requireCollateral in production policy)"
+        : "DCAP collateral (PCK CRL, TCB status, QE identity) was not checked: the browser " +
+          "verifier has no collateral path for this platform; use the native verifier where " +
+          "revocation must be part of the verdict",
   );
   return false;
 }
@@ -477,7 +562,7 @@ const CLAIM_REGISTER_HEX = /^[0-9a-f]{96}$/;
 
 /**
  * Enforce the RTMR[1]/RTMR[2] half of a TDX image pin against the VERIFIED
- * claims (the tuple's MRTD is enforced through the launch-digest allowlist
+ * claims (the tuple's MRTD is enforced as the only accepted launch digest
  * instead). Register-exact lowercase-hex comparison; an absent or malformed
  * claim fails closed — a claim that cannot be compared must never read as a
  * pin that held. Returns the `rtmrsPinned` entries ("<idx>:<hex>") recorded on
@@ -545,13 +630,41 @@ interface PreparedIdentity {
   frontDoorMode: string;
 }
 
+/**
+ * The launch digests a verdict accepts. `tdxImage` and `measurements` are
+ * mutually exclusive, as in the c8s and TEErminator verifiers: the tuple pins
+ * MRTD exactly, so a second list could only admit a firmware the tuple's
+ * RTMR[1]/RTMR[2] were never measured under. An empty result means no pin.
+ */
+function acceptedMeasurements(
+  measurements: string[] | undefined,
+  tdxImage: TdxImage | undefined,
+): string[] {
+  if (measurements !== undefined) {
+    if (
+      !Array.isArray(measurements) ||
+      !measurements.every((measurement) => typeof measurement === "string")
+    ) {
+      fail("invalid_request", "measurements must be an array of hex strings");
+    }
+    if (tdxImage !== undefined && measurements.length > 0) {
+      fail(
+        "invalid_request",
+        "measurements and tdxImage are mutually exclusive: the tuple pins MRTD, RTMR[1] and " +
+          "RTMR[2] exactly against one build, so a separate launch-digest list could only " +
+          "admit an image it does not describe",
+      );
+    }
+  }
+  return tdxImage !== undefined ? [tdxImage.mrtd] : (measurements ?? []);
+}
+
 function validatePolicy(policy: VerifyPolicy): void {
-  if (!policy || !Array.isArray(policy.measurements) || policy.measurements.length === 0) {
-    fail("invalid_request", "verification requires a non-empty measurement allowlist");
+  if (!policy) {
+    fail("invalid_request", "verification policy is required");
   }
-  if (!policy.measurements.every((measurement) => typeof measurement === "string")) {
-    fail("invalid_request", "measurement allowlist entries must be strings");
-  }
+  validatePlatform(policy.platform ?? "snp");
+  validateAt(policy.at);
   // The required anchor: a mesh CA pinned out of band, OR canonical allowlist
   // bytes enforced against the stamp on the derived-CA chain. Both together is
   // fine (specific-cluster plus policy skew detection); neither leaves the
@@ -635,11 +748,18 @@ function validatePolicy(policy: VerifyPolicy): void {
     }
     requireTdxImage("tdxImage", policy.tdxImage);
   }
+  if (acceptedMeasurements(policy.measurements, policy.tdxImage).length === 0) {
+    fail(
+      "invalid_request",
+      "verification requires a non-empty measurement allowlist, or tdxImage on TDX",
+    );
+  }
   validateSnpPolicy(
     policy.platform ?? "snp",
     policy.minTcb,
     policy.snpCrl,
     policy.requireCollateral,
+    policy.tdxCollateral,
   );
 }
 
@@ -806,6 +926,7 @@ async function verifyHardwareAttestation(
   expectedRtmr3?: Uint8Array,
   minTcb?: SnpMinTcb,
   snpCrl?: Uint8Array,
+  tdxCollateral?: string,
 ): Promise<WasmVerifyResult> {
   // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
   // + vTPM quote + hardware quote), with the transcript checked against the TPM
@@ -850,7 +971,13 @@ async function verifyHardwareAttestation(
       );
     else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor);
     else if (isTdx)
-      out = await verifyTdx(JSON.stringify(bundle.evidence), hardAnchor, undefined, expectedRtmr3);
+      out = await verifyTdx(
+        JSON.stringify(bundle.evidence),
+        hardAnchor,
+        undefined,
+        expectedRtmr3,
+        tdxCollateral,
+      );
     else
       out = await verifySnp(
         bundle.evidence,
@@ -887,6 +1014,7 @@ async function verifyHardwareAttestation(
         cause: e,
       });
     }
+    if (tdxCollateral !== undefined) failTdxCollateral(e);
     fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
 
@@ -1031,6 +1159,11 @@ export async function verifyAttestation(
   validatePolicy(policy);
   const warnings: string[] = [];
   const wantPlatform = policy.platform ?? "snp";
+  const acceptedTcb = validateTdxTcbPolicy(
+    wantPlatform,
+    policy.tdxCollateral,
+    policy.tdxTcbStatuses,
+  );
   const requireFreshness = policy.requireFreshness !== false;
   const keyExchange = decodeKeyExchange(bundle, nonce, expectedXwingEk);
   const identity = await prepareIdentity(bundle, keyExchange, nonce, policy, warnings);
@@ -1043,21 +1176,26 @@ export async function verifyAttestation(
     policy.expectedRtmr3 === undefined ? undefined : decodeRtmr3(policy.expectedRtmr3),
     policy.minTcb,
     policy.snpCrl,
+    policy.tdxCollateral === undefined
+      ? undefined
+      : tdxCollateralJson(policy.tdxCollateral, policy.at),
   );
   const collateralVerified = enforceCollateralPolicy(
     result,
     wantPlatform,
-    policy.snpCrl,
+    policy.snpCrl !== undefined || policy.tdxCollateral !== undefined,
     policy.requireCollateral,
     warnings,
   );
-  // The image tuple's MRTD is an accepted launch digest alongside the
-  // explicit allowlist; RTMR[1]/[2] are compared exactly below.
+  const tdxTcb =
+    acceptedTcb === undefined
+      ? undefined
+      : enforceTdxTcb(result.tcb_status, collateralVerified, acceptedTcb);
+  // With an image tuple its MRTD is the only accepted launch digest;
+  // RTMR[1]/[2] are compared exactly below.
   const measurement = verifyMeasurement(
     result,
-    policy.tdxImage === undefined
-      ? policy.measurements
-      : [...policy.measurements, policy.tdxImage.mrtd],
+    acceptedMeasurements(policy.measurements, policy.tdxImage),
   );
   const rtmrsPinned: string[] = [];
   if (policy.tdxImage !== undefined) {
@@ -1114,6 +1252,7 @@ export async function verifyAttestation(
     reportDataMatch: result.report_data_match,
     identityBound: result.report_data_match === true,
     collateralVerified,
+    ...(tdxTcb !== undefined ? { tdxTcb } : {}),
     keyAgreementContext: identity.transcript,
     keyExchange,
     frontDoorMode: identity.frontDoorMode,
@@ -1142,7 +1281,10 @@ export interface VerifyEvidenceOptions {
    * (auto-detected from CPUID) and the TDX platforms
    */
   generation?: string;
-  /** accepted launch digests (hex sha-384); empty = warn only */
+  /**
+   * accepted launch digests (hex sha-384); empty = warn only. Mutually
+   * exclusive with `tdxImage`.
+   */
   measurements?: string[];
   /**
    * raw bytes the freshness anchor must equal (e.g. SHA-384(pubkey ‖ nonce));
@@ -1166,9 +1308,9 @@ export interface VerifyEvidenceOptions {
   /**
    * The complete TDX guest-image pin (mrtd + rtmr1 + rtmr2, each 96 lowercase
    * hex chars; see {@link VerifyPolicy.tdxImage} and `parseImageManifest`).
-   * The tuple's `mrtd` joins the `measurements` allowlist and `rtmr1`/`rtmr2`
-   * are compared exactly; a mismatch or an uncomparable claim fails closed.
-   * Requires `platform: "tdx"`.
+   * All three registers are compared exactly and the tuple replaces
+   * `measurements`; a mismatch or an uncomparable claim fails closed.
+   * Requires a TDX platform.
    */
   tdxImage?: TdxImage;
   /** Minimum SEV-SNP TCB floor; see {@link VerifyPolicy.minTcb}. SNP only. */
@@ -1178,9 +1320,19 @@ export interface VerifyEvidenceOptions {
    * {@link VerifyPolicy.snpCrl}. SNP only.
    */
   snpCrl?: Uint8Array;
+  /** Intel PCS collateral for the quote; see {@link VerifyPolicy.tdxCollateral}. `"tdx"` only. */
+  tdxCollateral?: TdxCollateral;
+  /** Accepted TDX TCB statuses; see {@link VerifyPolicy.tdxTcbStatuses}. */
+  tdxTcbStatuses?: TdxTcbStatus[];
+  /**
+   * Time `tdxCollateral` must be current at (default now). Intel certificate
+   * validity is checked against the current time regardless.
+   */
+  at?: Date;
   /**
    * Require the revocation collateral to be verified for the verdict to
-   * pass; see {@link VerifyPolicy.requireCollateral}. Requires `snpCrl`.
+   * pass; see {@link VerifyPolicy.requireCollateral}. Requires `snpCrl` or
+   * `tdxCollateral`.
    */
   requireCollateral?: boolean;
 }
@@ -1193,6 +1345,8 @@ export interface EvidenceResult {
   reportDataMatch: boolean | null;
   /** Whether revocation collateral was verified; see {@link AttestationResult.collateralVerified}. */
   collateralVerified: boolean;
+  /** The evaluated TDX TCB status; see {@link AttestationResult.tdxTcb}. */
+  tdxTcb?: TdxTcbResult;
   claims: WasmClaims;
   /** Register pins this verdict compared exactly; see {@link AttestationResult.rtmrsPinned}. */
   rtmrsPinned?: string[];
@@ -1224,6 +1378,8 @@ export async function verifyEvidence(
   }
   const warnings: string[] = [];
   const wantPlatform = opts.platform ?? "snp";
+  validatePlatform(wantPlatform);
+  validateAt(opts.at);
   const isAzSnp = wantPlatform === "az-snp";
   const isAzTdx = wantPlatform === "az-tdx";
   const isTdx = wantPlatform === "tdx";
@@ -1257,7 +1413,15 @@ export async function verifyEvidence(
     }
     requireTdxImage("tdxImage", opts.tdxImage);
   }
-  validateSnpPolicy(wantPlatform, opts.minTcb, opts.snpCrl, opts.requireCollateral);
+  const allow = acceptedMeasurements(opts.measurements, opts.tdxImage).map((m) => m.toLowerCase());
+  validateSnpPolicy(
+    wantPlatform,
+    opts.minTcb,
+    opts.snpCrl,
+    opts.requireCollateral,
+    opts.tdxCollateral,
+  );
+  const acceptedTcb = validateTdxTcbPolicy(wantPlatform, opts.tdxCollateral, opts.tdxTcbStatuses);
   const expected = opts.expectedReportData;
 
   // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
@@ -1268,7 +1432,16 @@ export async function verifyEvidence(
     if (isAzSnp)
       out = await verifyAzSnp(JSON.stringify(evidence), expected, undefined, tcbFloor, opts.snpCrl);
     else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected);
-    else if (isTdx) out = await verifyTdx(JSON.stringify(evidence), expected, undefined, wantRtmr3);
+    else if (isTdx)
+      out = await verifyTdx(
+        JSON.stringify(evidence),
+        expected,
+        undefined,
+        wantRtmr3,
+        opts.tdxCollateral === undefined
+          ? undefined
+          : tdxCollateralJson(opts.tdxCollateral, opts.at),
+      );
     else out = await verifySnp(evidence, opts.generation!, expected, tcbFloor, opts.snpCrl);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
@@ -1301,6 +1474,7 @@ export async function verifyEvidence(
         cause: e,
       });
     }
+    if (opts.tdxCollateral !== undefined) failTdxCollateral(e);
     fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
 
@@ -1313,10 +1487,14 @@ export async function verifyEvidence(
   const collateralVerified = enforceCollateralPolicy(
     result,
     wantPlatform,
-    opts.snpCrl,
+    opts.snpCrl !== undefined || opts.tdxCollateral !== undefined,
     opts.requireCollateral,
     warnings,
   );
+  const tdxTcb =
+    acceptedTcb === undefined
+      ? undefined
+      : enforceTdxTcb(result.tcb_status, collateralVerified, acceptedTcb);
 
   // Same reasoning as verifyAttestation: on bare TDX the WASM entry point
   // throws on a mismatch, but an older or substituted verifier build that
@@ -1337,11 +1515,8 @@ export async function verifyEvidence(
     enforceRegisterPin(result, 3, "deployment identity", bytesToHex(wantRtmr3), "rtmr3_denied");
   }
 
-  // Measurement allowlist (case-insensitive hex). The image tuple's MRTD is
-  // an accepted launch digest alongside the explicit allowlist.
+  // Measurement allowlist (case-insensitive hex), or the image tuple's MRTD.
   const measurement = String(result.claims.launch_digest).toLowerCase();
-  const allow = (opts.measurements ?? []).map((m) => m.toLowerCase());
-  if (opts.tdxImage !== undefined) allow.push(opts.tdxImage.mrtd);
   if (allow.length === 0) {
     warnings.push("no measurement allowlist provided — launch digest was not checked");
   } else if (!allow.includes(measurement)) {
@@ -1387,6 +1562,7 @@ export async function verifyEvidence(
     reportVersion: result.report_version ?? 0,
     reportDataMatch: result.report_data_match,
     collateralVerified,
+    ...(tdxTcb !== undefined ? { tdxTcb } : {}),
     claims: result.claims,
     ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
     warnings,

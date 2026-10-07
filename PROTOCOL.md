@@ -320,9 +320,10 @@ The `evidence` object has the attestation-rs `TdxEvidence` shape:
 The identity binding is carried directly in the TD quote's 64-byte
 `report_data`, recomputed exactly as specified above, and the quote signature
 is verified against the PCK chain embedded in the quote up to the bundled
-Intel root. The async DCAP collateral checks (CRL/TCB/QE identity) are
-skipped in the browser (`collateral_verified: false`) — TDX has no
-caller-stapled collateral path yet, unlike SNP. `claims.launch_digest` is the TD launch measurement (MRTD);
+Intel root. The DCAP collateral checks (PCK CRLs, TCB status, TD QE
+identity) run only on collateral the caller supplies (`tdxCollateral`, see
+the `verify_tdx` I/O below); without it `collateral_verified` is false.
+`claims.launch_digest` is the TD launch measurement (MRTD);
 `generation` is not applicable and is empty. The runtime measurement
 registers surface as `claims.platform_data.rtmr_0`…`rtmr_3`, each 96
 lowercase hex chars.
@@ -333,9 +334,10 @@ into RTMR[2] — so a complete image pin is the tuple **MRTD + RTMR[1] +
 RTMR[2]** from one image-build manifest (a JSON object with `mrtd`, `rtmr1`,
 `rtmr2`, each exactly 96 lowercase hex chars; all three required, unknown
 extra fields allowed). The policy layer (`tdxImage`, or `parseImageManifest`
-over the manifest file) folds the tuple's MRTD into the launch-digest
-allowlist and compares `rtmr1`/`rtmr2` exactly against the verified claims,
-failing closed on a mismatch or an absent/malformed claim. A
+over the manifest file) accepts the tuple's MRTD as the only launch digest
+(the tuple and a `measurements` list are mutually exclusive) and compares
+`rtmr1`/`rtmr2` exactly against the verified claims, failing closed on a
+mismatch or an absent/malformed claim. A
 deployment-class verdict rejects an MRTD-only TDX measurement policy; with a
 pinned mesh CA the gap is a prominent warning instead. SEV-SNP needs no
 equivalent: its launch measurement covers the full image, and the platform
@@ -478,7 +480,8 @@ The JS policy layer applies the **same** pass/fail rule as for `verify_snp`.
 verify_az_tdx(evidenceJson: string, expectedReportData?: Uint8Array,
               expectedInitDataHash?: Uint8Array) -> Promise<string (JSON)> | throws
 verify_tdx(evidenceJson: string, expectedReportData?: Uint8Array,
-           expectedInitDataHash?: Uint8Array) -> Promise<string (JSON)> | throws
+           expectedInitDataHash?: Uint8Array, expectedRtmr3?: Uint8Array,
+           collateralJson?: string) -> Promise<string (JSON)> | throws
 ```
 
 `verify_az_tdx` mirrors `verify_az_snp` for an `AzTdxEvidence` object: full
@@ -487,11 +490,33 @@ freshness anchor, AK-to-TD binding, and TD-quote signature verification.
 `verify_tdx` verifies a bare `TdxEvidence` TD quote (embedded PCK chain to the
 bundled Intel root) and checks `expectedReportData` against the quote's
 `report_data`. Both fail closed (throw) on a freshness mismatch, take no
-`generation`, surface the MRTD as `claims.launch_digest`, and return
-`collateral_verified: false` — the browser has no TDX collateral path (the
-DCAP CRL/TCB/QE checks need Intel PCS collateral the caller cannot yet
-staple), unlike the SNP entry points, which accept a caller-supplied AMD CRL.
-The JS layer surfaces the gap as `collateralVerified: false` plus a warning.
+`generation`, and surface the MRTD as `claims.launch_digest`.
+
+`verify_az_tdx` always returns `collateral_verified: false`. `verify_tdx` does
+too unless `collateralJson` carries Intel PCS v4 collateral:
+
+```jsonc
+{
+  "tcb_info": "<body of GET /tdx/certification/v4/tcb?fmspc=…, verbatim>",
+  "tcb_info_issuer_chain": "<PEM, TCB-Info-Issuer-Chain header, URL-decoded>",
+  "qe_identity": "<body of GET /tdx/certification/v4/qe/identity, verbatim>",
+  "qe_identity_issuer_chain": "<PEM, SGX-Enclave-Identity-Issuer-Chain header, URL-decoded>",
+  "pck_crl": "<base64 DER or PEM PCK CRL of the PCK certificate's issuing CA>",
+  "root_ca_crl": "<base64 DER or PEM Intel SGX Root CA CRL>",
+  "at": 1791244800 // verification time, Unix seconds
+}
+```
+
+The verifier requires Intel's signature on both JSON bodies, `id: "TDX"` and
+the quote's FMSPC on the TCB Info, `id: "TD_QE"` on the QE Identity, both
+CRLs signed by the quote's verified PCK chain, and the TCB Info, QE Identity
+and both CRLs current at `at`; certificate validity (the PCK chain and both
+issuer chains) is checked against the current time. It then checks PCK revocation and the QE identity and evaluates the TCB
+status. On success `collateral_verified` is true and `tcb_status` is
+`{ "tcb_status": "UpToDate" | …, "fmspc": "<hex>", "advisory_ids": [...] }`;
+a collateral failure throws with a `TDX collateral:` prefix, and a `Revoked`
+TCB always throws. The JS layer maps `tdxCollateral` and `at` to this input,
+reports `tdxTcb`, and enforces `tdxTcbStatuses`.
 
 The JS policy layer applies the **same** pass/fail rule as for `verify_snp`.
 

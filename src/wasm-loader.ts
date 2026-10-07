@@ -145,8 +145,12 @@ export async function verifyAzTdx(
  * `claims.launch_digest` = hex(MRTD).
  *
  * The processor generation is irrelevant for TDX, so no generation argument is
- * needed. DCAP collateral checks (PCK CRL, TCB status, TD-QE identity) need an
- * async provider and are skipped in WASM: `collateral_verified` stays `false`.
+ * needed. DCAP collateral checks (PCK CRL, TCB status, TD-QE identity) run
+ * only on caller-supplied collateral (`collateralJson`): every item is
+ * signature-checked and the collateral freshness-checked at `at`,
+ * `collateral_verified` becomes `true` and the result carries `tcb_status`; a collateral failure throws with a
+ * `TDX collateral:` prefix. Without it the checks are skipped and
+ * `collateral_verified` stays `false`.
  *
  * When `expectedRtmr3` is supplied the verifier additionally requires the TD's
  * RTMR[3] to equal it, and **throws** on a mismatch. RTMR[3] is extended after
@@ -159,6 +163,10 @@ export async function verifyAzTdx(
  * @param expectedReportData raw bytes the TD quote report_data must equal
  * @param expectedInitDataHash bytes to bind against MRCONFIGID
  * @param expectedRtmr3 48 raw bytes the TD's RTMR[3] must equal
+ * @param collateralJson Intel PCS collateral: { tcb_info, tcb_info_issuer_chain,
+ *   qe_identity, qe_identity_issuer_chain, pck_crl, root_ca_crl, at } — JSON
+ *   bodies verbatim, issuer chains as URL-decoded PEM, CRLs base64, `at` in
+ *   Unix seconds
  * @returns verification result JSON (or throws on any failure)
  */
 export async function verifyTdx(
@@ -166,7 +174,14 @@ export async function verifyTdx(
   expectedReportData?: Uint8Array,
   expectedInitDataHash?: Uint8Array,
   expectedRtmr3?: Uint8Array,
+  collateralJson?: string,
 ): Promise<string> {
   await initVerifier();
-  return verify_tdx(evidenceJson, expectedReportData, expectedInitDataHash, expectedRtmr3);
+  return verify_tdx(
+    evidenceJson,
+    expectedReportData,
+    expectedInitDataHash,
+    expectedRtmr3,
+    collateralJson,
+  );
 }

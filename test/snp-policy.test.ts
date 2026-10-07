@@ -141,18 +141,20 @@ test("requireCollateral without snpCrl is rejected upfront: it could never pass"
   );
 });
 
-test("requireCollateral on a TDX platform is rejected: no browser collateral path", async () => {
-  await assert.rejects(
-    verifyEvidence(
-      {},
-      {
-        platform: "tdx",
-        measurements: [COCO_MEASUREMENT],
-        requireCollateral: true,
-      },
-    ),
-    code("invalid_request"),
-  );
+test("requireCollateral on TDX needs tdxCollateral, and az-tdx has no collateral path", async () => {
+  for (const platform of ["tdx", "az-tdx"]) {
+    await assert.rejects(
+      verifyEvidence(
+        {},
+        {
+          platform,
+          measurements: [COCO_MEASUREMENT],
+          requireCollateral: true,
+        },
+      ),
+      code("invalid_request"),
+    );
+  }
 });
 
 // --- bare snp (verify_snp): the same gates through the legacy entry point ---

@@ -62,9 +62,8 @@ test("verify_tdx verifies a live-captured bare-metal TDX bundle", async () => {
   assert.equal(out.platform, "tdx");
   assert.equal(out.signature_valid, true, "TD quote signature + DCAP chain must verify");
   assert.equal(out.report_data_match, null, "no expected anchor → freshness not enforced, null");
-  // collateral_verified is false: the WASM path has no async provider for the
-  // Intel PCS collateral (PCK CRL, TCB status, TD-QE identity) — same trade-off
-  // the az-snp/az-tdx WASM paths document.
+  // collateral_verified is false: no Intel PCS collateral (PCK CRL, TCB
+  // status, TD-QE identity) was supplied; see tdx-tcb.test.ts.
   assert.equal(out.collateral_verified, false);
   assert.equal(out.claims.launch_digest, TDX_MRTD, "MRTD surfaces as claims.launch_digest");
 });
@@ -279,6 +278,20 @@ test("a wrong RTMR[1] or RTMR[2] fails with rtmr_denied even when MRTD matches",
       (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr_denied",
     );
   }
+});
+test("verifyEvidence refuses tdxImage next to a measurements list", async () => {
+  const { evidence } = await tdxBundle();
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "tdx",
+      measurements: ["ab".repeat(48)],
+      tdxImage: TDX_IMAGE,
+    }),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "invalid_request" &&
+      e.message.includes("mutually exclusive"),
+  );
 });
 
 // All three registers or none: a partial tuple would silently verify only

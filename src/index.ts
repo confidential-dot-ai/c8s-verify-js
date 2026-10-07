@@ -29,6 +29,7 @@ import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
 import type { TdxImage } from "./manifest.js";
+import type { TdxCollateral, TdxTcbStatus } from "./tdx-tcb.js";
 
 export { C8sVerifyError } from "./errors.js";
 export type { C8sErrorCode } from "./errors.js";
@@ -61,6 +62,7 @@ export type { MatchedWorkload, AllowlistDocument, AllowlistWorkload } from "./wo
 // mrtd+rtmr1+rtmr2 tuple `tdxImage` enforces.
 export { parseImageManifest } from "./manifest.js";
 export type { TdxImage } from "./manifest.js";
+export type { TdxCollateral, TdxTcbResult, TdxTcbStatus } from "./tdx-tcb.js";
 export { decodePEM, decodeOnePEM, encodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
 export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
@@ -70,7 +72,8 @@ const WELL_KNOWN = "/.well-known/c8s";
 
 export interface C8sClientOptions {
   baseUrl: string;
-  measurements: string[];
+  /** Accepted launch digests (hex SHA-384). Required unless `tdxImage` is set; mutually exclusive with it. */
+  measurements?: string[];
   platform?: string;
   /**
    * SEV-SNP processor generation ("milan" | "genoa" | "turin"), pinned out of
@@ -124,8 +127,9 @@ export interface C8sClientOptions {
    * with the image build (feed the manifest file to `parseImageManifest`).
    * `measurements` alone pins only MRTD — the TDVF firmware — while the guest
    * kernel and rootfs land in RTMR[1]/RTMR[2], so only the tuple identifies
-   * the image. Required for a TDX deployment-class verdict (no `meshCaPem`);
-   * strongly recommended otherwise. Requires `platform: "tdx"`.
+   * the image. Replaces `measurements`. Required for a TDX deployment-class
+   * verdict (no `meshCaPem`); strongly recommended otherwise. Requires a TDX
+   * platform.
    */
   tdxImage?: TdxImage;
   /**
@@ -143,10 +147,22 @@ export interface C8sClientOptions {
   snpCrl?: Uint8Array;
   /**
    * Require the revocation collateral to be verified for the verdict to pass
-   * (production policy). Requires `snpCrl`. See
+   * (production policy). Requires `snpCrl` or `tdxCollateral`. See
    * `VerifyPolicy.requireCollateral`.
    */
   requireCollateral?: boolean;
+  /**
+   * Intel PCS collateral for the TDX quote, fetched by the caller. Supplying
+   * it makes PCK revocation and the TCB status part of every connection's
+   * verdict (`attestation.tdxTcb`). `platform: "tdx"` only. See
+   * `VerifyPolicy.tdxCollateral`.
+   */
+  tdxCollateral?: TdxCollateral;
+  /**
+   * TDX TCB statuses to accept, default `["UpToDate"]`. Requires
+   * `tdxCollateral`. See `VerifyPolicy.tdxTcbStatuses`.
+   */
+  tdxTcbStatuses?: TdxTcbStatus[];
 }
 
 export interface RequestInit {
@@ -232,6 +248,8 @@ export class C8sClient {
       minTcb: opts.minTcb,
       snpCrl: opts.snpCrl,
       requireCollateral: opts.requireCollateral,
+      tdxCollateral: opts.tdxCollateral,
+      tdxTcbStatuses: opts.tdxTcbStatuses,
     };
   }
 
