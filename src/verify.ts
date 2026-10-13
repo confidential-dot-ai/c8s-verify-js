@@ -33,6 +33,7 @@ import {
   type TdxTcbStatus,
   type WasmTcbStatus,
 } from "./tdx-tcb.js";
+import { replayMeasuredPolicies, validateMeasuredPolicies } from "./rtmr3.js";
 
 /**
  * Minimum SEV-SNP TCB floor: security patch levels (SPLs) the reported TCB
@@ -115,6 +116,13 @@ export interface VerifyPolicy {
    * Complements `meshCaPem`, which is also cluster-unique but is regenerated
    * inside the CDS TEE on every install; the operator key survives reinstalls
    * and image rebuilds, so it can be published in advance.
+   *
+   * Pin the bare operator-key seed. A node that measures its allowlist
+   * policies extends RTMR[3] once per policy after the seed and reports the
+   * list as the bundle's `measured_policies`; it is accepted when a prefix of
+   * that list replays from the pin to the quoted register (see
+   * {@link AttestationResult.measuredPolicies}). Without this pin the list is
+   * ignored.
    *
    * TDX only — the register does not exist on SNP, and the verifier consults
    * it only on the TDX path. Combining it with any other platform is rejected
@@ -212,6 +220,12 @@ export interface AttestationBundle {
   /** The session identifier (base64url, 16 bytes), committed by report_data. */
   session_id: string;
   identity_proof: MeshIdentityProof;
+  /**
+   * The node's journal of allowlist-policy digests measured into RTMR[3]
+   * after the seed, in order. Outside the transcript: read only under an
+   * `expectedRtmr3` pin, and trusted only as far as it replays.
+   */
+  measured_policies?: string[];
 }
 
 /** Claims block inside the WASM verifier's JSON result. */
@@ -317,6 +331,12 @@ export interface AttestationResult {
    * was pinned.
    */
   rtmrsPinned?: string[];
+  /**
+   * The measured allowlist policies that replay from the `expectedRtmr3` pin
+   * to the quoted RTMR[3], in measurement order. Present only when at least
+   * one did; absent means RTMR[3] equals the pin (or no pin was set).
+   */
+  measuredPolicies?: string[];
   warnings: string[];
 }
 
@@ -623,6 +643,63 @@ function isRtmr3Mismatch(e: unknown): boolean {
   return /RTMR\[3\] does not match/i.test(errMessage(e));
 }
 
+/**
+ * Enforce the RTMR[3] pin against the verified claims. With measured policies
+ * the register may also be the pin extended by a prefix of them; that prefix
+ * is returned (empty when the register equals the pin) and, since no policy
+ * pin judges it here, warned about. Exported for direct testing; callers go
+ * through {@link verifyAttestation} / {@link verifyEvidence}.
+ */
+export function enforceRtmr3Pin(
+  result: WasmVerifyResult,
+  isTdx: boolean,
+  pin: Uint8Array,
+  measured: string[],
+  warnings: string[],
+): string[] {
+  const want = bytesToHex(pin);
+  if (measured.length === 0) {
+    // Bare TDX takes the pin as a verifier argument and fails closed inside
+    // WASM, but do not rely on that alone: an older or substituted build that
+    // ignored the argument would return a valid-looking result with the field
+    // absent. `undefined` means the comparison never ran, which is a failure.
+    if (isTdx && result.rtmr3_match !== true) {
+      fail(
+        "rtmr3_denied",
+        result.rtmr3_match === false
+          ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
+          : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
+        { details: { expected: want, got: rtmr3FromClaims(result) } },
+      );
+    }
+  } else {
+    const got = rtmrFromClaims(result, 3);
+    if (typeof got === "string" && CLAIM_REGISTER_HEX.test(got) && got !== want) {
+      const replayed = replayMeasuredPolicies(want, measured, got);
+      if (replayed === undefined) {
+        fail(
+          "rtmr3_denied",
+          "RTMR[3] does not match the pinned value, and the node's measured policy list " +
+            "does not replay from it: this is a genuine TEE, but not the deployment the pin " +
+            "was taken from",
+          { details: { expected: want, got, measuredPolicies: measured } },
+        );
+      }
+      // Mirrors `c8s verify`: a replayed history no policy pin judged.
+      warnings.push(
+        `replayed ${replayed.length} measured policies, none judged: RTMR[3] proves which ` +
+          "allowlist policies the node enforced since boot (see measuredPolicies), but no " +
+          "policy pin checked them",
+      );
+      return replayed;
+    }
+  }
+  // The verified claim is where the pin is enforced on az-tdx, whose vTPM
+  // entry point takes no RTMR[3] argument; bare TDX runs the same comparison.
+  enforceRegisterPin(result, 3, "deployment identity", want, "rtmr3_denied");
+  return [];
+}
+
 interface PreparedIdentity {
   chain: ChainResult;
   proof: MeshIdentityProof;
@@ -927,7 +1004,9 @@ async function verifyHardwareAttestation(
   minTcb?: SnpMinTcb,
   snpCrl?: Uint8Array,
   tdxCollateral?: string,
-): Promise<WasmVerifyResult> {
+  measured: string[] = [],
+  warnings: string[] = [],
+): Promise<{ result: WasmVerifyResult; measuredPolicies: string[] }> {
   // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
   // + vTPM quote + hardware quote), with the transcript checked against the TPM
   // quote's extraData. Bare tdx verifies the TD quote + DCAP chain directly,
@@ -942,6 +1021,9 @@ async function verifyHardwareAttestation(
   // result and warn later; bare snp returns a non-throwing bool either way.
   const failsClosedOnMismatch = isAzSnp || isAzTdx || isTdx;
   const hardAnchor = requireFreshness ? expected : undefined;
+  // WASM compares RTMR[3] to the pin exactly, so a measured history is
+  // replayed against the verified claim instead.
+  const wasmRtmr3 = measured.length === 0 ? expectedRtmr3 : undefined;
   // `generation` is the one responder-supplied field that reaches a
   // verification decision. It is safe unpinned because it is authenticated
   // rather than asserted — it selects the VCEK/ASK/ARK chain the report is
@@ -975,7 +1057,7 @@ async function verifyHardwareAttestation(
         JSON.stringify(bundle.evidence),
         hardAnchor,
         undefined,
-        expectedRtmr3,
+        wasmRtmr3,
         tdxCollateral,
       );
     else
@@ -995,11 +1077,11 @@ async function verifyHardwareAttestation(
         { details: { expected: bytesToHex(expected) }, cause: e },
       );
     }
-    if (expectedRtmr3 !== undefined && isRtmr3Mismatch(e)) {
+    if (wasmRtmr3 !== undefined && isRtmr3Mismatch(e)) {
       fail(
         "rtmr3_denied",
         "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from",
-        { details: { expected: bytesToHex(expectedRtmr3) }, cause: e },
+        { details: { expected: bytesToHex(wasmRtmr3) }, cause: e },
       );
     }
     if (minTcb !== undefined && isTcbBelowFloor(e)) {
@@ -1024,28 +1106,11 @@ async function verifyHardwareAttestation(
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
-  if (expectedRtmr3 !== undefined) {
-    // Bare TDX takes the pin as a verifier argument and fails closed inside
-    // WASM, but do not rely on that alone: the verifier core only *records*
-    // the comparison, and an older or substituted build that ignored the
-    // argument would return a perfectly valid-looking result with the field
-    // absent. Require an explicit true — `undefined` means the comparison
-    // never ran, which is a failure, not an absence.
-    if (isTdx && result.rtmr3_match !== true) {
-      fail(
-        "rtmr3_denied",
-        result.rtmr3_match === false
-          ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
-          : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
-        { details: { expected: bytesToHex(expectedRtmr3), got: rtmr3FromClaims(result) } },
-      );
-    }
-    // The vTPM entry point has no RTMR[3] argument, so on az-tdx the verified
-    // claim is where the pin is enforced. Bare TDX runs it too: one comparison
-    // both platforms share, rather than a check that exists on one path only.
-    enforceRegisterPin(result, 3, "deployment identity", bytesToHex(expectedRtmr3), "rtmr3_denied");
-  }
-  return result;
+  const measuredPolicies =
+    expectedRtmr3 === undefined
+      ? []
+      : enforceRtmr3Pin(result, isTdx, expectedRtmr3, measured, warnings);
+  return { result, measuredPolicies };
 }
 
 function verifyMeasurement(result: WasmVerifyResult, allowlist: string[]): string {
@@ -1167,7 +1232,10 @@ export async function verifyAttestation(
   const requireFreshness = policy.requireFreshness !== false;
   const keyExchange = decodeKeyExchange(bundle, nonce, expectedXwingEk);
   const identity = await prepareIdentity(bundle, keyExchange, nonce, policy, warnings);
-  const result = await verifyHardwareAttestation(
+  // The list never widens anything: without the pin it is not even read.
+  const measured =
+    policy.expectedRtmr3 === undefined ? [] : validateMeasuredPolicies(bundle.measured_policies);
+  const { result, measuredPolicies } = await verifyHardwareAttestation(
     bundle,
     identity.transcript,
     wantPlatform,
@@ -1179,6 +1247,8 @@ export async function verifyAttestation(
     policy.tdxCollateral === undefined
       ? undefined
       : tdxCollateralJson(policy.tdxCollateral, policy.at),
+    measured,
+    warnings,
   );
   const collateralVerified = enforceCollateralPolicy(
     result,
@@ -1202,8 +1272,8 @@ export async function verifyAttestation(
     rtmrsPinned.push(...enforceTdxImagePins(result, policy.tdxImage));
   }
   if (policy.expectedRtmr3 !== undefined) {
-    // Enforced above by verifyHardwareAttestation (rtmr3_match must be true);
-    // recorded here so the result reports every register the verdict pinned.
+    // Enforced above by verifyHardwareAttestation; recorded here so the
+    // result reports every register the verdict pinned.
     rtmrsPinned.push(`3:${policy.expectedRtmr3.toLowerCase()}`);
   }
   verifyFreshness(result, identity.transcript, requireFreshness, warnings);
@@ -1261,6 +1331,7 @@ export async function verifyAttestation(
     workload,
     trustClass: policy.meshCaPem !== undefined ? "specific-cluster" : "deployment-class",
     ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
+    ...(measuredPolicies.length > 0 ? { measuredPolicies } : {}),
     warnings,
   };
 }
@@ -1302,9 +1373,18 @@ export interface VerifyEvidenceOptions {
    * expected TDX RTMR[3] (96 hex chars), pinned out of band; a mismatch fails
    * closed. Where `measurements` pins the build, this pins the deployment —
    * RTMR[3] carries the operator key bound at launch, which a reproducible
-   * image digest cannot. Requires `platform: "tdx"`.
+   * image digest cannot. Pin the bare operator-key seed; a node that measures
+   * its allowlist policies is accepted when a prefix of `measuredPolicies`
+   * replays from it. Requires a TDX platform.
    */
   expectedRtmr3?: string;
+  /**
+   * The node's measured allowlist-policy digests (`sha256:<hex>`, at most
+   * 256), as reported next to the evidence; see
+   * {@link AttestationBundle.measured_policies}. Read only with
+   * `expectedRtmr3`.
+   */
+  measuredPolicies?: string[];
   /**
    * The complete TDX guest-image pin (mrtd + rtmr1 + rtmr2, each 96 lowercase
    * hex chars; see {@link VerifyPolicy.tdxImage} and `parseImageManifest`).
@@ -1350,6 +1430,8 @@ export interface EvidenceResult {
   claims: WasmClaims;
   /** Register pins this verdict compared exactly; see {@link AttestationResult.rtmrsPinned}. */
   rtmrsPinned?: string[];
+  /** Replayed measured policies; see {@link AttestationResult.measuredPolicies}. */
+  measuredPolicies?: string[];
   warnings: string[];
 }
 
@@ -1402,6 +1484,8 @@ export async function verifyEvidence(
     }
     wantRtmr3 = decodeRtmr3(opts.expectedRtmr3);
   }
+  const measured = wantRtmr3 === undefined ? [] : validateMeasuredPolicies(opts.measuredPolicies);
+  const wasmRtmr3 = measured.length === 0 ? wantRtmr3 : undefined;
   if (opts.tdxImage !== undefined) {
     // Same platform rule as expectedRtmr3: a pin the verifier would silently
     // drop is worse than no pin.
@@ -1437,7 +1521,7 @@ export async function verifyEvidence(
         JSON.stringify(evidence),
         expected,
         undefined,
-        wantRtmr3,
+        wasmRtmr3,
         opts.tdxCollateral === undefined
           ? undefined
           : tdxCollateralJson(opts.tdxCollateral, opts.at),
@@ -1448,11 +1532,11 @@ export async function verifyEvidence(
     // The vTPM/tdx verifiers fail closed (throw) on a freshness mismatch when an
     // anchor is supplied — map it to the precise report_data_mismatch code
     // instead of the generic verification_failed used for chain/signature failures.
-    if (wantRtmr3 !== undefined && isRtmr3Mismatch(e)) {
+    if (wasmRtmr3 !== undefined && isRtmr3Mismatch(e)) {
       fail(
         "rtmr3_denied",
         "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from",
-        { details: { expected: bytesToHex(wantRtmr3) }, cause: e },
+        { details: { expected: bytesToHex(wasmRtmr3) }, cause: e },
       );
     }
     if ((isVtpm || isTdx) && expected !== undefined && isFreshnessMismatch(e)) {
@@ -1496,24 +1580,8 @@ export async function verifyEvidence(
       ? undefined
       : enforceTdxTcb(result.tcb_status, collateralVerified, acceptedTcb);
 
-  // Same reasoning as verifyAttestation: on bare TDX the WASM entry point
-  // throws on a mismatch, but an older or substituted verifier build that
-  // ignored the argument would return a valid-looking result with the field
-  // absent, so require an explicit true; and on az-tdx, where the entry point
-  // takes no such argument, the verified claim is what the pin is enforced
-  // against.
-  if (wantRtmr3 !== undefined) {
-    if (isTdx && result.rtmr3_match !== true) {
-      fail(
-        "rtmr3_denied",
-        result.rtmr3_match === false
-          ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
-          : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
-        { details: { expected: bytesToHex(wantRtmr3), got: rtmr3FromClaims(result) } },
-      );
-    }
-    enforceRegisterPin(result, 3, "deployment identity", bytesToHex(wantRtmr3), "rtmr3_denied");
-  }
+  const measuredPolicies =
+    wantRtmr3 === undefined ? [] : enforceRtmr3Pin(result, isTdx, wantRtmr3, measured, warnings);
 
   // Measurement allowlist (case-insensitive hex), or the image tuple's MRTD.
   const measurement = String(result.claims.launch_digest).toLowerCase();
@@ -1565,6 +1633,7 @@ export async function verifyEvidence(
     ...(tdxTcb !== undefined ? { tdxTcb } : {}),
     claims: result.claims,
     ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
+    ...(measuredPolicies.length > 0 ? { measuredPolicies } : {}),
     warnings,
   };
 }

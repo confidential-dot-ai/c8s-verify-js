@@ -6,9 +6,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { verifyTdx } from "../src/wasm-loader.js";
-import { enforceTdxImagePins, verifyEvidence, type WasmVerifyResult } from "../src/verify.js";
+import {
+  enforceRtmr3Pin,
+  enforceTdxImagePins,
+  verifyEvidence,
+  type WasmVerifyResult,
+} from "../src/verify.js";
 import { C8sVerifyError } from "../src/errors.js";
-import { base64UrlToBytes } from "../src/base64.js";
+import { base64UrlToBytes, bytesToHex, utf8ToBytes } from "../src/base64.js";
+import { extendRegister, MAX_MEASURED_POLICIES } from "../src/rtmr3.js";
 import type { TdxEvidence } from "../src/hcl.js";
 
 // Run from source via tsx; fixtures live alongside this file in test/fixtures.
@@ -377,4 +383,202 @@ test("verifyEvidence refuses an image tuple on a non-TDX platform", async () => 
       `platform ${platform} must refuse the tuple`,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// RTMR[3] measured policies: a node that extends RTMR[3] once per allowlist
+// policy after the operator-key seed, and reports the list next to the quote
+// ---------------------------------------------------------------------------
+
+interface MeasuredPoliciesVector {
+  anchor_pem: string;
+  seed_hex: string;
+  digests: string[];
+  rtmr3_after_hex: string[];
+}
+
+async function measuredVector(): Promise<MeasuredPoliciesVector> {
+  const path = join(FIX, "..", "..", "test-vectors", "rtmr3_measured_policies_vector.json");
+  return JSON.parse(await readFile(path, "utf8")) as MeasuredPoliciesVector;
+}
+
+// Shared with the Go implementation: seed = SHA-384(0^48 ‖ SHA-384(anchor)),
+// then one extend per digest.
+test("measured-policy replay matches the Go golden vector", async () => {
+  const v = await measuredVector();
+  const anchorDigest = createHash("sha384").update(utf8ToBytes(v.anchor_pem)).digest();
+  const seed = createHash("sha384").update(new Uint8Array(48)).update(anchorDigest).digest();
+  assert.equal(seed.toString("hex"), v.seed_hex, "seed from the anchor PEM");
+
+  let reg: Uint8Array = hexToBytes(v.seed_hex);
+  for (const [i, d] of v.digests.entries()) {
+    reg = extendRegister(reg, d);
+    assert.equal(bytesToHex(reg), v.rtmr3_after_hex[i], `register after ${i + 1} extends`);
+  }
+});
+
+function rtmr3Result(rtmr3: string, rtmr3Match?: boolean): WasmVerifyResult {
+  return {
+    signature_valid: true,
+    platform: "tdx",
+    report_data_match: null,
+    ...(rtmr3Match === undefined ? {} : { rtmr3_match: rtmr3Match }),
+    claims: { launch_digest: TDX_MRTD, platform_data: { rtmr_3: rtmr3 } },
+  };
+}
+
+test("enforceRtmr3Pin replays the measured policies from the pinned seed", async () => {
+  const v = await measuredVector();
+  const seed = hexToBytes(v.seed_hex);
+  const cases: { name: string; register: string; measured: string[]; want: string[] }[] = [
+    { name: "register is the bare seed", register: v.seed_hex, measured: v.digests, want: [] },
+    {
+      name: "seed plus one policy",
+      register: v.rtmr3_after_hex[0],
+      measured: v.digests.slice(0, 1),
+      want: v.digests.slice(0, 1),
+    },
+    {
+      name: "seed plus two policies",
+      register: v.rtmr3_after_hex[1],
+      measured: v.digests,
+      want: v.digests,
+    },
+    {
+      name: "list ahead of the quote",
+      register: v.rtmr3_after_hex[0],
+      measured: v.digests,
+      want: v.digests.slice(0, 1),
+    },
+  ];
+  for (const c of cases) {
+    for (const isTdx of [true, false]) {
+      const warnings: string[] = [];
+      const got = enforceRtmr3Pin(rtmr3Result(c.register), isTdx, seed, c.measured, warnings);
+      assert.deepEqual(got, c.want, `${c.name} (isTdx=${isTdx})`);
+      assert.equal(
+        warnings.some((w) =>
+          w.startsWith(`replayed ${c.want.length} measured policies, none judged`),
+        ),
+        c.want.length > 0,
+        `${c.name} (isTdx=${isTdx}): warnings ${JSON.stringify(warnings)}`,
+      );
+    }
+  }
+});
+
+test("enforceRtmr3Pin denies a register the measured policies do not replay to", async () => {
+  const v = await measuredVector();
+  const seed = hexToBytes(v.seed_hex);
+  const cases: { name: string; register: string; measured: string[] }[] = [
+    { name: "unrelated register", register: "ff".repeat(48), measured: v.digests },
+    { name: "list behind the quote", register: v.rtmr3_after_hex[1], measured: [v.digests[0]] },
+    {
+      name: "list out of order",
+      register: v.rtmr3_after_hex[1],
+      measured: [...v.digests].reverse(),
+    },
+    { name: "malformed claim", register: "zz".repeat(48), measured: v.digests },
+  ];
+  for (const c of cases) {
+    assert.throws(
+      () => enforceRtmr3Pin(rtmr3Result(c.register), true, seed, c.measured, []),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
+      c.name,
+    );
+  }
+});
+
+// With no list the WASM comparison must have run: bare TDX requires an
+// explicit rtmr3_match even when the claim equals the pin.
+test("enforceRtmr3Pin without measured policies requires the WASM comparison on bare TDX", async () => {
+  const v = await measuredVector();
+  const seed = hexToBytes(v.seed_hex);
+  assert.deepEqual(enforceRtmr3Pin(rtmr3Result(v.seed_hex, true), true, seed, [], []), []);
+  assert.throws(
+    () => enforceRtmr3Pin(rtmr3Result(v.seed_hex), true, seed, [], []),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
+  );
+});
+
+const D1 = "sha256:" + "1".repeat(64);
+
+// The live TD's RTMR[3] equals the pin, so the list is accepted without a
+// replay. The pin then skips the WASM comparison: a wrong pin is denied by
+// the replay in JS, not by the verifier's own RTMR[3] check.
+test('verifyEvidence platform:"tdx" accepts a measured list when RTMR[3] equals the pin', async () => {
+  const { evidence } = await tdxBundle();
+  const res = await verifyEvidence(evidence, {
+    platform: "tdx",
+    measurements: [TDX_MRTD],
+    expectedRtmr3: TDX_RTMR3,
+    measuredPolicies: [D1],
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.measuredPolicies, undefined);
+  assert.ok(!res.warnings.some((w) => w.includes("none judged")));
+  assert.ok(res.rtmrsPinned?.includes(`3:${TDX_RTMR3}`));
+});
+
+test("a wrong RTMR[3] pin goes through WASM without a list and through the replay with one", async () => {
+  const { evidence } = await tdxBundle();
+  const base = { platform: "tdx", measurements: [TDX_MRTD], expectedRtmr3: "ff".repeat(48) };
+  await assert.rejects(
+    verifyEvidence(evidence, base),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "rtmr3_denied" &&
+      String((e.cause as Error)?.message).includes("RTMR[3] does not match"),
+  );
+  await assert.rejects(
+    verifyEvidence(evidence, { ...base, measuredPolicies: [D1] }),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "rtmr3_denied" &&
+      e.message.includes("does not replay"),
+  );
+});
+
+test("verifyEvidence refuses a malformed or oversized measured list under an RTMR[3] pin", async () => {
+  const { evidence } = await tdxBundle();
+  const bad: unknown[] = [
+    "sha256:" + "1".repeat(64),
+    [D1.toUpperCase()],
+    ["SHA256:" + "1".repeat(64)],
+    ["sha256:" + "1".repeat(63)],
+    ["sha256:" + "1".repeat(64) + "\n"],
+    ["1".repeat(64)],
+    [42],
+    Array.from({ length: MAX_MEASURED_POLICIES + 1 }, () => D1),
+  ];
+  for (const measuredPolicies of bad) {
+    await assert.rejects(
+      verifyEvidence(evidence, {
+        platform: "tdx",
+        measurements: [TDX_MRTD],
+        expectedRtmr3: TDX_RTMR3,
+        measuredPolicies: measuredPolicies as string[],
+      }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      `list ${JSON.stringify(measuredPolicies).slice(0, 80)} must be refused`,
+    );
+  }
+  const res = await verifyEvidence(evidence, {
+    platform: "tdx",
+    measurements: [TDX_MRTD],
+    expectedRtmr3: TDX_RTMR3,
+    measuredPolicies: Array.from({ length: MAX_MEASURED_POLICIES }, () => D1),
+  });
+  assert.equal(res.ok, true, `${MAX_MEASURED_POLICIES} entries are allowed`);
+});
+
+test("verifyEvidence ignores the measured list without an RTMR[3] pin", async () => {
+  const { evidence } = await tdxBundle();
+  const res = await verifyEvidence(evidence, {
+    platform: "tdx",
+    measurements: [TDX_MRTD],
+    measuredPolicies: ["not a digest"],
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.measuredPolicies, undefined);
 });
