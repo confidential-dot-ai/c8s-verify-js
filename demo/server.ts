@@ -18,10 +18,17 @@ import { Buffer } from "node:buffer";
 import { deriveChannel, xwingEncapsulate, XWING_EK_BYTES } from "../src/keyagreement.js";
 import { type Channel, type WireRecord } from "../src/channel.js";
 import { cborEncode, cborDecode, type CborValue } from "../src/cbor.js";
-import { bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8 } from "../src/base64.js";
+import {
+  bytesToBase64Url,
+  base64UrlToBytes,
+  hexToBytes,
+  utf8ToBytes,
+  bytesToUtf8,
+} from "../src/base64.js";
 import { decodePEM } from "../src/pem.js";
 import { NONCE_BYTES } from "../src/nonce.js";
 import { mintIdentityProof } from "../test/mint-identity.js";
+import { DEMO_ROUTE_DIGEST } from "./config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Run from source via tsx; this file lives at demo/, so the repo root — the
@@ -171,6 +178,7 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         nonce,
         leafDer,
         caDer,
+        hexToBytes(DEMO_ROUTE_DIGEST),
         leafKeyPem,
       );
       const channel = await deriveChannel("server", sharedSecret, minted.transcript, sessionId);
@@ -224,6 +232,26 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
         headers?: CborValue;
         body?: Uint8Array;
       };
+      // Mirror the router: exactly one sealed Host and no Upgrade, or 400; a
+      // target not in origin form matches no route, 404.
+      const sealedNames = (Array.isArray(env.headers) ? env.headers : []).map((pair) =>
+        Array.isArray(pair) && typeof pair[0] === "string" ? pair[0].toLowerCase() : "",
+      );
+      const refusal: [number, string] | undefined =
+        sealedNames.filter((name) => name === "host").length !== 1
+          ? [400, "the sealed request must carry exactly one Host header"]
+          : sealedNames.includes("upgrade")
+            ? [400, "the tunnel does not carry protocol upgrades"]
+            : typeof env.path !== "string" || !env.path.startsWith("/")
+              ? [404, "404 page not found"]
+              : undefined;
+      if (refusal !== undefined) {
+        const sealed = await channel.sealResponse(
+          cborEncode({ status: refusal[0], body: utf8ToBytes(refusal[1]) }),
+          record.seq,
+        );
+        return cbor(res, 200, { seq: sealed.seq, ct: sealed.ct });
+      }
       const body = env.body ?? new Uint8Array(0);
       const reply = utf8ToBytes(
         `LB enclave received ${body.length} bytes over the over-encrypted channel for ` +

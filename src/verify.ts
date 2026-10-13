@@ -5,11 +5,12 @@
 import { verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
 import { verifyCertChain, type Certificate, type ChainResult } from "./x509.js";
 import { decodePEM } from "./pem.js";
-import { bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
+import { bytesToHex, base64UrlToBytes, constantTimeEqual, hexToBytes } from "./base64.js";
 import { fail } from "./errors.js";
 import type { Evidence } from "./hcl.js";
 import {
   BINDING_ATTEST_PQ,
+  ROUTE_DIGEST_BYTES,
   identityTranscriptHash,
   selectPinnedCA,
   verifyMeshIdentityProof,
@@ -143,6 +144,13 @@ export interface VerifyPolicy {
    */
   tdxImage?: TdxImage;
   /**
+   * Accepted route digests, each 64 lowercase hex characters: SHA-256 of a
+   * route manifest, as `c8s routes digest` prints it. Optional. When set, a
+   * bundle whose route digest is not one of these fails (`route_denied`).
+   * Pass the old and the new digest together to roll a manifest over.
+   */
+  routeDigests?: string[];
+  /**
    * Minimum SEV-SNP TCB floor, pinned from AMD security bulletins. A verified
    * report whose reported TCB is below any component fails closed
    * (`tcb_denied`). Measurement pinning does not replace this: a genuine,
@@ -211,6 +219,11 @@ export interface AttestationBundle {
   xwing_ct: string;
   /** The session identifier (base64url, 16 bytes), committed by report_data. */
   session_id: string;
+  /**
+   * SHA-256 of the route manifest the router had applied (64 lowercase hex),
+   * committed by the transcript.
+   */
+  route_digest: string;
   identity_proof: MeshIdentityProof;
 }
 
@@ -292,6 +305,11 @@ export interface AttestationResult {
   keyExchange: KeyExchangeEcho;
   /** The front-door credential model the endpoint committed into the verified transcript. */
   frontDoorMode: string;
+  /**
+   * The route digest (64 lowercase hex) the verified transcript commits: the
+   * route manifest the router had applied when it admitted the session.
+   */
+  routeDigest: string;
   cert: CertInfo;
   claims: WasmClaims;
   /**
@@ -628,6 +646,7 @@ interface PreparedIdentity {
   proof: MeshIdentityProof;
   transcript: Uint8Array;
   frontDoorMode: string;
+  routeDigest: string;
 }
 
 /**
@@ -657,6 +676,54 @@ function acceptedMeasurements(
     }
   }
   return tdxImage !== undefined ? [tdxImage.mrtd] : (measurements ?? []);
+}
+
+const ROUTE_DIGEST_HEX = new RegExp(`^[0-9a-f]{${ROUTE_DIGEST_BYTES * 2}}$`);
+
+/** Validate the routeDigests pin set; shared with the client constructor. */
+export function validateRouteDigests(routeDigests: string[] | undefined): void {
+  if (routeDigests === undefined) return;
+  if (!Array.isArray(routeDigests) || routeDigests.length === 0) {
+    fail(
+      "invalid_request",
+      "routeDigests must be a non-empty array when set: an empty pin set accepts nothing",
+    );
+  }
+  for (const digest of routeDigests) {
+    if (typeof digest !== "string" || !ROUTE_DIGEST_HEX.test(digest)) {
+      fail(
+        "invalid_request",
+        `routeDigests entry ${JSON.stringify(digest)} is not ${ROUTE_DIGEST_BYTES * 2} lowercase hex characters`,
+      );
+    }
+  }
+}
+
+/**
+ * Decode the bundle's route digest for the transcript. The value is not
+ * trusted here: the transcript recomputed from it fails unless it is the
+ * digest the evidence commits.
+ */
+function decodeRouteDigest(bundle: AttestationBundle): Uint8Array {
+  const digest = bundle.route_digest;
+  if (typeof digest !== "string" || !ROUTE_DIGEST_HEX.test(digest)) {
+    fail(
+      "identity_binding",
+      `attestation response route_digest must be ${ROUTE_DIGEST_BYTES * 2} lowercase hex characters, got ${JSON.stringify(digest)}`,
+      { details: { field: "route_digest" } },
+    );
+  }
+  return hexToBytes(digest);
+}
+
+/** Check a transcript-verified route digest against the pin set. */
+function enforceRouteDigests(digest: string, pins: string[] | undefined): void {
+  if (pins === undefined || pins.includes(digest)) return;
+  fail(
+    "route_denied",
+    `the evidence binds route digest ${digest}, want one of ${pins.join(", ")}`,
+    { details: { expected: [...pins], got: digest } },
+  );
 }
 
 function validatePolicy(policy: VerifyPolicy): void {
@@ -748,6 +815,7 @@ function validatePolicy(policy: VerifyPolicy): void {
     }
     requireTdxImage("tdxImage", policy.tdxImage);
   }
+  validateRouteDigests(policy.routeDigests);
   if (acceptedMeasurements(policy.measurements, policy.tdxImage).length === 0) {
     fail(
       "invalid_request",
@@ -860,6 +928,7 @@ async function prepareIdentity(
   if (typeof bundle.front_door_mode !== "string" || bundle.front_door_mode === "") {
     fail("identity_binding", "attestation response omitted front_door_mode");
   }
+  const routeDigest = decodeRouteDigest(bundle);
 
   const leafBlocks = decodePEM(bundle.cds_cert_pem, "CERTIFICATE");
   if (leafBlocks.length === 0) {
@@ -913,8 +982,15 @@ async function prepareIdentity(
     nonce,
     chain.leaf.der,
     chain.ca.der,
+    routeDigest,
   );
-  return { chain, proof: bundle.identity_proof, transcript, frontDoorMode: bundle.front_door_mode };
+  return {
+    chain,
+    proof: bundle.identity_proof,
+    transcript,
+    frontDoorMode: bundle.front_door_mode,
+    routeDigest: bundle.route_digest,
+  };
 }
 
 async function verifyHardwareAttestation(
@@ -1213,6 +1289,7 @@ export async function verifyAttestation(
     identity.chain.leaf,
     identity.chain.ca,
   );
+  enforceRouteDigests(identity.routeDigest, policy.routeDigests);
   // Workload policy runs LAST: the stamp is CA-vouched, so it is meaningful
   // only once steps 1–5 (versions, evidence, measurement, transcript, proof,
   // chain) have all passed.
@@ -1256,6 +1333,7 @@ export async function verifyAttestation(
     keyAgreementContext: identity.transcript,
     keyExchange,
     frontDoorMode: identity.frontDoorMode,
+    routeDigest: identity.routeDigest,
     cert: certInfo(identity.chain),
     claims: result.claims,
     workload,

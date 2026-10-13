@@ -12,6 +12,7 @@
 
 import { generateNonce } from "./nonce.js";
 import {
+  validateRouteDigests,
   verifyAttestation,
   type AttestationBundle,
   type AttestationResult,
@@ -163,13 +164,21 @@ export interface C8sClientOptions {
    * `tdxCollateral`. See `VerifyPolicy.tdxTcbStatuses`.
    */
   tdxTcbStatuses?: TdxTcbStatus[];
+  /**
+   * Accepted route digests (64 lowercase hex each, as `c8s routes digest`
+   * prints them). Optional; any one must match the digest the evidence
+   * binds. See `VerifyPolicy.routeDigests`.
+   */
+  routeDigests?: string[];
 }
 
 export interface RequestInit {
   method?: string;
   /**
    * Request headers: a plain record, or ordered [name, value] pairs when a
-   * field repeats (Cookie). Duplicate pairs reach the backend intact.
+   * field repeats (Cookie). Duplicate pairs reach the backend intact. Without
+   * a `Host` field, `Host` is the base URL's host; more than one is refused.
+   * Names and values must be strings.
    */
   headers?: Record<string, string> | [string, string][];
   body?: string | Uint8Array;
@@ -227,7 +236,9 @@ export class C8sClient {
           "against the mesh leaf's matched-workload stamp (deployment-class), or both",
       );
     }
+    validateRouteDigests(opts.routeDigests);
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    originHost(this.baseUrl);
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
     const f = opts.fetch ?? globalThis.fetch?.bind(globalThis);
     if (!f) {
@@ -250,6 +261,7 @@ export class C8sClient {
       requireCollateral: opts.requireCollateral,
       tdxCollateral: opts.tdxCollateral,
       tdxTcbStatuses: opts.tdxTcbStatuses,
+      routeDigests: opts.routeDigests,
     };
   }
 
@@ -319,9 +331,11 @@ export class Session {
   readonly sessionId: string;
   /** Verification result: measurement, platform, cert info, warnings, ... */
   readonly attestation: AttestationResult;
+  private readonly _host: string;
 
   constructor(o: SessionOptions) {
     this.baseUrl = o.baseUrl;
+    this._host = originHost(o.baseUrl);
     this.prefix = o.prefix;
     this._fetch = o.fetch;
     this.channel = o.channel;
@@ -345,8 +359,14 @@ export class Session {
    * endpoint, so a TLS-terminating proxy in front of the LB sees only ciphertext.
    * The LB enclave decrypts it, forwards the plaintext request to the backend
    * (over the cluster raTLS mesh), and seals the response back.
+   *
+   * The router routes by the sealed `Host` header, so `path` must be in origin
+   * form (start with `/`) and the headers may carry at most one `Host`.
    */
   async fetch(path: string, init: RequestInit = {}): Promise<TunnelResponse> {
+    if (typeof path !== "string" || !path.startsWith("/")) {
+      fail("invalid_request", `request path must start with "/", got ${JSON.stringify(path)}`);
+    }
     const method = (init.method ?? "GET").toUpperCase();
     const bodyBytes =
       init.body === undefined
@@ -354,9 +374,10 @@ export class Session {
         : typeof init.body === "string"
           ? utf8ToBytes(init.body)
           : init.body;
-    const headerPairs: [string, string][] = Array.isArray(init.headers)
-      ? init.headers
-      : Object.entries(init.headers ?? {});
+    const headerPairs = withHost(
+      Array.isArray(init.headers) ? init.headers : Object.entries(init.headers ?? {}),
+      this._host,
+    );
 
     const envelope = {
       method,
@@ -388,6 +409,54 @@ export class Session {
       text: () => bytesToUtf8(bytes),
     };
   }
+}
+
+/**
+ * The Host a sealed request defaults to: the base URL's host, with its port
+ * when non-default. A relative base URL resolves against the page.
+ */
+function originHost(baseUrl: string): string {
+  let url: URL | undefined;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    try {
+      url = new URL(baseUrl, globalThis.location?.href);
+    } catch {
+      // Reported below with the expected form; a runtime may throw on `location`.
+    }
+  }
+  if (url === undefined || !["http:", "https:"].includes(url.protocol) || url.host === "") {
+    fail(
+      "invalid_request",
+      `baseUrl ${JSON.stringify(baseUrl)} must be https://HOST[:PORT] (or http), or a path ` +
+        "resolved against the page",
+    );
+  }
+  return url.host;
+}
+
+/** Return the request headers with exactly one Host field: the caller's, or `host` appended. */
+function withHost(pairs: [string, string][], host: string): [string, string][] {
+  let hosts = 0;
+  for (const pair of pairs) {
+    if (!Array.isArray(pair) || typeof pair[0] !== "string" || typeof pair[1] !== "string") {
+      fail("invalid_request", "request headers must be [name, value] string pairs");
+    }
+    const name = pair[0].toLowerCase();
+    if (name === "upgrade") {
+      fail("invalid_request", "the tunnel carries one buffered response, not a protocol upgrade");
+    }
+    if (name === "host") {
+      if (pair[1].trim() === "") fail("invalid_request", "request Host header is empty");
+      hosts++;
+    }
+  }
+  if (hosts > 1) {
+    fail("invalid_request", `request carries ${hosts} Host headers; the router accepts one`);
+  }
+  if (hosts === 1) return pairs;
+  return [...pairs, ["Host", host]];
 }
 
 /** First value of each field, for the collapsed record view. */

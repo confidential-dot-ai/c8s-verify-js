@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { C8sClient } from "../src/index.js";
-import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "../demo/config.js";
+import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS, DEMO_ROUTE_DIGEST } from "../demo/config.js";
 import { loadFixtures } from "./helpers.js";
 
 // Run from source via tsx; the repo root is one directory up (test/ -> root),
@@ -43,6 +43,7 @@ test("end-to-end: identity-bound attestation and transcript-keyed channel", asyn
       measurements: DEMO_MEASUREMENTS,
       requireFreshness: DEMO_REQUIRE_FRESHNESS,
       meshCaPem,
+      routeDigests: [DEMO_ROUTE_DIGEST],
     });
     const session = await client.connect();
     assert.equal(session.attestation.platform, "snp");
@@ -51,6 +52,7 @@ test("end-to-end: identity-bound attestation and transcript-keyed channel", asyn
     assert.equal(session.attestation.keyAgreementContext.length, 48);
     assert.equal(session.attestation.cert.subjectCN, "lb.demo.c8s.local");
     assert.equal(session.attestation.trustClass, "specific-cluster"); // meshCaPem pinned
+    assert.equal(session.attestation.routeDigest, DEMO_ROUTE_DIGEST);
 
     const msg = "round-trip over the post-quantum channel";
     const res = await session.fetch("/v1/echo", { method: "POST", body: msg });

@@ -16,7 +16,7 @@ import {
   utf8ToBytes,
   bytesToUtf8,
 } from "../src/base64.js";
-import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS } from "./config.js";
+import { DEMO_MEASUREMENTS, DEMO_REQUIRE_FRESHNESS, DEMO_ROUTE_DIGEST } from "./config.js";
 
 const stepsEl = document.getElementById("steps")!;
 const runBtn = document.getElementById("run") as HTMLButtonElement;
@@ -116,22 +116,26 @@ async function run(): Promise<void> {
           measurements: DEMO_MEASUREMENTS,
           requireFreshness: DEMO_REQUIRE_FRESHNESS,
           meshCaPem: pinnedCa,
+          routeDigests: [DEMO_ROUTE_DIGEST],
         },
         keyPair.ek,
       );
     } catch (e) {
       // Attribute the failure to the right step.
-      const err = e as { code?: string; message?: string };
+      const err = e as { code?: string; message?: string; details?: { field?: unknown } };
       const code = err.code ?? "verification_failed";
       if (code === "verification_failed") set("wasm", "bad", `✗ ${err.message}`);
       else if (code === "measurement_denied") {
         set("wasm", "ok", "signature OK");
         set("measure", "bad", `✗ ${err.message}`);
-      } else if (code === "report_data_mismatch") {
+      } else if (code === "report_data_mismatch" || code === "route_denied") {
         set("wasm", "ok");
         set("measure", "ok");
         set("binding", "bad", `✗ ${err.message}`);
-      } else if (code === "nonce_mismatch") {
+      } else if (
+        code === "nonce_mismatch" ||
+        (code === "identity_binding" && err.details?.field === "route_digest")
+      ) {
         set("fetch", "bad", `✗ ${err.message}`);
       } else if (code === "identity_binding" || code.includes("cert")) {
         set("wasm", "ok");
@@ -166,7 +170,8 @@ async function run(): Promise<void> {
       "ok",
       `leaf CN=${result.cert.subjectCN}  issuer CN=${result.cert.issuerCN}\n` +
         `leaf sha256=${result.cert.sha256.slice(0, 32)}…\n` +
-        `mesh-CA sha256=${result.cert.caSha256.slice(0, 32)}… (pinned)`,
+        `mesh-CA sha256=${result.cert.caSha256.slice(0, 32)}… (pinned)\n` +
+        `route digest=${result.routeDigest.slice(0, 32)}… (pinned)`,
     );
 
     // 7. decapsulate the attested ciphertext and derive the channel: no second
@@ -195,7 +200,11 @@ async function run(): Promise<void> {
     const envelope = {
       method: "POST",
       path: "/v1/echo",
-      headers: { "content-type": "text/plain" },
+      // The router routes by the sealed Host; Session.fetch adds it for you.
+      headers: [
+        ["content-type", "text/plain"],
+        ["host", location.host],
+      ],
       body: utf8ToBytes(msg),
     };
     const rec = await channel.sealRequest(cborEncode(envelope));

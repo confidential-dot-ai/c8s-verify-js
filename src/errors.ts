@@ -67,6 +67,9 @@ export type C8sErrorCode =
   // bytes: CDS decided the match under a different policy document than the
   // one the caller holds.
   | "allowlist_denied"
+  // The response binds a route digest outside the pinned routeDigests set:
+  // the router applied a manifest other than the ones the caller accepts.
+  | "route_denied"
   | "unsupported";
 
 export interface C8sErrorOptions {

@@ -125,8 +125,8 @@ dropped.
 The protocol closes the copied-public-chain gap in two ways:
 
 - Hardware evidence commits to both key-exchange messages, the session id,
-  the client nonce, the exact mesh leaf, and the issuing CA in one
-  domain-separated transcript.
+  the client nonce, the exact mesh leaf, the issuing CA, and the route digest
+  in one domain-separated transcript.
 - The mesh leaf signs that transcript, proving possession of the corresponding
   private key. Copying the public certificate chain is no longer sufficient.
 
@@ -155,7 +155,7 @@ npm install c8s-verify
 import { C8sClient, parseImageManifest } from "c8s-verify";
 
 const client = new C8sClient({
-  baseUrl: "https://lb.example.com",
+  baseUrl: "https://lb.example.com", // a relative path needs a page to resolve against
   meshCaPem: pinnedMeshCaPem,                              // specific-cluster anchor
   //   ^ or/and pass `allowlist` (the exact canonical allowlist bytes) for a
   //     deployment-class anchor enforced against the mesh leaf's
@@ -172,6 +172,9 @@ const client = new C8sClient({
   // deployment-class verdict (no meshCaPem). On SEV-SNP, pin the launch
   // digest instead: measurements: ["<expected hex SHA-384 launch digest>"].
   tdxImage: parseImageManifest(imageManifestBytes),
+  // Optional. Accepted route digests (`c8s routes digest` output); any one
+  // must match. Pass the old and the new digest while a manifest rolls over.
+  routeDigests: ["<64 lowercase hex route digest>"],
 });
 
 // Posts a fresh nonce + X-Wing encapsulation key, verifies the TEE evidence,
@@ -180,9 +183,11 @@ const client = new C8sClient({
 // attestation and key exchange are one round trip.
 const session = await client.connect();
 console.log(session.attestation.measurement, session.attestation.cert.sha256);
+console.log(session.attestation.routeDigest); // the route manifest the router applied
 
 // All traffic on `session.fetch` is end-to-end encrypted to the LB's enclave,
-// underneath whatever TLS terminator sits in front of it.
+// underneath whatever TLS terminator sits in front of it. The path must start
+// with "/"; Host defaults to the base URL's host.
 const res = await session.fetch("/v1/chat", { method: "POST", body: prompt });
 console.log(res.text());
 ```
@@ -199,13 +204,33 @@ fails with a typed `channel_error` (HTTP 401), and the embedding app re-runs
 `X-C8s-Exporter` header), so an application can bind bearer tokens to this
 exact attested channel.
 
+The router routes each tunnelled request by the `Host` header sealed inside it.
+When your headers carry no `Host`, `session.fetch` adds the base URL's host
+(with the port when non-default); to reach another virtual host on the same
+router, pass `Host` yourself. More than one or an empty `Host`, an `Upgrade`
+header, or a path not starting with `/` throws `invalid_request` before
+anything is sent.
+
+**Route digest.** The evidence binds the route digest (hardware-bound only
+when `identityBound` is true): the SHA-256 of the route manifest the router
+had applied when it admitted the session.
+`session.attestation.routeDigest` reports it as 64 lowercase hex characters.
+Pin `routeDigests` to accept only the manifests you know; a different digest
+fails with `route_denied`, naming the expected and received digests. To roll a
+manifest over without failing, pin the old and the new digest together, then
+drop the old one once every router replica has applied the new one. The
+digest identifies the manifest at admission only: a manifest the router
+applies later routes the session's later requests without new evidence, so
+call `client.connect()` again when you need a fresh bound. This library does
+not verify the published manifest under the operator keys.
+
 What is verified, and in what order: nonce + `xwing_ek` echo → response version
 is exactly `c8s/attest-pq/v1` → served leaf chains to the pinned or
 transcript-derived mesh CA → hardware signature + certificate chain (WASM;
 SEV-SNP VCEK or TDX DCAP, per the policy `platform`) → launch measurement ∈ a
 non-empty allowlist → `report_data` commits the key exchange, session id,
-nonce, leaf, and CA → leaf
-proof-of-possession signature → matched-workload stamp (only when
+nonce, leaf, CA, and route digest → leaf proof-of-possession signature →
+route digest in `routeDigests` (only when pinned) → matched-workload stamp (only when
 `workloadName`/`allowlist` is pinned, and only after everything else passed).
 The same transcript is the HKDF context. Any failure throws a typed
 `C8sVerifyError` and no channel is established.

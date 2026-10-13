@@ -14,8 +14,8 @@ import {
 import { generateNonce } from "../src/nonce.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { DEMO_MEASUREMENTS } from "../demo/config.js";
-import { buildBundle, loadFixtures } from "./helpers.js";
-import { base64ToBytes, bytesToBase64, bytesToBase64Url } from "../src/base64.js";
+import { buildBundle, loadFixtures, TEST_ROUTE_DIGEST } from "./helpers.js";
+import { base64ToBytes, bytesToBase64, bytesToBase64Url, bytesToHex } from "../src/base64.js";
 import { certificateHashBase64Url } from "../src/identity.js";
 import { fingerprintSHA256 } from "../src/x509.js";
 import { allowlistDigestHex } from "../src/workload.js";
@@ -62,6 +62,131 @@ test("rejects a bundle whose advertised front_door_mode differs from the committ
     () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
   );
+});
+
+const ROUTE_HEX = bytesToHex(TEST_ROUTE_DIGEST);
+const OTHER_ROUTE_HEX = "ab".repeat(32);
+
+test("returns the route digest the transcript commits", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const r = await verifyAttestation(bundle, nonce, policy(meshCaPem));
+  assert.equal(r.routeDigest, ROUTE_HEX);
+});
+
+test("rejects a missing or malformed route_digest", async () => {
+  const cases: Record<string, unknown> = {
+    missing: undefined,
+    empty: "",
+    "upper-case": ROUTE_HEX.toUpperCase(),
+    short: ROUTE_HEX.slice(2),
+    long: ROUTE_HEX + "00",
+    "not hex": "zz".repeat(32),
+    "trailing newline": ROUTE_HEX + "\n",
+    number: 42,
+  };
+  for (const [name, value] of Object.entries(cases)) {
+    const nonce = generateNonce();
+    const { bundle, meshCaPem } = await buildBundle(nonce);
+    (bundle as unknown as Record<string, unknown>).route_digest = value;
+    await assert.rejects(
+      () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
+      (e: unknown) =>
+        e instanceof C8sVerifyError &&
+        e.code === "identity_binding" &&
+        e.details.field === "route_digest",
+      name,
+    );
+  }
+});
+
+test("rejects a route_digest the transcript does not commit", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  bundle.route_digest = OTHER_ROUTE_HEX;
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem)),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "identity_binding" &&
+      e.message.includes("proof-of-possession"),
+  );
+});
+
+test("accepts a route digest in the pin set", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  const r = await verifyAttestation(
+    bundle,
+    nonce,
+    policy(meshCaPem, { routeDigests: [OTHER_ROUTE_HEX, ROUTE_HEX] }),
+  );
+  assert.equal(r.routeDigest, ROUTE_HEX);
+});
+
+test("pins the committed digest, whichever it is", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, {
+    routeDigest: new Uint8Array(32).fill(0xab),
+  });
+  const r = await verifyAttestation(
+    bundle,
+    nonce,
+    policy(meshCaPem, { routeDigests: [OTHER_ROUTE_HEX] }),
+  );
+  assert.equal(r.routeDigest, OTHER_ROUTE_HEX);
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem, { routeDigests: [ROUTE_HEX] })),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "route_denied",
+  );
+});
+
+test("rejects a route digest outside the pin set, naming both", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem, { routeDigests: [OTHER_ROUTE_HEX] })),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "route_denied" &&
+      e.message.includes(ROUTE_HEX) &&
+      e.message.includes(OTHER_ROUTE_HEX) &&
+      e.details.got === ROUTE_HEX,
+  );
+});
+
+test("a forged route_digest outside the pin set fails the transcript, not the pin", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  bundle.route_digest = OTHER_ROUTE_HEX;
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, policy(meshCaPem, { routeDigests: [ROUTE_HEX] })),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+  );
+});
+
+test("rejects a malformed route digest pin set", async () => {
+  const cases: Record<string, unknown> = {
+    empty: [],
+    "not an array": ROUTE_HEX,
+    "upper-case": [ROUTE_HEX.toUpperCase()],
+    short: [ROUTE_HEX.slice(2)],
+    "not a string": [42],
+  };
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce);
+  for (const [name, routeDigests] of Object.entries(cases)) {
+    await assert.rejects(
+      () =>
+        verifyAttestation(
+          bundle,
+          nonce,
+          policy(meshCaPem, { routeDigests: routeDigests as string[] }),
+        ),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      name,
+    );
+  }
 });
 
 test("verifies an acme front-door bundle (recorded evidence)", async () => {

@@ -159,6 +159,7 @@ Response is `application/json`:
   "xwing_ek": "<echoed b64url 1216-byte client encapsulation key>",
   "xwing_ct": "<b64url 1120-byte X-Wing ciphertext>",
   "session_id": "<b64url 16-byte session identifier>",
+  "route_digest": "<64 lowercase hex: SHA-256 of the route manifest the router applied>",
   "identity_proof": {
     "algorithm": "ecdsa-sha384",
     "leaf_sha256": "<b64url SHA-256 of leaf DER>",
@@ -178,7 +179,9 @@ specified in their sections below. Everything outside `evidence` (and the
 binding recomputation) is platform-independent.
 
 The `version`, `cds_cert_pem`, `front_door_mode`, `xwing_ek`, `xwing_ct`,
-`session_id`, and `identity_proof` fields are mandatory. A live client MUST check that `nonce`
+`session_id`, `route_digest`, and `identity_proof` fields are mandatory. A
+client MUST refuse a `route_digest` that is not exactly 64 lowercase hex
+characters. A live client MUST check that `nonce`
 and `xwing_ek` exactly echo the values it sent (`xwing_ek` is echoed so a
 saved bundle stays verifiable offline; in that offline mode the result is not
 a freshness proof). The LB re-reads the TEE-held mesh leaf, private key, and
@@ -201,6 +204,7 @@ transcript = LP("c8s-verify/v1")
           || LP(xwing_ct(1120))
           || LP(session_id(16))
           || LP(nonce(32))
+          || LP(route_digest(32))
 
 transcript_hash = SHA-384(transcript)
 report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
@@ -212,10 +216,22 @@ changes `transcript_hash` and therefore fails the hardware `report_data`
 match, the proof-of-possession signature, and the key schedule (whose salt is
 `transcript_hash`) simultaneously.
 
+`route_digest` is the 32 bytes the bundle's hex `route_digest` decodes to: the
+SHA-256 of the route manifest the router had applied when it admitted the
+session. The client recomputes the transcript with the bundle's value, so a
+forged value fails the `report_data` match and the proof signature. The digest
+identifies the manifest at admission; a manifest applied later routes the
+session's later requests without new evidence. A client that pins
+`routeDigests` refuses any other digest with `route_denied`.
+
 The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
 is deliberately unchanged by the endpoint move (as are the HKDF info string and
 tunnel AADs below): only the bundle's `version` field carries the endpoint
 binding id `c8s/attest-pq/v1`.
+
+The route digest field changed this layout in place, under the same binding id
+and with no negotiation: a client and a router on different layouts fail
+verification, and the channel fails to open, with no version error.
 
 The 64-byte anchor is identical on every platform: SEV-SNP `report_data` and
 the TDX TD-quote `report_data` both carry 64 bytes natively, and the Azure vTPM
@@ -607,13 +623,25 @@ survive the tunnel:
 ```cbor
 // request
 { "method": "POST", "path": "/v1/chat",
-  "headers": [["cookie", "a=1"], ["cookie", "b=2"]],
+  "headers": [["host", "api.example"], ["cookie", "a=1"], ["cookie", "b=2"]],
   "body": h'<raw request body>' }
 
 // response
 { "status": 200, "headers": [["set-cookie", "a=1"], ["set-cookie", "b=2"]],
   "body": h'<raw response body>' }
 ```
+
+The router routes a tunnelled request by the `Host` header sealed in the
+envelope, never by the outer request's host. The envelope MUST carry exactly
+one `Host` (matched case-insensitively), or the router answers 400. `path`
+MUST be in origin form (start with `/`); any other target matches no route
+and gets 404. The tunnel carries one buffered response, so the router also
+answers 400 to a sealed `Upgrade` header. `Session.fetch` adds `Host` from the
+base URL's host (with the port when non-default) when the caller sends none,
+and throws `invalid_request` before sealing on a second `Host`, an `Upgrade`
+header, or a path not starting with `/`. It also refuses an empty `Host`; that
+check is client-side only: the router counts `Host` fields, so an empty value
+passes, matches no manifest host, and gets 404.
 
 **Session lifetime.** The session (and its key schedule) is established once —
 one attest-pq round trip — and reused for every subsequent tunnel record; no
@@ -645,7 +673,9 @@ deployment-class verdict without the platform-complete mrtd+rtmr1+rtmr2 image
 tuple), `rtmr_denied` (an RTMR[1]/RTMR[2] image-tuple register differs from the
 pin, or the claims carry no comparable value), `rtmr3_denied`, `invalid_cert` /
 `cert_chain` (mesh leaf does not chain to the selected CA or is expired),
-`identity_binding`, and `key_binding`.
+`identity_binding` (including a missing or malformed `route_digest`),
+`key_binding`, and `route_denied` (the bound route digest is not in the
+`routeDigests` pin set).
 
 The workload policy adds `workload_not_attested` (no stamp while a
 workload/allowlist pin is set), `workload_invalid` (malformed or duplicated
@@ -670,7 +700,8 @@ is the normative cross-language golden vector, shared verbatim with c8s
 after a deliberate contract change). Given the recorded X-Wing seed and
 ciphertext, everything downstream is deterministic; a conforming
 implementation MUST reproduce the encapsulation key expanded from the seed,
-the decapsulated shared secret, the identity transcript hash, every key-
+the decapsulated shared secret, the identity transcript hash (committing
+`route_digest_hex`), every key-
 schedule output (both keys, both IV prefixes, the exporter), and the sealed
 request and response records byte for byte. `test/vectors.test.ts` runs this
 check here; `TestChannelGoldenVectors` runs it in Go.

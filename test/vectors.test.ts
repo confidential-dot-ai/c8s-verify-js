@@ -2,7 +2,7 @@
 // pkg/overenc/testdata (regenerated there with `go test -update`). Everything
 // downstream of the recorded X-Wing ciphertext is deterministic, so this test
 // reproduces the whole pipeline — seed-expanded keypair, decapsulation,
-// identity transcript, HKDF key schedule, and one sealed record per direction
+// identity transcript (route digest included), HKDF key schedule, and one sealed record per direction
 // — and compares byte for byte against the Go implementation.
 
 import { test } from "node:test";
@@ -30,6 +30,7 @@ interface ChannelVectors {
   ca_der_hex: string;
   nonce_hex: string;
   session_id_hex: string;
+  route_digest_hex: string;
   transcript_hash_hex: string;
   c2s_key_hex: string;
   s2c_key_hex: string;
@@ -73,6 +74,7 @@ test("channel golden vectors match the Go implementation byte for byte", async (
     hexToBytes(v.nonce_hex),
     hexToBytes(v.leaf_der_hex),
     hexToBytes(v.ca_der_hex),
+    hexToBytes(v.route_digest_hex),
   );
   assert.equal(bytesToHex(transcript), v.transcript_hash_hex, "transcript hash");
 
