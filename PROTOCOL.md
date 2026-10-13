@@ -164,7 +164,8 @@ Response is `application/json`:
     "leaf_sha256": "<b64url SHA-256 of leaf DER>",
     "mesh_ca_sha256": "<b64url SHA-256 of issuing CA DER>",
     "signature": "<b64url ASN.1 DER ECDSA signature>"
-  }
+  },
+  "measured_policies": ["sha256:<64 hex>"]            // optional, TDX: allowlist policies extended into RTMR[3], in order
 }
 ```
 
@@ -184,6 +185,15 @@ saved bundle stays verifiable offline; in that offline mode the result is not
 a freshness proof). The LB re-reads the TEE-held mesh leaf, private key, and
 CA for each request so certificate rotation cannot leave the bundle and proof
 on different credential generations. There is no legacy or downgrade path.
+
+`measured_policies` is the node's journal of allowlist-policy digests, each
+extended into RTMR[3] after the operator-key seed as
+`reg = SHA-384(reg || SHA-384(ascii digest))`. It is outside the transcript
+and read after the quote, so it may run ahead of the register. A client with
+an RTMR[3] pin accepts the quoted register when it equals the pin, or when the
+shortest prefix of the list folded onto the pin equals it. Each entry MUST
+match `^sha256:[0-9a-f]{64}$` and the list MUST hold at most 256 entries, or
+verification fails. A client without an RTMR[3] pin ignores the field.
 
 #### Report-data and mesh-identity binding
 
