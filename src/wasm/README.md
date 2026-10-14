@@ -23,9 +23,9 @@ rather than shipped as an opaque binary in git history:
 | | |
 |---|---|
 | Source | `vendor/attestation-rs` submodule (`confidential-dot-ai/attestation-rs`), `crates/attestation-wasm` |
-| Pinned commit | `d9e71379d0bf073ad27777342f455ec0c9c678c8` |
+| Pinned commit | `ae74953d9aa84b507ae08f4038d8c37dae50d33b` |
 | Build | `wasm-pack build --target web` |
-| Entry points | `verify_snp`, `verify_az_snp`, `verify_az_tdx`, `verify_tdx` |
+| Entry points | `evaluate_snp`, `evaluate_az_snp`, `evaluate_az_tdx`, `evaluate_tdx` (the library calls these; the build also exports the generic `evaluate`) |
 
 The pin is the `vendor/attestation-rs` submodule gitlink — there is no separate
 pin variable. To move to a newer `attestation-rs`:
@@ -39,12 +39,13 @@ npm run build:wasm && npm test    # rebuild + verify
 
 Update the table above in the same change.
 
-> **az-snp contract note.** As of this pin, `verify_az_snp` *fails closed* — it
-> **throws** on a freshness (TPM quote `extraData`) mismatch rather than
-> returning a non-throwing `report_data_match: false`. The policy layer
-> (`src/verify.ts`) catches that throw and surfaces it as the `report_data_mismatch`
-> error code. Bare `verify_snp` still returns a non-throwing bool. If you bump the
-> pin and that contract changes, revisit `isFreshnessMismatch` in `src/verify.ts`.
+> **Contract.** Rules are values: each `evaluate_*` entry point returns a result
+> with one field per rule (`report_data_match`, `rtmr_match`, `min_tcb_met`,
+> `crl_ok`, …) and `passed`, which is true only when every rule held. An entry
+> point throws only when the evidence cannot be evaluated (chain, signature,
+> malformed input or parameters, collateral that fails its own checks). Read
+> `passed`: `src/verify.ts` (`enforceVerifierRules`) accepts only
+> `passed === true` and uses the failing fields to choose the error code.
 
 ## Build inputs
 

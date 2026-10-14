@@ -4,7 +4,11 @@
 import { bytesToBase64, utf8ToBytes } from "./base64.js";
 import { fail } from "./errors.js";
 
-/** Intel's TDX TCB status levels, as Intel PCS names them. */
+/**
+ * Intel's TDX TCB status levels, as Intel PCS names them, plus
+ * `NoMatchingLevel`: the quote's TCB is below every level Intel lists for
+ * its platform.
+ */
 export type TdxTcbStatus =
   | "UpToDate"
   | "SWHardeningNeeded"
@@ -12,7 +16,8 @@ export type TdxTcbStatus =
   | "ConfigurationAndSWHardeningNeeded"
   | "OutOfDate"
   | "OutOfDateConfigurationNeeded"
-  | "Revoked";
+  | "Revoked"
+  | "NoMatchingLevel";
 
 const TCB_STATUSES: readonly TdxTcbStatus[] = [
   "UpToDate",
@@ -22,6 +27,7 @@ const TCB_STATUSES: readonly TdxTcbStatus[] = [
   "OutOfDate",
   "OutOfDateConfigurationNeeded",
   "Revoked",
+  "NoMatchingLevel",
 ];
 
 /** Accepted when the caller names no levels. */
@@ -122,7 +128,7 @@ export function validateTdxTcbPolicy(
     fail("invalid_request", "tdxTcbStatuses must list at least one TCB status");
   }
   for (const status of accepted) {
-    if (!TCB_STATUSES.includes(status) || status === "Revoked") {
+    if (!TCB_STATUSES.includes(status) || status === "Revoked" || status === "NoMatchingLevel") {
       fail(
         "invalid_request",
         `tdxTcbStatuses: ${JSON.stringify(status)} is not an acceptable TDX TCB status`,
@@ -140,7 +146,7 @@ function base64(v: string | Uint8Array): string {
   return bytesToBase64(typeof v === "string" ? utf8ToBytes(v) : v);
 }
 
-/** Serialize validated collateral to the JSON the WASM `verify_tdx` takes. */
+/** Serialize validated collateral to the JSON the WASM `evaluate_tdx` takes. */
 export function tdxCollateralJson(c: TdxCollateral, at: Date | undefined): string {
   let tcbInfo: string;
   let qeIdentity: string;

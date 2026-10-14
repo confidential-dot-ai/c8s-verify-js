@@ -143,11 +143,7 @@ async function run(): Promise<void> {
       throw e;
     }
 
-    set(
-      "wasm",
-      "ok",
-      `signature_valid=true · report v${result.reportVersion} · platform=${result.platform}`,
-    );
+    set("wasm", "ok", `passed · report v${result.reportVersion} · platform=${result.platform}`);
     set("measure", "ok", `launch_digest ∈ allowlist\n${result.measurement}`);
 
     if (result.reportDataMatch === true) {

@@ -7,7 +7,7 @@
 // etc.). The layout matches Microsoft's az-cvm-vtpm crate and the c8s Go
 // extractor (c8s/pkg/attestclient/snpreport.go).
 //
-// This unwrap supports the *degraded* az-snp path: the WASM `verify_snp` entry
+// This unwrap supports the *degraded* az-snp path: the WASM `evaluate_snp` entry
 // understands only a bare SNP report (`attestation_report` + `cert_chain.vcek`)
 // and has no notion of the HCL envelope, so we unwrap the HCL report down to the
 // raw SNP report it expects. The (host-controlled, untrusted) header is only used
@@ -19,14 +19,14 @@
 // (evidence.tpm_quote) to the SNP report, so it verifies hardware + measurement
 // but not freshness/key-binding. For full az-snp verification — which also
 // verifies the TPM quote against the AK and checks the quote's extraData against
-// the session nonce — use the WASM `verify_az_snp` entry (exposed as
-// `verifyAzSnp`, selected by `platform: "az-snp"`). This unwrap remains for
+// the session nonce — use the WASM `evaluate_az_snp` entry (exposed as
+// `evaluateAzSnp`, selected by `platform: "az-snp"`). This unwrap remains for
 // callers that opt into the degraded `platform: "snp"` mode over az-snp evidence.
 
 import { base64ToBytes, base64UrlToBytes, bytesToBase64 } from "./base64.js";
 import { fail } from "./errors.js";
 
-/** Bare SEV-SNP evidence: the shape the WASM `verify_snp` entry consumes. */
+/** Bare SEV-SNP evidence: the shape the WASM `evaluate_snp` entry consumes. */
 export interface SnpEvidence {
   attestation_report: string;
   cert_chain: { vcek: string };

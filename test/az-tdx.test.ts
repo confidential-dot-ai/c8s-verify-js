@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { verifyAzTdx } from "../src/wasm-loader.js";
+import { evaluateAzTdx } from "../src/wasm-loader.js";
 import { verifyEvidence } from "../src/verify.js";
 import { C8sVerifyError } from "../src/errors.js";
 import type { Evidence, AzTdxEvidence } from "../src/hcl.js";
@@ -27,33 +27,33 @@ const TDX_MRTD =
 
 // --- First-class az-tdx: full verification including the vTPM quote ---
 //
-// verify_az_tdx (exposed as verifyAzTdx / platform:"az-tdx") verifies the
+// evaluate_az_tdx (exposed as evaluateAzTdx / platform:"az-tdx") verifies the
 // HCL-wrapped TD report AND the vTPM quote — the TPM signature against the AK in
 // the HCL runtime data, the AK->TEE binding, the TD quote's ECDSA signature and
 // DCAP chain to the pinned Intel SGX Root CA, the TD debug policy, and the
 // freshness anchor in the quote's extraData. This graduates az-tdx from
 // "reserved" (PROTOCOL.md) to "supported".
 
-test("verify_az_tdx verifies the TD quote + vTPM quote of a recorded az-tdx bundle", async () => {
-  const out = JSON.parse(await verifyAzTdx(JSON.stringify(await tdxEvidence())));
+test("evaluate_az_tdx verifies the TD quote + vTPM quote of a recorded az-tdx bundle", async () => {
+  const out = JSON.parse(await evaluateAzTdx(JSON.stringify(await tdxEvidence())));
   assert.equal(out.platform, "az-tdx");
-  assert.equal(out.signature_valid, true, "TD quote signature + DCAP chain must verify");
+  assert.equal(out.passed, true, "TD quote signature + DCAP chain verify and every rule holds");
   assert.equal(out.report_data_match, null, "no expected anchor → freshness not enforced, null");
-  // collateral_verified is false: the WASM path has no async provider for the
-  // Intel PCS collateral (PCK CRL, TCB status, TD-QE identity) — same trade-off
-  // verify_az_snp documents.
-  assert.equal(out.collateral_verified, false);
+  // tcb_status and crl_ok are null: the WASM path has no provider for the Intel
+  // PCS collateral (PCK CRL, TCB status, TD-QE identity) on az-tdx.
+  assert.equal(out.tcb_status, null);
+  assert.equal(out.crl_ok, null);
   assert.equal(out.claims.launch_digest, TDX_MRTD, "MRTD surfaces as claims.launch_digest");
 });
 
-test("verify_az_tdx fails closed (throws) on a freshness mismatch", async () => {
-  // Like verify_az_snp, the anchor is bound in the verifier core, which fails
-  // closed on a mismatch rather than returning a non-throwing bool. The JS policy
-  // layer catches this and surfaces the report_data_mismatch code (below).
-  await assert.rejects(
-    verifyAzTdx(JSON.stringify(await tdxEvidence()), new Uint8Array(48)),
-    /report_data mismatch|TPM nonce/i,
+test("evaluate_az_tdx reports a freshness mismatch as not passed", async () => {
+  // Like evaluate_az_snp, a mismatch is a value, not a throw; the JS policy layer
+  // surfaces it as the report_data_mismatch code (below).
+  const out = JSON.parse(
+    await evaluateAzTdx(JSON.stringify(await tdxEvidence()), new Uint8Array(48)),
   );
+  assert.equal(out.report_data_match, false);
+  assert.equal(out.passed, false);
 });
 
 // --- Policy layer routing: verifyEvidence with platform:"az-tdx" ---

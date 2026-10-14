@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { verifyTdx } from "../src/wasm-loader.js";
+import { evaluateTdx } from "../src/wasm-loader.js";
 import { enforceTdxImagePins, verifyEvidence, type WasmVerifyResult } from "../src/verify.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { base64UrlToBytes } from "../src/base64.js";
@@ -51,38 +51,38 @@ async function tlsCertAnchor(): Promise<Uint8Array> {
 
 // --- First-class bare tdx: direct DCAP verification, no vTPM in the path ---
 //
-// verify_tdx (exposed as verifyTdx / platform:"tdx") verifies the TD quote's
+// evaluate_tdx (exposed as evaluateTdx / platform:"tdx") verifies the TD quote's
 // ECDSA signature and the full DCAP chain to the pinned Intel SGX Root CA,
 // rejects debug TDs, replays the CC event log against RTMR0-3, and binds the
 // freshness anchor directly against the quote's 64-byte report_data.
 
-test("verify_tdx verifies a live-captured bare-metal TDX bundle", async () => {
+test("evaluate_tdx verifies a live-captured bare-metal TDX bundle", async () => {
   const { evidence } = await tdxBundle();
-  const out = JSON.parse(await verifyTdx(JSON.stringify(evidence)));
+  const out = JSON.parse(await evaluateTdx(JSON.stringify(evidence)));
   assert.equal(out.platform, "tdx");
-  assert.equal(out.signature_valid, true, "TD quote signature + DCAP chain must verify");
+  assert.equal(out.passed, true, "TD quote signature + DCAP chain verify and every rule holds");
   assert.equal(out.report_data_match, null, "no expected anchor → freshness not enforced, null");
-  // collateral_verified is false: no Intel PCS collateral (PCK CRL, TCB
+  // tcb_status and crl_ok are null: no Intel PCS collateral (PCK CRL, TCB
   // status, TD-QE identity) was supplied; see tdx-tcb.test.ts.
-  assert.equal(out.collateral_verified, false);
+  assert.equal(out.tcb_status, null);
+  assert.equal(out.crl_ok, null);
   assert.equal(out.claims.launch_digest, TDX_MRTD, "MRTD surfaces as claims.launch_digest");
 });
 
-test("verify_tdx binds report_data to the tls-cert anchor (SPKI ‖ nonce)", async () => {
+test("evaluate_tdx binds report_data to the tls-cert anchor (SPKI ‖ nonce)", async () => {
   const { evidence } = await tdxBundle();
-  const out = JSON.parse(await verifyTdx(JSON.stringify(evidence), await tlsCertAnchor()));
+  const out = JSON.parse(await evaluateTdx(JSON.stringify(evidence), await tlsCertAnchor()));
   assert.equal(out.report_data_match, true, "SHA-384(SPKI ‖ nonce) must match report_data");
 });
 
-test("verify_tdx fails closed (throws) on a freshness mismatch", async () => {
+test("evaluate_tdx reports a freshness mismatch as not passed", async () => {
   const { evidence } = await tdxBundle();
-  await assert.rejects(
-    verifyTdx(JSON.stringify(evidence), new Uint8Array(48)),
-    /report_data mismatch/i,
-  );
+  const out = JSON.parse(await evaluateTdx(JSON.stringify(evidence), new Uint8Array(48)));
+  assert.equal(out.report_data_match, false);
+  assert.equal(out.passed, false);
 });
 
-test("verify_tdx fails closed on a tampered CC event log", async () => {
+test("evaluate_tdx fails closed on a tampered CC event log", async () => {
   const { evidence } = await tdxBundle();
   // Truncate the event log deep into the measured events: the replay of what
   // remains against RTMR0-3 must fail, even though the quote itself is
@@ -93,7 +93,7 @@ test("verify_tdx fails closed on a tampered CC event log", async () => {
   const raw = Buffer.from(evidence.cc_eventlog!, "base64");
   const truncated = raw.subarray(0, 1024).toString("base64");
   await assert.rejects(
-    verifyTdx(JSON.stringify({ ...evidence, cc_eventlog: truncated })),
+    evaluateTdx(JSON.stringify({ ...evidence, cc_eventlog: truncated })),
     /eventlog integrity/i,
   );
 });
@@ -223,7 +223,7 @@ test("verifyEvidence refuses a malformed RTMR[3] pin", async () => {
 });
 
 // Omitting the pin must stay valid: existing callers keep working, and the
-// result then carries no rtmr3_match at all.
+// result then carries rtmr_match[3] = null.
 test('verifyEvidence platform:"tdx" without a pin does not check RTMR[3]', async () => {
   const { evidence } = await tdxBundle();
   const res = await verifyEvidence(evidence, { platform: "tdx", measurements: [TDX_MRTD] });
@@ -326,7 +326,7 @@ test("a partial or malformed tuple is refused with invalid_request", async () =>
 // directly on hand-built results.
 test("enforceTdxImagePins fails closed on absent or malformed register claims", () => {
   const base = {
-    signature_valid: true,
+    passed: true,
     platform: "tdx",
     report_data_match: null,
   };
