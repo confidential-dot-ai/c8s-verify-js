@@ -248,10 +248,8 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
     text(res, 405, "method not allowed");
   } catch (e) {
-    json(res, 500, {
-      error: "internal",
-      message: String((e as { message?: unknown })?.message ?? e),
-    });
+    console.error(`${req.method} ${req.url}:`, e);
+    json(res, 500, { error: "internal", message: "internal server error" });
   }
 });
 

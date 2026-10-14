@@ -227,7 +227,9 @@ export class C8sClient {
           "against the mesh leaf's matched-workload stamp (deployment-class), or both",
       );
     }
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    let baseUrl = opts.baseUrl;
+    while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+    this.baseUrl = baseUrl;
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
     const f = opts.fetch ?? globalThis.fetch?.bind(globalThis);
     if (!f) {
