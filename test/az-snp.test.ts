@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { verifySnp, verifyAzSnp } from "../src/wasm-loader.js";
+import { evaluateSnp, evaluateAzSnp } from "../src/wasm-loader.js";
 import { verifyEvidence } from "../src/verify.js";
 import { snpReportFromHcl } from "../src/hcl.js";
 import { base64UrlToBytes, concatBytes } from "../src/base64.js";
@@ -18,19 +18,18 @@ const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 // A recorded Azure SEV-SNP (az-snp) attestation: an HCL report wrapping the raw
 // SNP report, plus a TPM quote and the VCEK. Verified end-to-end through the
-// JS -> WASM boundary (`verifySnp`), the same path `verifyAttestation` uses.
+// JS -> WASM boundary (`evaluateSnp`), the same path `verifyAttestation` uses.
 test("verifies a recorded az-snp attestation through the WASM verifier", async () => {
   const att = JSON.parse(await readFile(join(FIX, "az-snp-attestation.json"), "utf8"));
 
   // VCEK subject is SEV-Milan / HwID "Milan-B0" -> Milan generation.
-  const out = await verifySnp(att.evidence, "milan");
+  const out = await evaluateSnp(att.evidence, "milan");
   const result = JSON.parse(out);
 
-  assert.equal(
-    result.signature_valid,
-    true,
-    "hardware signature must verify against the VCEK chain",
-  );
+  // Throwing would mean a VCEK chain or signature failure; passed means every
+  // guest-policy rule held too.
+  assert.equal(result.platform, "snp");
+  assert.equal(result.passed, true);
 });
 
 // A second, independently-recorded Milan az-snp attestation (distinct host:
@@ -39,14 +38,11 @@ test("verifies a recorded az-snp attestation through the WASM verifier", async (
 test("verifies a second recorded az-snp (Milan) attestation", async () => {
   const att = JSON.parse(await readFile(join(FIX, "az-snp-milan-2.json"), "utf8"));
 
-  const out = await verifySnp(att.evidence, "milan");
+  const out = await evaluateSnp(att.evidence, "milan");
   const result = JSON.parse(out);
 
-  assert.equal(
-    result.signature_valid,
-    true,
-    "hardware signature must verify against the VCEK chain",
-  );
+  assert.equal(result.platform, "snp");
+  assert.equal(result.passed, true);
 });
 
 // The HCL header is host-controlled and untrusted: we only use it to locate the
@@ -83,11 +79,11 @@ test("rejects an HCL report whose hardware type is not SNP", () => {
 
 // --- First-class az-snp: full verification including the vTPM quote ---
 //
-// `verify_az_snp` (exposed as verifyAzSnp / platform:"az-snp") verifies the
+// `evaluate_az_snp` (exposed as evaluateAzSnp / platform:"az-snp") verifies the
 // HCL-wrapped SNP report AND the vTPM quote — the TPM signature against the AK
 // in the HCL runtime data, the AK→TEE binding, and the freshness anchor in the
 // quote's extraData. This is what graduates az-snp from "reserved" (degraded
-// hardware-only via verify_snp) to "supported" in PROTOCOL.md.
+// hardware-only via evaluate_snp) to "supported" in PROTOCOL.md.
 //
 // az-snp-coco-bound.json is a CoCo az-snp fixture whose vTPM quote binds the
 // ASCII nonce "challenge"; its launch measurement is fixed and known. (The
@@ -101,31 +97,29 @@ async function cocoEvidence(): Promise<Evidence> {
     .evidence as Evidence;
 }
 
-test("verify_az_snp verifies the vTPM quote, not just the hardware report", async () => {
-  const out = JSON.parse(await verifyAzSnp(JSON.stringify(await cocoEvidence())));
+test("evaluate_az_snp verifies the vTPM quote, not just the hardware report", async () => {
+  const out = JSON.parse(await evaluateAzSnp(JSON.stringify(await cocoEvidence())));
   assert.equal(out.platform, "az-snp");
-  assert.equal(out.signature_valid, true);
+  assert.equal(out.passed, true);
   assert.equal(out.report_data_match, null, "no expected anchor → match is null, not enforced");
-  // collateral_verified is false: the WASM path has no async cert provider for CRL.
-  assert.equal(out.collateral_verified, false);
+  assert.equal(out.crl_ok, null, "no CRL supplied → revocation not checked");
 });
 
-test("verify_az_snp confirms freshness when the quote extraData matches the anchor", async () => {
+test("evaluate_az_snp confirms freshness when the quote extraData matches the anchor", async () => {
   const out = JSON.parse(
-    await verifyAzSnp(JSON.stringify(await cocoEvidence()), utf8("challenge")),
+    await evaluateAzSnp(JSON.stringify(await cocoEvidence()), utf8("challenge")),
   );
   assert.equal(out.report_data_match, true, "quote extraData binds the expected nonce");
 });
 
-test("verify_az_snp fails closed (throws) on a freshness mismatch", async () => {
-  // Unlike bare verify_snp (non-throwing bool), verify_az_snp binds the anchor in
-  // the verifier core and fails closed — it throws on a freshness mismatch. The JS
-  // policy layer (verifyEvidence / verifyAttestation) catches this and surfaces it
-  // as the report_data_mismatch code; see the policy-layer tests below.
-  await assert.rejects(
-    verifyAzSnp(JSON.stringify(await cocoEvidence()), utf8("wrong-nonce")),
-    /report_data mismatch|TPM nonce/i,
+test("evaluate_az_snp reports a freshness mismatch as not passed", async () => {
+  // A mismatch is a value, not a throw: the policy layer reads report_data_match
+  // and surfaces it as report_data_mismatch (see the policy-layer tests below).
+  const out = JSON.parse(
+    await evaluateAzSnp(JSON.stringify(await cocoEvidence()), utf8("wrong-nonce")),
   );
+  assert.equal(out.report_data_match, false);
+  assert.equal(out.passed, false);
 });
 
 // --- Policy layer routing: verifyEvidence with platform:"az-snp" ---

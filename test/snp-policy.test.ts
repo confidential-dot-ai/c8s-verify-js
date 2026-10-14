@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { verifySnp } from "../src/wasm-loader.js";
+import { evaluateSnp } from "../src/wasm-loader.js";
 import { verifyEvidence } from "../src/verify.js";
 import { C8sVerifyError } from "../src/errors.js";
 import type { Evidence } from "../src/hcl.js";
@@ -157,36 +157,45 @@ test("requireCollateral on TDX needs tdxCollateral, and az-tdx has no collateral
   }
 });
 
-// --- bare snp (verify_snp): the same gates through the legacy entry point ---
+// --- bare snp (evaluate_snp): the same gates through the legacy entry point ---
 
-test("bare verify_snp enforces the minimum-TCB floor", async () => {
+test("bare evaluate_snp reports the minimum-TCB floor", async () => {
   const evidence = await bareSnpEvidence();
-  // At floor zero the fixture verifies and reports its collateral honestly.
+  // At floor zero the fixture passes and reports its collateral honestly.
   const ok = JSON.parse(
-    await verifySnp(
+    await evaluateSnp(
       evidence,
       "milan",
       undefined,
       JSON.stringify({ bootloader: 0, tee: 0, snp: 0, microcode: 0 }),
     ),
   );
-  assert.equal(ok.signature_valid, true);
-  assert.equal(ok.collateral_verified, false);
-  // Above the reported TCB it fails closed.
-  await assert.rejects(
-    verifySnp(
+  assert.equal(ok.min_tcb_met, true);
+  assert.equal(ok.passed, true);
+  assert.equal(ok.crl_ok, null, "no CRL supplied ⇒ revocation was not checked");
+  // Above the reported TCB it does not pass: a value, not a throw.
+  const below = JSON.parse(
+    await evaluateSnp(
       evidence,
       "milan",
       undefined,
       JSON.stringify({ bootloader: 0, tee: 0, snp: 0, microcode: 255 }),
     ),
-    /below minimum/i,
+  );
+  assert.equal(below.min_tcb_met, false);
+  assert.equal(below.passed, false);
+});
+
+test("bare evaluate_snp rejects a report_data anchor over 64 bytes", async () => {
+  await assert.rejects(
+    evaluateSnp(await bareSnpEvidence(), "milan", new Uint8Array(65)),
+    /report_data exceeds maximum size \(64 bytes\)/,
   );
 });
 
-test("bare verify_snp fails closed on an unparseable CRL", async () => {
+test("bare evaluate_snp fails closed on an unparseable CRL", async () => {
   await assert.rejects(
-    verifySnp(
+    evaluateSnp(
       await bareSnpEvidence(),
       "milan",
       undefined,
@@ -197,9 +206,9 @@ test("bare verify_snp fails closed on an unparseable CRL", async () => {
   );
 });
 
-test("bare verify_snp rejects a malformed min TCB rather than dropping it", async () => {
+test("bare evaluate_snp rejects a malformed min TCB rather than dropping it", async () => {
   await assert.rejects(
-    verifySnp(await bareSnpEvidence(), "milan", undefined, "not json"),
+    evaluateSnp(await bareSnpEvidence(), "milan", undefined, "not json"),
     /min_tcb deserialize/i,
   );
 });

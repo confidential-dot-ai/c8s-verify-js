@@ -2,7 +2,7 @@
 // X.509 chain check, and turns their raw outputs into a pass/fail decision against
 // a caller-supplied policy (expected measurements, platform, freshness binding).
 
-import { verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
+import { evaluateSnp, evaluateAzSnp, evaluateAzTdx, evaluateTdx } from "./wasm-loader.js";
 import { verifyCertChain, type Certificate, type ChainResult } from "./x509.js";
 import { decodePEM } from "./pem.js";
 import { bytesToHex, base64UrlToBytes, constantTimeEqual } from "./base64.js";
@@ -71,7 +71,13 @@ export interface VerifyPolicy {
    * which silicon the caller believes it is talking to.
    */
   generation?: string;
-  /** default true: report_data must bind the selected session transcript */
+  /**
+   * Default true: report_data must bind the selected session transcript.
+   * With false, the transcript is not passed to the verifier at all, so
+   * `passed` judges every other rule, the result has `identityBound: false`,
+   * and a warning says freshness was not checked. Use false only to
+   * re-verify recorded evidence.
+   */
   requireFreshness?: boolean;
   /**
    * Mesh CA pinned out of band. Optional: the required anchor is this pin OR
@@ -174,7 +180,7 @@ export interface VerifyPolicy {
   tdxCollateral?: TdxCollateral;
   /**
    * TDX TCB statuses the verdict accepts; any other fails with `tcb_denied`.
-   * Default `["UpToDate"]`. A `Revoked` TCB always fails. Requires
+   * Default `["UpToDate"]`. A `Revoked` or `NoMatchingLevel` TCB always fails. Requires
    * `tdxCollateral`.
    */
   tdxTcbStatuses?: TdxTcbStatus[];
@@ -221,23 +227,53 @@ export interface WasmClaims {
   [key: string]: unknown;
 }
 
-/** Parsed JSON result returned by the WASM verifier. */
+/**
+ * Parsed JSON result returned by the WASM verifier. The verifier throws only
+ * when the evidence cannot be verified (malformed, not genuine, bad
+ * collateral); a genuine answer that breaks a rule is a field here, and
+ * `passed` is true only when every rule held.
+ */
 export interface WasmVerifyResult {
-  signature_valid: boolean;
   platform: string;
   generation?: string;
   // Present for snp/az-snp; az-tdx has no SNP report version.
   report_version?: number;
   report_data_match: boolean | null;
-  collateral_verified?: boolean;
+  /** SNP: HOST_DATA / vTPM PCR[8]. Not supplied by this library: always null. */
+  host_data_match?: boolean | null;
+  /** TDX: MRCONFIGID / vTPM PCR[8]. Not supplied by this library: always null. */
+  init_data_match?: boolean | null;
+  /** Verifier-side launch digest / MRTD pins. Not supplied: measurements are pinned here. */
+  launch_digest_match?: boolean | null;
+  mrtd_match?: boolean | null;
+  /** vTPM platforms: every pinned PCR matched. Not supplied by this library. */
+  pcrs_match?: boolean | null;
   /**
-   * RTMR[3] comparison result, present only when a pin was supplied. The
-   * verifier core omits the field entirely when it never performed the
-   * comparison, so `undefined` means "not checked" — never "fine".
+   * RTMR[0..3] comparison results (TDX). An entry is `null` when no pin was
+   * supplied for it, so `null` means "not checked" — never "fine".
    */
-  rtmr3_match?: boolean | null;
+  rtmr_match?: (boolean | null)[];
   /** The evaluated TDX TCB status; present only when collateral was checked. */
   tcb_status?: WasmTcbStatus | null;
+  /** TDX: the TCB status is one the verifier accepts (all but Revoked and NoMatchingLevel). */
+  tcb_status_accepted?: boolean | null;
+  /** SNP: the reported TCB is at or above the supplied floor. */
+  min_tcb_met?: boolean | null;
+  /**
+   * Revocation, checked only on supplied collateral (`null` without it). SNP:
+   * the AMD CRL does not revoke the VEK's issuing ASK/ASVK. TDX: Intel's CRLs
+   * list neither the PCK certificate nor its issuing CA.
+   */
+  crl_ok?: boolean | null;
+  /** The guest is debug-enabled, and whether the verifier was told to allow it. */
+  debug?: boolean;
+  allow_debug?: boolean;
+  /** SNP: the report's VMPL and the highest VMPL accepted. */
+  vmpl?: number;
+  max_vmpl?: number;
+  /** SNP: the TCB the report was signed under. */
+  reported_tcb?: Record<string, number>;
+  passed: boolean;
   claims: WasmClaims;
 }
 
@@ -320,50 +356,110 @@ export interface AttestationResult {
   warnings: string[];
 }
 
-// The vTPM (az-snp, az-tdx) and bare-tdx verifiers bind the freshness anchor in
-// the verifier core and FAIL CLOSED — they throw on a mismatch rather than
-// returning a non-throwing report_data_match=false (which is what bare
-// `verify_snp` does). Recognize that specific failure by message so the policy
-// layer can surface it as the precise `report_data_mismatch` code instead of a
-// generic `verification_failed`, and so the soft (requireFreshness=false) path
-// can tell a freshness mismatch apart from a real hardware/signature failure.
-function isFreshnessMismatch(e: unknown): boolean {
-  const msg = String((e as { message?: unknown })?.message ?? e);
-  return /report_data mismatch|TPM nonce (length )?mismatch/i.test(msg);
-}
-
 /** Best-effort error message for embedding in a typed failure. */
 function errMessage(e: unknown): string {
   return String((e as { message?: unknown })?.message ?? e);
 }
 
 /**
- * The SNP verifiers fail closed (throw) when the reported TCB is below the
- * supplied floor. Recognise that throw by message so it surfaces as the
- * precise `tcb_denied` code — a caller telling "unpatched platform" apart
- * from "broken evidence" needs the codes to differ.
- */
-function isTcbBelowFloor(e: unknown): boolean {
-  return /below minimum/i.test(errMessage(e));
-}
-
-/**
- * A supplied CRL that fails any of its own checks (signature, freshness,
- * parse) or names the VEK throws inside the verifier. Recognise it so the
+ * A supplied CRL that fails its own checks (signature, freshness, parse)
+ * throws inside the verifier with a `CRL check:` prefix. Recognise it so the
  * failure surfaces as `collateral_denied` rather than the generic
  * `verification_failed` used for chain and signature failures.
  */
 function isCollateralFailure(e: unknown): boolean {
-  return /CRL check|revoked/i.test(errMessage(e));
+  return /CRL check/i.test(errMessage(e));
 }
 
 /** Map a tagged TDX collateral throw to its precise code; no-op otherwise. */
 function failTdxCollateral(e: unknown): void {
   if (!isTdxCollateralFailure(e)) return;
-  if (errMessage(e).includes("TCB status is Revoked")) {
-    fail("tcb_denied", "TDX TCB status is Revoked", { cause: e });
-  }
   fail("collateral_denied", `TDX collateral check failed: ${errMessage(e)}`, { cause: e });
+}
+
+/**
+ * The verifier's verdict. `passed` is the only gate: `true` accepts, `false`
+ * fails. The failing fields only choose the error code and message, and a
+ * field this mapping does not know still fails, as `verification_failed`.
+ * When an anchor was supplied, `report_data_match` must also be `true`: a
+ * verifier build that ignored the argument must never read as fresh.
+ * Exported for direct testing; callers go through {@link verifyAttestation} /
+ * {@link verifyEvidence}.
+ */
+export function enforceVerifierRules(result: WasmVerifyResult, anchor?: Uint8Array): void {
+  if (result.passed === false) failRule(result, anchor);
+  if (result.passed !== true) {
+    fail("verification_failed", "the verifier result has no passed field");
+  }
+  if (anchor !== undefined && result.report_data_match !== true) {
+    fail(
+      "report_data_mismatch",
+      "report_data was not checked by the verifier (no report_data_match in the result) — refusing to report a binding that was never enforced",
+      { details: { expected: bytesToHex(anchor) } },
+    );
+  }
+}
+
+/** Fail with the code of the first failing field, in precedence order. */
+function failRule(result: WasmVerifyResult, anchor: Uint8Array | undefined): never {
+  if (result.report_data_match === false) {
+    fail(
+      "report_data_mismatch",
+      "report_data does not match the expected binding (stale or substituted evidence)",
+      {
+        details: {
+          ...(anchor !== undefined ? { expected: bytesToHex(anchor) } : {}),
+          got: result.claims.report_data,
+        },
+      },
+    );
+  }
+  if (result.rtmr_match?.[3] === false) {
+    fail(
+      "rtmr3_denied",
+      "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from",
+      { details: { got: rtmr3FromClaims(result) } },
+    );
+  }
+  if (result.min_tcb_met === false) {
+    fail(
+      "tcb_denied",
+      "reported SNP TCB is below the pinned minimum: genuine silicon, but platform firmware older than the policy floor",
+      { details: { reportedTcb: result.reported_tcb } },
+    );
+  }
+  if (result.tcb_status_accepted === false) {
+    fail("tcb_denied", `TDX TCB status is ${result.tcb_status?.tcb_status ?? "not accepted"}`);
+  }
+  if (result.crl_ok === false) {
+    fail(
+      "collateral_denied",
+      isTdxPlatform(result.platform)
+        ? "TDX collateral check failed: Intel's CRLs revoke the PCK certificate or its issuing CA"
+        : "endorsement-key collateral check failed: the AMD CRL revokes the VEK's issuing certificate",
+    );
+  }
+  if (result.debug === true && result.allow_debug !== true) {
+    fail("verification_failed", "the guest is debug-enabled (the host can read its memory)");
+  }
+  if (result.vmpl !== undefined && result.vmpl > (result.max_vmpl ?? 0)) {
+    fail("verification_failed", `the report was requested from VMPL ${result.vmpl}, not 0`);
+  }
+  // For the message only: the verdict is already `passed: false`.
+  const failing = Object.entries(result)
+    .filter(([key]) => /_(match|met|ok|accepted)$/.test(key))
+    .flatMap(([key, value]) =>
+      Array.isArray(value)
+        ? value.flatMap((v, i) => (v === false ? [`${key}[${i}]`] : []))
+        : value === false
+          ? [key]
+          : [],
+    );
+  fail(
+    "verification_failed",
+    `the verifier reports not passed${failing.length > 0 ? `: ${failing.join(", ")} false` : ""}`,
+    { details: { failing } },
+  );
 }
 
 /**
@@ -507,9 +603,11 @@ function minTcbJson(minTcb: SnpMinTcb | undefined): string | undefined {
 
 /**
  * Enforce the collateral outcome against the policy, using the VERIFIED
- * result as the source of truth: a supplied CRL (or an explicit
- * requireCollateral) demands `collateral_verified === true` — a verifier
- * build that silently dropped the argument must never read as verified.
+ * result as the source of truth: supplied collateral (or an explicit
+ * requireCollateral) demands `crl_ok === true` — `null` means revocation was
+ * never checked, and a verifier build that silently dropped the argument
+ * must never read as verified. `crl_ok === false` has already failed in
+ * {@link enforceVerifierRules}.
  * Returns whether collateral was verified; when it was not and the policy
  * tolerates that, the gap is surfaced as a warning instead.
  */
@@ -520,12 +618,12 @@ function enforceCollateralPolicy(
   requireCollateral: boolean | undefined,
   warnings: string[],
 ): boolean {
-  const verified = result.collateral_verified === true;
+  const verified = result.crl_ok === true;
   if (verified) return true;
   if (supplied || requireCollateral) {
     fail(
       "collateral_required",
-      "revocation collateral was not verified (no collateral_verified in the result) — refusing to report a collateral policy that was never enforced",
+      "revocation collateral was not verified (no crl_ok in the result) — refusing to report a collateral policy that was never enforced",
     );
   }
   const p = platform.trim().toLowerCase();
@@ -610,17 +708,6 @@ function enforceRegisterPin(
     );
   }
   return `${idx}:${want}`;
-}
-
-/**
- * The TDX verifier throws on an RTMR[3] mismatch (it fails closed rather than
- * only reporting), so recognise that specific throw and surface it as
- * rtmr3_denied instead of the generic verification_failed used for chain and
- * signature failures. A caller distinguishing "wrong cluster" from "broken
- * evidence" needs the codes to differ.
- */
-function isRtmr3Mismatch(e: unknown): boolean {
-  return /RTMR\[3\] does not match/i.test(errMessage(e));
 }
 
 interface PreparedIdentity {
@@ -919,9 +1006,8 @@ async function prepareIdentity(
 
 async function verifyHardwareAttestation(
   bundle: AttestationBundle,
-  expected: Uint8Array,
+  anchor: Uint8Array | undefined,
   wantPlatform: string,
-  requireFreshness: boolean,
   pinnedGeneration?: string,
   expectedRtmr3?: Uint8Array,
   minTcb?: SnpMinTcb,
@@ -933,15 +1019,11 @@ async function verifyHardwareAttestation(
   // quote's extraData. Bare tdx verifies the TD quote + DCAP chain directly,
   // and bare snp the SNP report only, each checking the transcript against the
   // quote's report_data. All return the same result shape, so the policy checks
-  // stay platform-agnostic.
+  // stay platform-agnostic. `anchor` is undefined when the caller does not
+  // require freshness, so `passed` then judges every other rule.
   const isAzSnp = wantPlatform === "az-snp";
   const isAzTdx = wantPlatform === "az-tdx";
   const isTdx = wantPlatform === "tdx";
-  // These verifiers fail closed (throw) on a freshness mismatch, so in soft
-  // mode (requireFreshness=false) we omit the anchor to get a non-throwing
-  // result and warn later; bare snp returns a non-throwing bool either way.
-  const failsClosedOnMismatch = isAzSnp || isAzTdx || isTdx;
-  const hardAnchor = requireFreshness ? expected : undefined;
   // `generation` is the one responder-supplied field that reaches a
   // verification decision. It is safe unpinned because it is authenticated
   // rather than asserted — it selects the VCEK/ASK/ARK chain the report is
@@ -962,53 +1044,32 @@ async function verifyHardwareAttestation(
     let out: string;
     const tcbFloor = minTcbJson(minTcb);
     if (isAzSnp)
-      out = await verifyAzSnp(
+      out = await evaluateAzSnp(
         JSON.stringify(bundle.evidence),
-        hardAnchor,
+        anchor,
         undefined,
         tcbFloor,
         snpCrl,
       );
-    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor);
+    else if (isAzTdx) out = await evaluateAzTdx(JSON.stringify(bundle.evidence), anchor);
     else if (isTdx)
-      out = await verifyTdx(
+      out = await evaluateTdx(
         JSON.stringify(bundle.evidence),
-        hardAnchor,
+        anchor,
         undefined,
         expectedRtmr3,
         tdxCollateral,
       );
     else
-      out = await verifySnp(
+      out = await evaluateSnp(
         bundle.evidence,
         pinnedGeneration ?? bundle.generation,
-        expected,
+        anchor,
         tcbFloor,
         snpCrl,
       );
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
-    if (failsClosedOnMismatch && requireFreshness && isFreshnessMismatch(e)) {
-      fail(
-        "report_data_mismatch",
-        "report_data does not bind this session transcript (stale or substituted evidence)",
-        { details: { expected: bytesToHex(expected) }, cause: e },
-      );
-    }
-    if (expectedRtmr3 !== undefined && isRtmr3Mismatch(e)) {
-      fail(
-        "rtmr3_denied",
-        "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from",
-        { details: { expected: bytesToHex(expectedRtmr3) }, cause: e },
-      );
-    }
-    if (minTcb !== undefined && isTcbBelowFloor(e)) {
-      fail(
-        "tcb_denied",
-        "reported SNP TCB is below the pinned minimum: genuine silicon, but platform firmware older than the policy floor",
-        { details: { minTcb }, cause: e },
-      );
-    }
     if (snpCrl !== undefined && isCollateralFailure(e)) {
       fail("collateral_denied", `endorsement-key collateral check failed: ${errMessage(e)}`, {
         cause: e,
@@ -1018,25 +1079,19 @@ async function verifyHardwareAttestation(
     fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
 
-  if (result.signature_valid !== true) {
-    fail("verification_failed", "attestation signature is not valid");
-  }
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
+  enforceVerifierRules(result, anchor);
   if (expectedRtmr3 !== undefined) {
-    // Bare TDX takes the pin as a verifier argument and fails closed inside
-    // WASM, but do not rely on that alone: the verifier core only *records*
-    // the comparison, and an older or substituted build that ignored the
-    // argument would return a perfectly valid-looking result with the field
-    // absent. Require an explicit true — `undefined` means the comparison
-    // never ran, which is a failure, not an absence.
-    if (isTdx && result.rtmr3_match !== true) {
+    // Bare TDX takes the pin as a verifier argument and reports the comparison
+    // as rtmr_match[3] (a `false` already failed above). An older or
+    // substituted build that ignored the argument would return a
+    // valid-looking result without it, so require an explicit true.
+    if (isTdx && result.rtmr_match?.[3] !== true) {
       fail(
         "rtmr3_denied",
-        result.rtmr3_match === false
-          ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
-          : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
+        "RTMR[3] was not checked by the verifier (no rtmr_match[3] in the result) — refusing to report a pin that was never enforced",
         { details: { expected: bytesToHex(expectedRtmr3), got: rtmr3FromClaims(result) } },
       );
     }
@@ -1057,26 +1112,6 @@ function verifyMeasurement(result: WasmVerifyResult, allowlist: string[]): strin
     });
   }
   return measurement;
-}
-
-function verifyFreshness(
-  result: WasmVerifyResult,
-  expected: Uint8Array,
-  requireFreshness: boolean,
-  warnings: string[],
-): void {
-  if (result.report_data_match === true) return;
-  if (requireFreshness) {
-    fail(
-      "report_data_mismatch",
-      "report_data does not bind the expected session and identity transcript",
-      { details: { expected: bytesToHex(expected), got: result.claims.report_data } },
-    );
-  }
-  warnings.push(
-    "freshness binding not enforced (requireFreshness=false): hardware signature and " +
-      "measurement are verified, but report_data is not bound to this session transcript",
-  );
 }
 
 /**
@@ -1167,11 +1202,16 @@ export async function verifyAttestation(
   const requireFreshness = policy.requireFreshness !== false;
   const keyExchange = decodeKeyExchange(bundle, nonce, expectedXwingEk);
   const identity = await prepareIdentity(bundle, keyExchange, nonce, policy, warnings);
+  if (!requireFreshness) {
+    warnings.push(
+      "freshness binding not enforced (requireFreshness=false): hardware signature and " +
+        "measurement are verified, but report_data is not bound to this session transcript",
+    );
+  }
   const result = await verifyHardwareAttestation(
     bundle,
-    identity.transcript,
+    requireFreshness ? identity.transcript : undefined,
     wantPlatform,
-    requireFreshness,
     policy.generation,
     policy.expectedRtmr3 === undefined ? undefined : decodeRtmr3(policy.expectedRtmr3),
     policy.minTcb,
@@ -1202,11 +1242,10 @@ export async function verifyAttestation(
     rtmrsPinned.push(...enforceTdxImagePins(result, policy.tdxImage));
   }
   if (policy.expectedRtmr3 !== undefined) {
-    // Enforced above by verifyHardwareAttestation (rtmr3_match must be true);
+    // Enforced above by verifyHardwareAttestation (rtmr_match[3] must be true);
     // recorded here so the result reports every register the verdict pinned.
     rtmrsPinned.push(`3:${policy.expectedRtmr3.toLowerCase()}`);
   }
-  verifyFreshness(result, identity.transcript, requireFreshness, warnings);
   await verifyMeshIdentityProof(
     identity.proof,
     identity.transcript,
@@ -1423,17 +1462,28 @@ export async function verifyEvidence(
   );
   const acceptedTcb = validateTdxTcbPolicy(wantPlatform, opts.tdxCollateral, opts.tdxTcbStatuses);
   const expected = opts.expectedReportData;
+  if (expected !== undefined && !(expected instanceof Uint8Array && expected.length <= 64)) {
+    fail("invalid_request", "expectedReportData must be a Uint8Array of at most 64 bytes");
+  }
 
-  // Hardware attestation via WASM (throws on VCEK chain / report signature failure).
+  // Hardware attestation via WASM: throws only when the evidence cannot be
+  // verified (chain, signature, malformed, bad collateral); rules are values
+  // and `passed` is the verdict.
   let result: WasmVerifyResult;
   try {
     let out: string;
     const tcbFloor = minTcbJson(opts.minTcb);
     if (isAzSnp)
-      out = await verifyAzSnp(JSON.stringify(evidence), expected, undefined, tcbFloor, opts.snpCrl);
-    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected);
+      out = await evaluateAzSnp(
+        JSON.stringify(evidence),
+        expected,
+        undefined,
+        tcbFloor,
+        opts.snpCrl,
+      );
+    else if (isAzTdx) out = await evaluateAzTdx(JSON.stringify(evidence), expected);
     else if (isTdx)
-      out = await verifyTdx(
+      out = await evaluateTdx(
         JSON.stringify(evidence),
         expected,
         undefined,
@@ -1442,33 +1492,9 @@ export async function verifyEvidence(
           ? undefined
           : tdxCollateralJson(opts.tdxCollateral, opts.at),
       );
-    else out = await verifySnp(evidence, opts.generation!, expected, tcbFloor, opts.snpCrl);
+    else out = await evaluateSnp(evidence, opts.generation!, expected, tcbFloor, opts.snpCrl);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
-    // The vTPM/tdx verifiers fail closed (throw) on a freshness mismatch when an
-    // anchor is supplied — map it to the precise report_data_mismatch code
-    // instead of the generic verification_failed used for chain/signature failures.
-    if (wantRtmr3 !== undefined && isRtmr3Mismatch(e)) {
-      fail(
-        "rtmr3_denied",
-        "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from",
-        { details: { expected: bytesToHex(wantRtmr3) }, cause: e },
-      );
-    }
-    if ((isVtpm || isTdx) && expected !== undefined && isFreshnessMismatch(e)) {
-      fail(
-        "report_data_mismatch",
-        "report_data does not match the expected binding (stale or substituted evidence)",
-        { details: { expected: bytesToHex(expected) }, cause: e },
-      );
-    }
-    if (opts.minTcb !== undefined && isTcbBelowFloor(e)) {
-      fail(
-        "tcb_denied",
-        "reported SNP TCB is below the pinned minimum: genuine silicon, but platform firmware older than the policy floor",
-        { details: { minTcb: opts.minTcb }, cause: e },
-      );
-    }
     if (opts.snpCrl !== undefined && isCollateralFailure(e)) {
       fail("collateral_denied", `endorsement-key collateral check failed: ${errMessage(e)}`, {
         cause: e,
@@ -1478,12 +1504,10 @@ export async function verifyEvidence(
     fail("verification_failed", `hardware attestation failed: ${errMessage(e)}`, { cause: e });
   }
 
-  if (result.signature_valid !== true) {
-    fail("verification_failed", "attestation signature is not valid");
-  }
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
+  enforceVerifierRules(result, expected);
   const collateralVerified = enforceCollateralPolicy(
     result,
     wantPlatform,
@@ -1496,19 +1520,16 @@ export async function verifyEvidence(
       ? undefined
       : enforceTdxTcb(result.tcb_status, collateralVerified, acceptedTcb);
 
-  // Same reasoning as verifyAttestation: on bare TDX the WASM entry point
-  // throws on a mismatch, but an older or substituted verifier build that
-  // ignored the argument would return a valid-looking result with the field
-  // absent, so require an explicit true; and on az-tdx, where the entry point
-  // takes no such argument, the verified claim is what the pin is enforced
-  // against.
+  // Same reasoning as verifyAttestation: on bare TDX an older or substituted
+  // verifier build that ignored the argument would return a valid-looking
+  // result without rtmr_match[3], so require an explicit true; and on az-tdx,
+  // where the entry point takes no such argument, the verified claim is what
+  // the pin is enforced against.
   if (wantRtmr3 !== undefined) {
-    if (isTdx && result.rtmr3_match !== true) {
+    if (isTdx && result.rtmr_match?.[3] !== true) {
       fail(
         "rtmr3_denied",
-        result.rtmr3_match === false
-          ? "RTMR[3] does not match the pinned value: this is a genuine TEE, but not the deployment the pin was taken from"
-          : "RTMR[3] was not checked by the verifier (no rtmr3_match in the result) — refusing to report a pin that was never enforced",
+        "RTMR[3] was not checked by the verifier (no rtmr_match[3] in the result) — refusing to report a pin that was never enforced",
         { details: { expected: bytesToHex(wantRtmr3), got: rtmr3FromClaims(result) } },
       );
     }
@@ -1540,16 +1561,8 @@ export async function verifyEvidence(
     );
   }
 
-  // report_data binding — only enforced when the caller supplies an expected value.
-  if (expected !== undefined) {
-    if (result.report_data_match !== true) {
-      fail(
-        "report_data_mismatch",
-        "report_data does not match the expected binding (stale or substituted evidence)",
-        { details: { expected: bytesToHex(expected), got: result.claims.report_data } },
-      );
-    }
-  } else {
+  // The report_data binding was enforced by enforceVerifierRules when supplied.
+  if (expected === undefined) {
     warnings.push(
       "no expectedReportData provided — report_data freshness/key binding was not verified",
     );

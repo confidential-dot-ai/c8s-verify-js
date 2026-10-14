@@ -322,7 +322,7 @@ The identity binding is carried directly in the TD quote's 64-byte
 is verified against the PCK chain embedded in the quote up to the bundled
 Intel root. The DCAP collateral checks (PCK CRLs, TCB status, TD QE
 identity) run only on collateral the caller supplies (`tdxCollateral`, see
-the `verify_tdx` I/O below); without it `collateral_verified` is false.
+the `evaluate_tdx` I/O below); without it `crl_ok` and `tcb_status` are null.
 `claims.launch_digest` is the TD launch measurement (MRTD);
 `generation` is not applicable and is empty. The runtime measurement
 registers surface as `claims.platform_data.rtmr_0`…`rtmr_3`, each 96
@@ -391,32 +391,39 @@ explicit `workloadName` pin (mismatch ⇒ `workload_denied`), and resolve the
 stamped name as a key lookup in the held document's `workloads` map (absent ⇒
 `workload_unresolved`).
 
-## WASM verifier I/O (`attestation-rs` `verify_snp`)
+## WASM verifier I/O (`attestation-rs` `evaluate_snp`)
 
 ```
-verify_snp(evidenceJson: string, generation: "milan"|"genoa"|"turin",
-           expectedReportData?: Uint8Array, minTcbJson?: string,
-           crlDer?: Uint8Array) -> string (JSON) | throws
+evaluate_snp(evidenceJson: string, generation: "milan"|"genoa"|"turin",
+             expectedReportData?: Uint8Array, minTcbJson?: string,
+             crlDer?: Uint8Array) -> string (JSON) | throws
 ```
 
-- **Throws** (JsError) if any enforced check fails: the VEK chain to the
-  bundled AMD roots (ARK → ASK → VCEK, or ARK → ASVK → VLEK, auto-detected),
-  the VEK validity period, the report signature, VMPL != 0 or debug policy,
-  the VEK's chip-id/TCB certificate-extension cross-validation against the
-  report, a reported TCB below the `minTcbJson` floor
-  (`{ "bootloader": N, "tee": N, "snp": N, "microcode": N, "fmc"?: N }`), or
-  — when `crlDer` is supplied — a CRL whose ARK signature, thisUpdate/
-  nextUpdate freshness window, or revocation status rejects the VEK. These
-  are the same endorsement and platform-security checks the native SNP
-  verifier enforces; only VEK network fetching is out (the VEK is inline).
-- On success returns:
+- **Throws** (JsError) only when the evidence cannot be evaluated: the VEK
+  chain to the bundled AMD roots (ARK → ASK → VCEK, or ARK → ASVK → VLEK,
+  auto-detected), the VEK validity period, the VEK's chip-id/TCB
+  certificate-extension cross-validation against the report, the report
+  signature, malformed input or parameters (a malformed `minTcbJson`, an
+  `expectedReportData` over 64 bytes), or — when `crlDer` is supplied — a CRL
+  that cannot be parsed, is not ARK-signed or is outside its
+  thisUpdate/nextUpdate window (`CRL check:` prefix). These are the same
+  endorsement checks the native SNP verifier enforces; only VEK network
+  fetching is out (the VEK is inline).
+- Otherwise returns the result; every rule is a value and `passed` is true
+  only when all of them hold:
   ```jsonc
   {
-    "signature_valid": true,
     "platform": "snp",
+    "passed": true,
     "report_version": 3,
     "report_data_match": true,        // bool, or null if no expected provided
-    "collateral_verified": false,     // true iff a CRL was supplied and checked
+    "host_data_match": null,
+    "launch_digest_match": null,
+    "debug": false, "allow_debug": false, // a debug guest never passes
+    "vmpl": 0, "max_vmpl": 0,
+    "reported_tcb": { "bootloader": N, "tee": N, "snp": N, "microcode": N },
+    "min_tcb_met": true,              // null without minTcbJson
+    "crl_ok": true,                   // null without crlDer; false if the CRL revokes the VEK's ASK/ASVK
     "claims": {
       "launch_digest": "<hex sha-384>",
       "report_data": "<hex 64 bytes>",
@@ -428,9 +435,17 @@ verify_snp(evidenceJson: string, generation: "milan"|"genoa"|"turin",
   }
   ```
 
-The JS policy layer treats verification as **passed** iff: `verify_snp` did not throw
-(`signature_valid === true`), `report_data_match === true`, `platform` is acceptable, and
-`claims.launch_digest` ∈ the caller's measurement allowlist (case-insensitive hex).
+The JS policy layer treats verification as **passed** iff: the call did not
+throw, `passed === true`, `platform` is the expected one, and
+`claims.launch_digest` ∈ the caller's measurement allowlist (case-insensitive
+hex). `passed` is the only verifier gate. When it is `false`, the first
+failing field picks the error code, in this order: `report_data_match` →
+`report_data_mismatch`, `rtmr_match[3]` → `rtmr3_denied`, `min_tcb_met` and
+`tcb_status_accepted` → `tcb_denied`, `crl_ok` → `collateral_denied`; any
+other failing field → `verification_failed`. When an anchor was supplied,
+`report_data_match` must also be `true`. With `requireFreshness: false` the
+transcript is not passed as an anchor, so `passed` covers every other rule,
+`identityBound` is `false` and a warning says freshness was not checked.
 
 **Revocation collateral is caller-supplied.** The browser cannot reach AMD
 KDS, so the CRL for the deployment's generation
@@ -438,7 +453,7 @@ KDS, so the CRL for the deployment's generation
 caller and passed as `snpCrl` in the JS policy. The bytes need no transport
 trust — the verifier authenticates them against the bundled ARK and rejects
 stale or future-dated lists — but *absence* is honest: without a CRL the
-result carries `collateral_verified: false`, the JS layer surfaces
+result carries `crl_ok: null`, the JS layer surfaces
 `collateralVerified: false` plus a warning, and `requireCollateral` turns
 that into a `collateral_required` failure for production policy. A supplied
 CRL that cannot be positively verified fails closed (`collateral_denied`),
@@ -446,54 +461,63 @@ never as "skipped". A minimum TCB floor (`minTcb`, from AMD security
 bulletins) closes the remaining platform gap: measurement pinning alone
 accepts a genuine, correctly-measured guest on unpatched firmware.
 
-## WASM verifier I/O (`attestation-rs` `verify_az_snp`)
+## WASM verifier I/O (`attestation-rs` `evaluate_az_snp`)
 
 ```
-verify_az_snp(evidenceJson: string, expectedReportData?: Uint8Array,
-              expectedInitDataHash?: Uint8Array, minTcbJson?: string,
-              crlDer?: Uint8Array) -> string (JSON) | throws
+evaluate_az_snp(evidenceJson: string, expectedReportData?: Uint8Array,
+                expectedInitDataHash?: Uint8Array, minTcbJson?: string,
+                crlDer?: Uint8Array) -> string (JSON) | throws
 ```
 
-Full Azure vTPM verification of an `AzSnpEvidence` object (above). Unlike `verify_snp`
-it takes no `generation` (auto-detected) and verifies the vTPM quote in addition to the
-hardware report:
+Full Azure vTPM verification of an `AzSnpEvidence` object (above). Unlike
+`evaluate_snp` it takes no `generation` (auto-detected) and verifies the vTPM
+quote in addition to the hardware report:
 
 1. TPM quote signature against the AK extracted from the HCL runtime data.
-2. Quote `extraData` == `expectedReportData` (the freshness anchor).
-3. PCR digest integrity, and optionally `expectedInitDataHash` bound to PCR[8].
+2. Quote `extraData` against `expectedReportData` (the freshness anchor):
+   `report_data_match`.
+3. PCR digest integrity, and optionally `expectedInitDataHash` against PCR[8]:
+   `host_data_match`.
 4. AK-to-TEE binding: `snp.report_data[..32] == SHA-256(runtime_data)`.
-5. VCEK chain to the bundled AMD roots, VCEK validity period, SNP report
-   signature, VMPL/debug/TCB policy, and the optional `minTcbJson` floor.
+5. VCEK chain to the bundled AMD roots, VCEK validity period and SNP report
+   signature; then VMPL/debug and the optional `minTcbJson` floor as values.
 6. When `crlDer` is supplied: the AMD KDS CRL's ARK signature and freshness,
-   then the VCEK's revocation status (same semantics as `verify_snp`).
+   then `crl_ok` (same semantics as `evaluate_snp`).
 
-- **Throws** (JsError) if any check fails.
-- On success returns the same shape as `verify_snp` with `platform: "az-snp"`;
-  `collateral_verified` is true iff a CRL was supplied and checked, and
-  `report_data_match` reflects the quote `extraData`, not the SNP report_data.
+- **Throws** (JsError) only when the evidence cannot be evaluated (steps 1, 3's
+  digest, 4, 5's chain and signature, a CRL failing its own checks).
+- Otherwise returns the same shape as `evaluate_snp` with `platform: "az-snp"`
+  and `pcrs_match` (null: this library pins no PCRs); `report_data_match`
+  reflects the quote `extraData`, not the SNP report_data.
 
-The JS policy layer applies the **same** pass/fail rule as for `verify_snp`.
+The JS policy layer applies the **same** pass/fail rule as for `evaluate_snp`.
 
-## WASM verifier I/O (`attestation-rs` `verify_az_tdx`, `verify_tdx`)
+## WASM verifier I/O (`attestation-rs` `evaluate_az_tdx`, `evaluate_tdx`)
 
 ```
-verify_az_tdx(evidenceJson: string, expectedReportData?: Uint8Array,
-              expectedInitDataHash?: Uint8Array) -> Promise<string (JSON)> | throws
-verify_tdx(evidenceJson: string, expectedReportData?: Uint8Array,
-           expectedInitDataHash?: Uint8Array, expectedRtmr3?: Uint8Array,
-           collateralJson?: string) -> Promise<string (JSON)> | throws
+evaluate_az_tdx(evidenceJson: string, expectedReportData?: Uint8Array,
+                expectedInitDataHash?: Uint8Array) -> Promise<string (JSON)> | throws
+evaluate_tdx(evidenceJson: string, expectedReportData?: Uint8Array,
+             expectedInitDataHash?: Uint8Array, expectedRtmr3?: Uint8Array,
+             collateralJson?: string) -> Promise<string (JSON)> | throws
 ```
 
-`verify_az_tdx` mirrors `verify_az_snp` for an `AzTdxEvidence` object: full
-vTPM quote verification with `extraData == expectedReportData` as the
-freshness anchor, AK-to-TD binding, and TD-quote signature verification.
-`verify_tdx` verifies a bare `TdxEvidence` TD quote (embedded PCK chain to the
-bundled Intel root) and checks `expectedReportData` against the quote's
-`report_data`. Both fail closed (throw) on a freshness mismatch, take no
-`generation`, and surface the MRTD as `claims.launch_digest`.
+`evaluate_az_tdx` mirrors `evaluate_az_snp` for an `AzTdxEvidence` object:
+full vTPM quote verification with `extraData` checked against
+`expectedReportData` as the freshness anchor, AK-to-TD binding, and TD-quote
+signature verification. `evaluate_tdx` verifies a bare `TdxEvidence` TD quote
+(embedded PCK chain to the bundled Intel root) and checks `expectedReportData`
+against the quote's `report_data`. Both throw only when the evidence cannot be
+evaluated, report a freshness mismatch as `report_data_match: false` and
+`passed: false`, take no `generation`, and surface the MRTD as
+`claims.launch_digest`. The result carries `report_data_match`,
+`init_data_match`, `mrtd_match`, `rtmr_match` (four entries; `rtmr_match[3]`
+is the `expectedRtmr3` comparison on `evaluate_tdx`), `debug`/`allow_debug`,
+`tcb_status`, `tcb_status_accepted` and `crl_ok`, plus `pcrs_match` on az-tdx.
 
-`verify_az_tdx` always returns `collateral_verified: false`. `verify_tdx` does
-too unless `collateralJson` carries Intel PCS v4 collateral:
+`evaluate_az_tdx` always returns `tcb_status: null` and `crl_ok: null`.
+`evaluate_tdx` does too unless `collateralJson` carries Intel PCS v4
+collateral:
 
 ```jsonc
 {
@@ -511,14 +535,16 @@ The verifier requires Intel's signature on both JSON bodies, `id: "TDX"` and
 the quote's FMSPC on the TCB Info, `id: "TD_QE"` on the QE Identity, both
 CRLs signed by the quote's verified PCK chain, and the TCB Info, QE Identity
 and both CRLs current at `at`; certificate validity (the PCK chain and both
-issuer chains) is checked against the current time. It then checks PCK revocation and the QE identity and evaluates the TCB
-status. On success `collateral_verified` is true and `tcb_status` is
-`{ "tcb_status": "UpToDate" | …, "fmspc": "<hex>", "advisory_ids": [...] }`;
-a collateral failure throws with a `TDX collateral:` prefix, and a `Revoked`
-TCB always throws. The JS layer maps `tdxCollateral` and `at` to this input,
-reports `tdxTcb`, and enforces `tdxTcbStatuses`.
+issuer chains) is checked against the current time. Collateral failing any of
+these throws with a `TDX collateral:` prefix. It then checks the QE identity
+and reports PCK revocation as `crl_ok` (false when the PCK certificate or its
+issuing CA is revoked) and the TCB status as
+`{ "tcb_status": "UpToDate" | …, "fmspc": "<hex>", "advisory_ids": [...] }`,
+with `tcb_status_accepted: false` for `Revoked` and `NoMatchingLevel`. The JS
+layer maps `tdxCollateral` and `at` to this input, reports `tdxTcb`, and
+enforces `tdxTcbStatuses`.
 
-The JS policy layer applies the **same** pass/fail rule as for `verify_snp`.
+The JS policy layer applies the **same** pass/fail rule as for `evaluate_snp`.
 
 ## Over-encryption channel (post-quantum hybrid)
 

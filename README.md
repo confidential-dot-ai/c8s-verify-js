@@ -240,7 +240,7 @@ FMSPC, and that the TCB Info, QE Identity and both CRLs are current at `at`
 current time); it then requires the PCK chain to not be revoked and
 evaluates the TCB status (`collateral_denied` if any of that fails). `tdxTcbStatuses` lists the
 statuses to accept (default `["UpToDate"]`; others fail with `tcb_denied`,
-and `Revoked` always fails). The evaluated status is on the result as
+and `Revoked` and `NoMatchingLevel` always fail). The evaluated status is on the result as
 `tdxTcb: { status, fmspc, advisoryIds }`; without `tdxCollateral` it is
 absent and `collateralVerified` is `false`. `requireCollateral: true` makes
 the collateral mandatory. `platform: "tdx"` only: the az-tdx entry point has
@@ -254,8 +254,10 @@ rather than a c8s-verify challenge-response bundle, use `verifyEvidence`
 It runs the same hardware verification + measurement/platform checks, and — when
 you pass `expectedReportData` — the `report_data` binding, but requires no bundle,
 nonce, session key, or CDS certificate (do any cluster-identity / mesh-CA chaining
-yourself). The raw WASM entrypoints (`verifySnp`, `verifyAzSnp`, `verifyAzTdx`,
-`verifyTdx`) are also exported for full control.
+yourself). The raw WASM entrypoints (`evaluateSnp`, `evaluateAzSnp`, `evaluateAzTdx`,
+`evaluateTdx`) are also exported for full control: they return the result JSON
+with `passed` and throw only when the evidence cannot be evaluated, so a caller
+must read `passed` (and the match fields) itself.
 
 ```js
 import { verifyEvidence } from "c8s-verify";

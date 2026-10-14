@@ -135,6 +135,12 @@ test("TCB policies the verifier could not enforce are refused upfront", async ()
       tdxCollateral: good,
       tdxTcbStatuses: ["Revoked" as const],
     },
+    {
+      platform: "tdx",
+      tdxImage: TDX_IMAGE,
+      tdxCollateral: good,
+      tdxTcbStatuses: ["NoMatchingLevel" as const],
+    },
     { platform: "tdx", tdxImage: TDX_IMAGE, tdxCollateral: { ...good, pckCrl: "" } },
     { platform: "tdx", tdxImage: TDX_IMAGE, requireCollateral: true },
   ]) {

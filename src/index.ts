@@ -65,7 +65,13 @@ export type { TdxImage } from "./manifest.js";
 export type { TdxCollateral, TdxTcbResult, TdxTcbStatus } from "./tdx-tcb.js";
 export { decodePEM, decodeOnePEM, encodePEM } from "./pem.js";
 export { generateNonce } from "./nonce.js";
-export { initVerifier, verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx } from "./wasm-loader.js";
+export {
+  initVerifier,
+  evaluateSnp,
+  evaluateAzSnp,
+  evaluateAzTdx,
+  evaluateTdx,
+} from "./wasm-loader.js";
 export type { Evidence, SnpEvidence, AzSnpEvidence, AzTdxEvidence, TdxEvidence } from "./hcl.js";
 
 const WELL_KNOWN = "/.well-known/c8s";

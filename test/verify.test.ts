@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import {
+  enforceVerifierRules,
   verifyAttestation,
   verifyEvidence,
   type AttestationBundle,
   type VerifyEvidenceOptions,
   type VerifyPolicy,
+  type WasmVerifyResult,
 } from "../src/verify.js";
 import { generateNonce } from "../src/nonce.js";
 import { C8sVerifyError } from "../src/errors.js";
@@ -281,6 +283,19 @@ test("verifyEvidence verifies bare SNP evidence", async () => {
   assert.equal(r.measurement, DEMO_MEASUREMENTS[0]);
   // No expected binding supplied -> warns rather than fails.
   assert.ok(r.warnings.some((w) => w.includes("expectedReportData")));
+});
+
+test("verifyEvidence refuses an expectedReportData over 64 bytes as invalid_request", async () => {
+  const { snpEvidence } = await loadFixtures();
+  await assert.rejects(
+    () =>
+      verifyEvidence(snpEvidence, {
+        generation: "genoa",
+        measurements: DEMO_MEASUREMENTS,
+        expectedReportData: new Uint8Array(65),
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
 });
 
 test("verifyEvidence rejects a measurement not in the allowlist", async () => {
@@ -925,4 +940,37 @@ test("verifyAttestation refuses a partial or malformed tuple with invalid_reques
       `tuple ${JSON.stringify(bad).slice(0, 60)}… must be refused`,
     );
   }
+});
+
+// The failing-field mapping, on hand-built results: real evidence cannot
+// produce every combination (this library pins no PCRs).
+test("enforceVerifierRules accepts only passed, and maps failing fields to codes", () => {
+  const base = { platform: "snp", report_data_match: null, claims: { launch_digest: "" } };
+  const code = (c: string) => (e: unknown) => e instanceof C8sVerifyError && e.code === c;
+  const reject = (r: Partial<WasmVerifyResult>, c: string) =>
+    assert.throws(() => enforceVerifierRules({ ...base, passed: false, ...r }), code(c));
+
+  reject({ report_data_match: false, min_tcb_met: false }, "report_data_mismatch");
+  reject({ rtmr_match: [null, null, null, false], crl_ok: false }, "rtmr3_denied");
+  reject({ min_tcb_met: false }, "tcb_denied");
+  reject({ platform: "tdx", tcb_status_accepted: false }, "tcb_denied");
+  reject({ crl_ok: false }, "collateral_denied");
+  reject({ platform: "tdx", crl_ok: false }, "collateral_denied");
+  reject({ debug: true, allow_debug: false }, "verification_failed");
+  reject({ vmpl: 1, max_vmpl: 0 }, "verification_failed");
+  // A rule this library does not know, or none at all, still fails.
+  reject({ endorsement_match: false } as Partial<WasmVerifyResult>, "verification_failed");
+  reject({}, "verification_failed");
+  assert.throws(
+    () => enforceVerifierRules({ ...base } as unknown as WasmVerifyResult),
+    code("verification_failed"),
+  );
+  // A supplied anchor must have been checked.
+  assert.throws(
+    () => enforceVerifierRules({ ...base, passed: true }, new Uint8Array(48)),
+    code("report_data_mismatch"),
+  );
+
+  enforceVerifierRules({ ...base, passed: true, crl_ok: true, min_tcb_met: true });
+  enforceVerifierRules({ ...base, passed: true, report_data_match: true }, new Uint8Array(48));
 });
