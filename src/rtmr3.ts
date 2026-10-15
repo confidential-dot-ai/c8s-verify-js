@@ -26,24 +26,25 @@ export function extendRegister(reg: Uint8Array, digest: string): Uint8Array {
 /**
  * Check a reported measured-policy list: an array of at most
  * {@link MAX_MEASURED_POLICIES} canonical `sha256:<64 lowercase hex>` digests.
- * Anything else fails with `invalid_request`. `undefined` reads as empty.
+ * Anything else fails with `rtmr3_denied`, like a list that does not replay.
+ * `undefined` reads as empty.
  */
 export function validateMeasuredPolicies(list: unknown): string[] {
   if (list === undefined) return [];
   if (!Array.isArray(list)) {
-    fail("invalid_request", "measured policy list must be an array of policy digests");
+    fail("rtmr3_denied", "measured policy list is malformed: not an array of policy digests");
   }
   if (list.length > MAX_MEASURED_POLICIES) {
     fail(
-      "invalid_request",
-      `measured policy list has ${list.length} entries, more than the ${MAX_MEASURED_POLICIES} allowed`,
+      "rtmr3_denied",
+      `measured policy list is malformed: ${list.length} entries, more than the ${MAX_MEASURED_POLICIES} allowed`,
     );
   }
   for (const entry of list) {
     if (typeof entry !== "string" || !CANONICAL_POLICY_DIGEST.test(entry)) {
       fail(
-        "invalid_request",
-        `measured policy ${JSON.stringify(entry)} is not a canonical sha256:<64 lowercase hex> digest`,
+        "rtmr3_denied",
+        `measured policy list is malformed: ${JSON.stringify(entry)} is not a canonical sha256:<64 lowercase hex> digest`,
       );
     }
   }

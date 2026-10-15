@@ -559,7 +559,10 @@ test("verifyEvidence refuses a malformed or oversized measured list under an RTM
         expectedRtmr3: TDX_RTMR3,
         measuredPolicies: measuredPolicies as string[],
       }),
-      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      (e: unknown) =>
+        e instanceof C8sVerifyError &&
+        e.code === "rtmr3_denied" &&
+        e.message.includes("measured policy list is malformed"),
       `list ${JSON.stringify(measuredPolicies).slice(0, 80)} must be refused`,
     );
   }

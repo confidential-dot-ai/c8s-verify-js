@@ -92,7 +92,8 @@ policy after that seed and reports the digests as the bundle's
 `measured_policies`. Keep pinning the bare seed: the verifier accepts the
 quoted register when a prefix of that list replays from the pin, exposes the
 prefix as `measuredPolicies` on the result, and warns that no policy pin
-judged it.
+judged it. A list that does not replay, is malformed, or holds more than 256
+entries fails with `rtmr3_denied`.
 
 Pinning both is strictly stronger than either alone; `expectedRtmr3` is optional
 only for backwards compatibility, and SNP has no equivalent register, so it is

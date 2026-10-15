@@ -985,7 +985,10 @@ test("verifyAttestation refuses malformed or oversized measured_policies under a
     const { bundle, meshCaPem } = await measuredTdxBundle(nonce, measured);
     await assert.rejects(
       () => verifyAttestation(bundle, nonce, tdxPolicy(meshCaPem, TDX_RTMR3)),
-      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      (e: unknown) =>
+        e instanceof C8sVerifyError &&
+        e.code === "rtmr3_denied" &&
+        e.message.includes("measured policy list is malformed"),
       `list ${JSON.stringify(measured).slice(0, 80)} must be refused`,
     );
   }
