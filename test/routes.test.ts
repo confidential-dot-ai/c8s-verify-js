@@ -14,6 +14,7 @@ import { base64ToBytes, base64UrlToBytes, bytesToBase64, bytesToBase64Url } from
 import { hexToBytes } from "../src/base64.js";
 import { decodePEM, encodePEM } from "../src/pem.js";
 import type { XWingKeyPair } from "../src/keyagreement.js";
+import type { AttestationBundle } from "../src/verify.js";
 import { DEMO_MEASUREMENTS } from "../demo/config.js";
 import { buildBundle, loadFixtures } from "./helpers.js";
 
@@ -116,9 +117,21 @@ test("shared vectors: invalid envelopes are refused", async () => {
   }
 });
 
+// c8s accepts these; this client deliberately requires alg to match the key's
+// curve and refuses crit.
+const STRICTER_THAN_C8S = new Set([
+  "ES384 signature by the P-256 key",
+  "ES512 signature by the P-384 key",
+  "crit header",
+  "empty crit header",
+]);
+
 test("edge vectors: envelopes get the c8s verdict", async () => {
   const v = await edge();
+  const seen = new Set<string>();
   for (const c of v.envelopes) {
+    if (STRICTER_THAN_C8S.has(c.name)) seen.add(c.name);
+    const valid = c.valid && !STRICTER_THAN_C8S.has(c.name);
     const got = await verifyPublishedRoutes(c.envelope, v.operator_keys_pem).then(
       (r) => r,
       (e: unknown) => {
@@ -126,12 +139,25 @@ test("edge vectors: envelopes get the c8s verdict", async () => {
         return undefined;
       },
     );
-    assert.equal(got !== undefined, c.valid, c.name);
+    assert.equal(got !== undefined, valid, c.name);
     if (got !== undefined) {
       assert.equal(got.routeDigest, c.route_digest, c.name);
       assert.equal(got.revision, c.revision, c.name);
     }
   }
+  assert.deepEqual([...seen].sort(), [...STRICTER_THAN_C8S].sort(), "every exemption has a vector");
+});
+
+test("an alg no operator key's curve matches is named", async () => {
+  const ed = await edge();
+  const c = ed.envelopes.find((e) => e.name === "ES384 signature by the P-256 key");
+  assert.ok(c);
+  const { operator_public_key_pem: p256 } = await shared();
+  await assert.rejects(
+    () => verifyPublishedRoutes(c.envelope, p256),
+    (e: unknown) =>
+      hasCode("route_manifest_denied")(e) && (e as Error).message.includes("ES384 needs a P-384"),
+  );
 });
 
 test("edge vectors: manifests get the c8s verdict", async () => {
@@ -214,6 +240,7 @@ type Publication = { status: number; body: string } | Error;
 interface RouteServer {
   fetch: typeof fetch;
   publicationFetches: () => number;
+  attestCalls: () => number;
   tunnelCalls: () => number;
 }
 
@@ -227,9 +254,11 @@ function routeServer(
 ): RouteServer {
   let fetches = 0;
   let tunnel = 0;
+  let attest = 0;
   const f = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.endsWith("/attest-pq")) {
+      attest++;
       const req = JSON.parse(init?.body as string) as { nonce: string; xwing_ek: string };
       const { bundle } = await buildBundle(base64UrlToBytes(req.nonce), {
         clientKeyPair: { ek: base64UrlToBytes(req.xwing_ek) } as XWingKeyPair,
@@ -250,7 +279,12 @@ function routeServer(
     }
     throw new Error(`unexpected fetch ${url}`);
   };
-  return { fetch: f, publicationFetches: () => fetches, tunnelCalls: () => tunnel };
+  return {
+    fetch: f,
+    publicationFetches: () => fetches,
+    attestCalls: () => attest,
+    tunnelCalls: () => tunnel,
+  };
 }
 
 async function routeClient(fetchFn: typeof fetch, keys: string, routeFloor?: RouteFloor) {
@@ -283,6 +317,12 @@ test("connect checks the published manifest against the evidence", async () => {
   }[] = [
     { name: "matching publication", bound: d12, publications: [ok(r12.envelope)], want: 12 },
     {
+      name: "mismatch, then a re-fetch that does not verify",
+      bound: d13,
+      publications: [ok(r12.envelope), ok(v.invalid[0].envelope)],
+      want: "route_manifest_denied",
+    },
+    {
       name: "untrusted key",
       bound: d12,
       publications: [ok(r12.envelope)],
@@ -305,13 +345,13 @@ test("connect checks the published manifest against the evidence", async () => {
       name: "mismatch, then the same revision",
       bound: d13,
       publications: [ok(r12.envelope), ok(r12.envelope)],
-      want: "route_manifest_denied",
+      want: "route_denied",
     },
     {
-      name: "mismatch, then a lower revision, even one that matches",
+      name: "mismatch, then a lower revision that matches",
       bound: d12,
       publications: [ok(r13.envelope), ok(r12.envelope)],
-      want: "route_manifest_denied",
+      want: 12,
     },
     {
       name: "mismatch, then a newer revision that does not match",
@@ -320,9 +360,9 @@ test("connect checks the published manifest against the evidence", async () => {
       want: "route_denied",
     },
     {
-      name: "floor above the published revision",
+      name: "floor above the attested revision, retried once",
       bound: d12,
-      publications: [ok(r12.envelope)],
+      publications: [ok(r12.envelope), ok(r12.envelope)],
       floor: { revision: 13, digest: d13 },
       want: "route_manifest_denied",
     },
@@ -334,7 +374,7 @@ test("connect checks the published manifest against the evidence", async () => {
       want: "route_manifest_denied",
     },
     {
-      name: "first fetch below the floor, then the bound revision",
+      name: "mismatch below the floor, then the bound revision",
       bound: d13,
       publications: [ok(r12.envelope), ok(r13.envelope)],
       floor: { revision: 13, digest: d13 },
@@ -405,15 +445,19 @@ test("connect keeps the accepted revision and refuses a later rollback", async (
   const v = await shared();
   const [r12, r13] = v.valid;
   let bound = r13.route_digest;
-  const server = routeServer(() => bound, [ok(r13.envelope), ok(r12.envelope)]);
+  const server = routeServer(() => bound, [ok(r13.envelope), ok(r12.envelope), ok(r12.envelope)]);
   const client = await routeClient(server.fetch, v.operator_public_key_pem);
   await client.connect();
   assert.deepEqual(client.routeFloor, { revision: 13, digest: r13.route_digest });
 
   bound = r12.route_digest;
-  await assert.rejects(() => client.connect(), hasCode("route_manifest_denied"));
+  await assert.rejects(
+    () => client.connect(),
+    (e: unknown) =>
+      hasCode("route_manifest_denied")(e) && (e as C8sVerifyError).details.reason === "below_floor",
+  );
   assert.deepEqual(client.routeFloor, { revision: 13, digest: r13.route_digest });
-  assert.equal(server.publicationFetches(), 2);
+  assert.equal(server.publicationFetches(), 3, "the rollback is retried once");
 });
 
 test("a connect that loses a race to a newer revision does not lower the floor", async () => {
@@ -423,27 +467,100 @@ test("a connect that loses a race to a newer revision does not lower the floor",
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   let reached!: () => void;
-  const atPublication = new Promise<void>((resolve) => (reached = resolve));
-  // The held first fetch reaches the server after the second one.
-  const server = routeServer(() => bound, [ok(r13.envelope), ok(r12.envelope)]);
-  let publications = 0;
+  const atAttestation = new Promise<void>((resolve) => (reached = resolve));
+  // Publications in request order: the held connect, the racing one, then
+  // the held connect's retry.
+  const server = routeServer(() => bound, [ok(r12.envelope), ok(r13.envelope), ok(r12.envelope)]);
+  let attestations = 0;
   const f: typeof fetch = async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
-    if (url.endsWith("/routes") && publications++ === 0) {
+    const res = await server.fetch(input, init);
+    if (url.endsWith("/attest-pq") && attestations++ === 0) {
+      // Hold the first handshake once it bound revision 12, so the floor
+      // rises between its route check and its floor update.
       reached();
       await held;
     }
-    return server.fetch(input, init);
+    return res;
   };
   const client = await routeClient(f, v.operator_public_key_pem);
   const first = client.connect();
-  await atPublication;
+  await atAttestation;
   bound = r13.route_digest;
   await client.connect();
   assert.deepEqual(client.routeFloor, { revision: 13, digest: r13.route_digest });
+  bound = r12.route_digest;
   release();
   await assert.rejects(first, hasCode("route_manifest_denied"));
   assert.deepEqual(client.routeFloor, { revision: 13, digest: r13.route_digest });
+  assert.equal(server.publicationFetches(), 3);
+});
+
+test("a connection below the floor is retried once, and succeeds once the replica catches up", async () => {
+  const v = await shared();
+  const [r12, r13] = v.valid;
+  const floor = { revision: 13, digest: r13.route_digest };
+  // The first handshake reaches a replica still on 12, the retry one on 13.
+  const server: RouteServer = routeServer(
+    () => (server.attestCalls() <= 1 ? r12.route_digest : r13.route_digest),
+    [ok(r12.envelope), ok(r13.envelope)],
+  );
+  const client = await routeClient(server.fetch, v.operator_public_key_pem, floor);
+  const session = await client.connect();
+  assert.equal(session.attestation.routeRevision, 13);
+  assert.equal(server.attestCalls(), 2);
+  assert.deepEqual(client.routeFloor, floor);
+});
+
+test("a revision conflict with the floor is not retried", async () => {
+  const v = await shared();
+  const [r12, r13] = v.valid;
+  const server = routeServer(r12.route_digest, [ok(r12.envelope)]);
+  const client = await routeClient(server.fetch, v.operator_public_key_pem, {
+    revision: 12,
+    digest: r13.route_digest,
+  });
+  await assert.rejects(
+    () => client.connect(),
+    (e: unknown) =>
+      hasCode("route_manifest_denied")(e) &&
+      (e as C8sVerifyError).details.reason === "revision_conflict",
+  );
+  assert.equal(server.attestCalls(), 1);
+});
+
+test("the publication is requested first and its failure reported after the evidence's", async () => {
+  const v = await shared();
+  const server = routeServer(v.valid[0].route_digest, [{ status: 404, body: "" }]);
+  const order: string[] = [];
+  const f: typeof fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    order.push(new URL(url).pathname);
+    const res = await server.fetch(input, init);
+    if (!url.endsWith("/attest-pq")) return res;
+    const bundle = (await res.json()) as AttestationBundle;
+    bundle.route_digest = "ab".repeat(32); // no longer the digest the proof signs
+    return new Response(JSON.stringify(bundle), { status: 200 });
+  };
+  const client = await routeClient(f, v.operator_public_key_pem);
+  await assert.rejects(
+    () => client.connect(),
+    (e: unknown) => e instanceof C8sVerifyError && !e.code.startsWith("route_"),
+  );
+  assert.deepEqual(order, ["/.well-known/c8s/routes", "/.well-known/c8s/attest-pq"]);
+});
+
+test("a key WebCrypto refuses fails every connect before the handshake", async () => {
+  const v = await shared();
+  const spki = decodePEM(v.operator_public_key_pem, "PUBLIC KEY")[0].slice();
+  spki[spki.length - 1] ^= 1; // y no longer on the curve
+  const server = routeServer(v.valid[0].route_digest, []);
+  const client = await routeClient(server.fetch, encodePEM(spki, "PUBLIC KEY"));
+  for (let i = 0; i < 2; i++) {
+    await assert.rejects(() => client.connect(), hasCode("invalid_request"));
+  }
+  assert.equal(server.attestCalls(), 0);
+  assert.equal(server.publicationFetches(), 0);
 });
 
 test("a session refuses requests the attested manifest does not route", async () => {

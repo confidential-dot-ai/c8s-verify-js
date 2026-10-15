@@ -2,7 +2,14 @@
 // /.well-known/c8s/routes, verified as c8s pkg/routes VerifySigned verifies
 // it, and the route selection the manifest implies. Decoders follow the Go
 // ones c8s uses (encoding/base64, encoding/pem, net.ParseIP), so a manifest
-// verifies here exactly when it verifies there.
+// verifies here exactly when it verifies there. Two deliberate exceptions
+// are stricter: the token's alg must match the key's curve, and a crit
+// header is refused.
+//
+// Both C8sClient and verifyPublishedRoutes check the full schema, backend
+// fields included. The client alone would not need it, since its digest check
+// ties the manifest to one an attested router applied, but the standalone
+// verdict of verifyPublishedRoutes does; keep the schema in step with c8s.
 
 import { readChildren, readTLV, decodeOID, TAG } from "./asn1.js";
 import { bytesToBase64, bytesToBase64Url, bytesToHex, utf8ToBytes } from "./base64.js";
@@ -196,16 +203,16 @@ function parseEnvelope(body: Uint8Array): { manifest: Uint8Array; token: string 
   return { manifest, token };
 }
 
-const ES_ALGORITHMS: Record<string, { hash: string; size: number }> = {
-  ES256: { hash: "SHA-256", size: 32 },
-  ES384: { hash: "SHA-384", size: 48 },
-  ES512: { hash: "SHA-512", size: 66 },
+const ES_ALGORITHMS: Record<string, { hash: string; curve: string }> = {
+  ES256: { hash: "SHA-256", curve: "P-256" },
+  ES384: { hash: "SHA-384", curve: "P-384" },
+  ES512: { hash: "SHA-512", curve: "P-521" },
 };
 
 /**
  * Verify a stored write token as c8s operatorauth.VerifyStoredToken does
  * (golang-jwt v5 without claims validation): an ES256, ES384 or ES512
- * signature under one of keys, then htm, htu and pbh.
+ * signature under one of keys on the matching curve, then htm, htu and pbh.
  */
 async function verifyToken(keys: CryptoKey[], token: string, digest: Uint8Array): Promise<void> {
   const parts = token.split(".");
@@ -216,8 +223,16 @@ async function verifyToken(keys: CryptoKey[], token: string, digest: Uint8Array)
   if (typeof alg !== "string" || !Object.hasOwn(ES_ALGORITHMS, alg)) {
     throw new Invalid("write token alg is not ES256, ES384 or ES512");
   }
+  if (Object.hasOwn(header, "crit")) throw new Invalid("write token header has crit");
   const signature = goBase64(parts[2], URL_ALPHABET, false);
   if (signature === undefined) throw new Invalid("write token signature is not base64url");
+  const { curve } = ES_ALGORITHMS[alg];
+  if (!keys.some((key) => (key.algorithm as EcKeyAlgorithm).namedCurve === curve)) {
+    // c8s accepts a mismatched alg, so name the cause rather than a bad signature.
+    throw new Invalid(
+      `write token alg ${alg} needs a ${curve} operator key; re-sign with the algorithm matching the key's curve`,
+    );
+  }
   const input = utf8ToBytes(`${parts[0]}.${parts[1]}`);
   let verified = false;
   for (const key of keys) {
@@ -259,41 +274,20 @@ function tokenJson(segment: string, what: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/**
- * golang-jwt splits the signature at the algorithm's key size and passes r
- * and s to ecdsa.Verify, which takes any curve: ES384 under a P-256 key
- * verifies. WebCrypto wants r||s at the key's own curve size.
- */
+/** Verify a raw r||s signature; the algorithm must match the key's curve. */
 async function verifyES(
   key: CryptoKey,
-  alg: { hash: string; size: number },
+  alg: { hash: string; curve: string },
   signature: Uint8Array,
   input: Uint8Array,
 ): Promise<boolean> {
-  if (signature.length !== 2 * alg.size) return false;
-  const size = CURVE_BYTES[(key.algorithm as EcKeyAlgorithm).namedCurve];
-  const r = fixedWidth(signature.subarray(0, alg.size), size);
-  const s = fixedWidth(signature.subarray(alg.size), size);
-  if (r === undefined || s === undefined) return false;
-  const raw = new Uint8Array(2 * size);
-  raw.set(r);
-  raw.set(s, size);
+  const curve = (key.algorithm as EcKeyAlgorithm).namedCurve;
+  if (curve !== alg.curve || signature.length !== 2 * CURVE_BYTES[curve]) return false;
   try {
-    return await subtle().verify({ name: "ECDSA", hash: alg.hash }, key, raw, input);
+    return await subtle().verify({ name: "ECDSA", hash: alg.hash }, key, signature, input);
   } catch {
     return false;
   }
-}
-
-/** Re-pad a big-endian integer to `size` bytes; undefined if zero or too large. */
-function fixedWidth(n: Uint8Array, size: number): Uint8Array | undefined {
-  let start = 0;
-  while (start < n.length && n[start] === 0) start++;
-  const digits = n.length - start;
-  if (digits === 0 || digits > size) return undefined;
-  const out = new Uint8Array(size);
-  out.set(n.subarray(start), size - digits);
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -917,28 +911,30 @@ export function validateRouteFloor(floor: RouteFloor | undefined): void {
 }
 
 /**
- * Refuse a manifest whose revision is below the floor, or equal to it with
- * another digest.
+ * Refuse a manifest whose revision is below the floor (details.reason
+ * "below_floor"), or equal to it with another digest ("revision_conflict").
  */
 export function checkRouteFloor(routes: PublishedRoutes, floor: RouteFloor | undefined): void {
   if (floor === undefined) return;
-  const details = {
+  const details = (reason: string) => ({
+    reason,
     revision: routes.revision,
     digest: routes.routeDigest,
     floor: { ...floor },
-  };
+  });
   if (routes.revision < floor.revision) {
     fail(
       "route_manifest_denied",
-      `the published route manifest has revision ${routes.revision}, below the accepted revision ${floor.revision}`,
-      { details },
+      `a router replica may lag behind the accepted route manifest revision ${floor.revision}, ` +
+        `or the manifest was rolled back: the attested manifest has revision ${routes.revision}`,
+      { details: details("below_floor") },
     );
   }
   if (routes.revision === floor.revision && routes.routeDigest !== floor.digest) {
     fail(
       "route_manifest_denied",
-      `the published route manifest has the accepted revision ${floor.revision} with a different digest`,
-      { details },
+      `the attested route manifest has the accepted revision ${floor.revision} with a different digest`,
+      { details: details("revision_conflict") },
     );
   }
 }

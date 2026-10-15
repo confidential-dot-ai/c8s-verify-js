@@ -228,25 +228,32 @@ call `client.connect()` again when you need a fresh bound.
 
 **Operator-signed routes.** To accept any manifest an operator signed instead
 of pinning digests, pass `routeOperatorKeys`: a PEM bundle of the operator
-public keys (ECDSA P-256, P-384 or P-521; a key WebCrypto refuses fails the
-first `connect`). It excludes `routeDigests`, and the
-router must publish its manifest (Helm `router.routePublication.enabled`).
-After each handshake, `connect` fetches `/.well-known/c8s/routes`, verifies the
-write token under the keys as c8s does, and requires the manifest's digest to
-be the one the evidence binds. If the digests differ, it fetches once more and
-accepts only a newer revision that matches. The session then reports
+public keys (ECDSA P-256, P-384 or P-521; a key WebCrypto refuses fails every
+`connect`, before the handshake). It excludes `routeDigests`. The router must
+publish its manifest (Helm `router.routePublication.enabled`), and a browser
+client also needs CORS on `/.well-known/c8s/routes`: the c8s chart allows any
+origin on `/.well-known/c8s/` by default (`router.cors.protocolEndpoints`), or
+only `router.cors.allowOrigins` when `router.cors.enabled` is set. Without it
+the fetch fails as `route_manifest_unavailable`.
+
+`connect` requests `/.well-known/c8s/routes` before the handshake, verifies
+the write token under the keys as c8s does, and requires the manifest's
+digest to be the one the evidence binds. If the digests differ, it fetches
+once more and requires the second manifest to match. The session then reports
 `routePolicy: "operator-signed"` and `routeRevision`, and `session.fetch`
 refuses (`route_unmatched`) a request the attested manifest routes to no
 backend. The client keeps the newest accepted revision and digest as a
-rollback floor, in memory: it refuses an older revision, or the same revision
-with another digest (`route_manifest_denied`). To keep the floor across
-restarts, store `client.routeFloor` after each `connect` and pass it back as
-`routeFloor`. A publication that is off or unreachable fails with
+rollback floor, in memory. A revision below it is retried once, in case a
+replica lags, then refused; the same revision with another digest is refused
+at once (`route_manifest_denied`). To keep the floor across restarts, store
+`client.routeFloor` after each `connect` and pass it back as `routeFloor`. A
+publication that is off or unreachable fails with
 `route_manifest_unavailable`, a malformed one with `route_manifest_invalid`.
+PROTOCOL.md lists every check and its error code.
 `verifyPublishedRoutes(body, operatorKeysPem)` checks the signature and schema
 of a body you fetched yourself; comparing its `routeDigest` with the evidence
-and keeping a floor are then yours. Without either option, `routePolicy` is `"unverified"`:
-the digest is reported, not checked.
+and keeping a floor are then yours. Without either option, `routePolicy` is
+`"unverified"`: the digest is reported, not checked.
 
 What is verified, and in what order: nonce + `xwing_ek` echo → response version
 is exactly `c8s/attest-pq/v1` → served leaf chains to the pinned or

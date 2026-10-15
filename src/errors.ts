@@ -74,9 +74,10 @@ export type C8sErrorCode =
   | "route_denied"
   // Operator-key route checks (routeOperatorKeys). "_unavailable": the route
   // publication could not be fetched (network, 404 when publication is off,
-  // any other status). "_invalid": the body is not a well-formed envelope.
-  // "_denied": the envelope does not verify under the operator keys, falls
-  // below the rollback floor, or a re-fetch did not bring a newer revision.
+  // any other status). "_invalid": the body exceeds 4 MiB or is not a
+  // well-formed envelope. "_denied": the envelope does not verify under the
+  // operator keys, or the rollback floor refuses the attested manifest
+  // (details.reason "below_floor" or "revision_conflict").
   | "route_manifest_unavailable"
   | "route_manifest_invalid"
   | "route_manifest_denied"

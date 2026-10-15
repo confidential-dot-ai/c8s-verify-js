@@ -185,20 +185,21 @@ export interface C8sClientOptions {
   routeDigests?: string[];
   /**
    * Operator public keys (PEM PUBLIC KEY blocks, ECDSA P-256, P-384 or
-   * P-521) the route manifest must be signed under. Optional. After each
+   * P-521) the route manifest must be signed under. Optional. Before each
    * handshake, `connect` fetches the manifest the router publishes at
    * `/.well-known/c8s/routes`, verifies it under these keys and requires its
-   * digest to be the one the evidence binds. On a mismatch it fetches once
-   * more and accepts only a newer revision. Requires route publication on the
-   * router. Excludes `routeDigests`. A malformed key fails construction; a
-   * point WebCrypto refuses fails the first `connect`, before the handshake.
+   * digest to be the one the evidence binds, fetching once more on a
+   * mismatch. Requires route publication on the router, and CORS on that
+   * path for a browser. Excludes `routeDigests`. A malformed key fails construction; a
+   * point WebCrypto refuses fails every `connect`, before the handshake.
    */
   routeOperatorKeys?: string;
   /**
    * The revision and digest of the manifest last accepted, to refuse a
    * rollback: an older revision, or this revision with another digest.
    * Requires `routeOperatorKeys`. The client raises the floor in memory as it
-   * accepts newer revisions; read `routeFloor` to persist it.
+   * accepts newer revisions, and retries a connection below it once, in case
+   * a replica lags; read `routeFloor` to persist it.
    */
   routeFloor?: RouteFloor;
 }
@@ -329,25 +330,17 @@ export class C8sClient {
 
   /**
    * Check the route digest the evidence binds against the manifest the router
-   * publishes.
+   * publishes, re-fetching once on a mismatch.
    */
-  private async verifyRoutes(keys: CryptoKey[], digest: string): Promise<PublishedRoutes> {
-    const first = await this.publishedRoutes(keys);
-    if (first.routeDigest === digest) {
-      checkRouteFloor(first, this.floor);
-      return first;
-    }
-    // The publication fetch may have reached a replica that is behind.
+  private async verifyRoutes(
+    published: Promise<PublishedRoutes>,
+    keys: CryptoKey[],
+    digest: string,
+  ): Promise<PublishedRoutes> {
+    const first = await published;
+    if (first.routeDigest === digest) return first;
+    // The publication may have come from a replica on another revision.
     const fresh = await this.publishedRoutes(keys);
-    if (fresh.revision <= first.revision) {
-      fail(
-        "route_manifest_denied",
-        `the evidence binds route digest ${digest}, the published manifest has ${first.routeDigest}, ` +
-          `and the re-fetched revision ${fresh.revision} is not newer than ${first.revision}`,
-        { details: { expected: [first.routeDigest, fresh.routeDigest], got: digest } },
-      );
-    }
-    checkRouteFloor(fresh, this.floor);
     if (fresh.routeDigest !== digest) {
       fail(
         "route_denied",
@@ -437,14 +430,32 @@ export class C8sClient {
    * derive the over-encrypted channel. The session is live on return.
    */
   async connect(): Promise<Session> {
+    try {
+      return await this.connectOnce();
+    } catch (e) {
+      // A handshake and publication that agree on a revision below the floor
+      // most likely reached a replica that has not caught up: try once more.
+      if (!(e instanceof C8sVerifyError) || e.details.reason !== "below_floor") throw e;
+      return this.connectOnce();
+    }
+  }
+
+  private async connectOnce(): Promise<Session> {
     const routeKeys = await this.routeKeys;
+    // Requested before the handshake, as c8s verify does: a manifest the
+    // router applies between this request and admission shows up as a
+    // mismatch the re-fetch resolves.
+    const published = routeKeys && this.publishedRoutes(routeKeys);
+    // Awaited after the transcript verifies; a failed handshake must not
+    // leave its rejection unhandled.
+    void published?.catch(() => undefined);
     const nonce = generateNonce();
     const keyPair = await generateXWingKeyPair();
     const bundle = await this.fetchAttestation(nonce, keyPair);
     let attestation = await verifyAttestation(bundle, nonce, this.policy, keyPair.ek);
     let routes: PublishedRoutes | undefined;
-    if (routeKeys !== undefined) {
-      routes = await this.verifyRoutes(routeKeys, attestation.routeDigest);
+    if (routeKeys !== undefined && published !== undefined) {
+      routes = await this.verifyRoutes(published, routeKeys, attestation.routeDigest);
       attestation = {
         ...attestation,
         routePolicy: "operator-signed",

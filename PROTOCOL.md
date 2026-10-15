@@ -225,38 +225,38 @@ session's later requests without new evidence. A client that pins
 `routeDigests` refuses any other digest with `route_denied`.
 
 **Operator-signed routes.** A client with `routeOperatorKeys` instead checks
-the digest against the manifest the router publishes. After the transcript
-verifies, it sends `GET <baseUrl><prefix>/routes` (`/.well-known/c8s/routes` by
-default) with `cache: "no-store"`. The response needs no transport trust and
-may come from another replica. A 200 body of at most 4 MiB is the envelope
-`{"manifest": "<standard padded base64 of the manifest bytes>", "token": "<write token>"}`,
-with exactly these members. The client checks, in order:
+the digest against the manifest the router publishes. It sends
+`GET <baseUrl><prefix>/routes` (`/.well-known/c8s/routes` by default, with
+`cache: "no-store"`) before the attest-pq POST, and evaluates it once the
+transcript verifies; a failed transcript check is reported first. The
+publication needs no transport trust and may come from another replica.
 
-1. Both the envelope and the manifest are strict JSON: one UTF-8 value, no
-   duplicate member names, no unpaired surrogate escapes, no trailing data.
-   `manifest` is canonical standard padded base64.
-2. The token is a compact JWS with `alg` ES256, ES384 or ES512, signed over
-   the ASCII `header.payload` text under one of the keys. The signature is raw
-   `r || s` at the algorithm's size, as in RFC 7515; DER is refused. As in
-   c8s, the algorithm need not match the key's curve.
-3. The claims carry `htm` `PUT`, `htu` `/routes`, and `pbh`, the unpadded
-   base64url SHA-256 of the decoded manifest bytes. `exp`, `nbf` and `iat` are
-   not checked: the token authorized a past write.
-4. The manifest bytes satisfy the `c8s.routes/v1` schema of c8s `pkg/routes`.
-5. SHA-256 of the manifest bytes equals the transcript's `route_digest`.
-6. The revision is not below the client's floor, and equal to it only with
-   the same digest.
+Each publication fetch is checked in this order, stopping at the first
+failure:
 
-If step 5 fails, the client fetches once more, since the first fetch may
-have reached a replica that is behind. It accepts the second manifest only if
-its revision is higher than the first one's and it passes steps 1–6;
-otherwise it fails with `route_manifest_denied` (not newer, or below the
-floor) or `route_denied` (newer, other digest). A lower revision fails even
-when it matches. Once the channel is established, the accepted manifest
-raises the floor. `Session.fetch`
-then refuses with `route_unmatched` a request whose sealed `Host` and path
-the manifest routes to no backend, under the router's matching rules (reserved
-router paths are not applied).
+| Step | Check | Error code |
+|---|---|---|
+| F1 | The request completes with status 200. A 404 means publication is off or no manifest is applied. | `route_manifest_unavailable` |
+| F2 | The body is at most 4 MiB. | `route_manifest_invalid` |
+| F3 | The body is strict JSON (one UTF-8 value, no duplicate member names, no unpaired surrogate escapes, no trailing data) holding exactly `{"manifest": "<standard padded base64 of the manifest bytes>", "token": "<write token>"}`, and `manifest` is canonical base64. | `route_manifest_invalid` |
+| F4 | The token is a compact JWS whose header and claims are base64url JSON objects. `alg` is ES256, ES384 or ES512, there is no `crit`, and the raw `r \|\| s` signature (RFC 7515; DER is refused) over the ASCII `header.payload` text verifies under one of the keys on the matching curve: P-256, P-384 or P-521. | `route_manifest_denied` |
+| F5 | The claims carry `htm` `PUT`, `htu` `/routes`, and `pbh`, the unpadded base64url SHA-256 of the decoded manifest bytes. `exp`, `nbf` and `iat` are not checked: the token authorized a past write. | `route_manifest_denied` |
+| F6 | The manifest bytes satisfy the `c8s.routes/v1` schema of c8s `pkg/routes`. | `route_manifest_denied` |
+
+Then the connection is checked in this order:
+
+| Step | Check | Error code |
+|---|---|---|
+| C1 | SHA-256 of the first manifest equals the transcript's `route_digest`. If not, the client fetches once more (F1–F6) and continues with that manifest. A first fetch that fails F1–F6 is final, as in `c8s verify`. | — |
+| C2 | The re-fetched manifest's digest equals the transcript's `route_digest`. | `route_denied` |
+| C3 | After the channel is derived, the manifest's revision is not below the client's floor. If it is, the whole connection is retried once, since a replica may lag behind; a second failure is final, with `details.reason` `below_floor`. | `route_manifest_denied` |
+| C4 | A manifest at the floor's revision has the floor's digest. Not retried; `details.reason` `revision_conflict`. | `route_manifest_denied` |
+
+An accepted manifest then raises the floor; rollback is decided by the floor
+alone. A connection refused after admission leaves its router session unused
+until the idle TTL retires it. `Session.fetch` refuses with `route_unmatched` a request whose sealed
+`Host` and path the manifest routes to no backend, under the router's
+matching rules (reserved router paths are not applied).
 
 The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
 is deliberately unchanged by the endpoint move (as are the HKDF info string and
@@ -712,8 +712,8 @@ pin, or the claims carry no comparable value), `rtmr3_denied`, `invalid_cert` /
 `routeDigests` pin set, or is not the operator-signed published manifest's).
 With `routeOperatorKeys`, `route_manifest_unavailable` (the publication fetch
 failed or returned a status other than 200), `route_manifest_invalid` (the body
-is not a well-formed envelope) and `route_manifest_denied` (the envelope does
-not verify, the floor refuses it, or a re-fetch brought no newer revision)
+exceeds 4 MiB or is not a well-formed envelope) and `route_manifest_denied` (the envelope does
+not verify, or the floor refuses the attested manifest)
 abort the connection, and `Session.fetch` throws `route_unmatched`.
 
 The workload policy adds `workload_not_attested` (no stamp while a
