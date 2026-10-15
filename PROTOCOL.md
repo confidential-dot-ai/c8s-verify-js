@@ -224,6 +224,40 @@ identifies the manifest at admission; a manifest applied later routes the
 session's later requests without new evidence. A client that pins
 `routeDigests` refuses any other digest with `route_denied`.
 
+**Operator-signed routes.** A client with `routeOperatorKeys` instead checks
+the digest against the manifest the router publishes. After the transcript
+verifies, it sends `GET <baseUrl><prefix>/routes` (`/.well-known/c8s/routes` by
+default) with `cache: "no-store"`. The response needs no transport trust and
+may come from another replica. A 200 body of at most 4 MiB is the envelope
+`{"manifest": "<standard padded base64 of the manifest bytes>", "token": "<write token>"}`,
+with exactly these members. The client checks, in order:
+
+1. Both the envelope and the manifest are strict JSON: one UTF-8 value, no
+   duplicate member names, no unpaired surrogate escapes, no trailing data.
+   `manifest` is canonical standard padded base64.
+2. The token is a compact JWS with `alg` ES256, ES384 or ES512, signed over
+   the ASCII `header.payload` text under one of the keys. The signature is raw
+   `r || s` at the algorithm's size, as in RFC 7515; DER is refused. As in
+   c8s, the algorithm need not match the key's curve.
+3. The claims carry `htm` `PUT`, `htu` `/routes`, and `pbh`, the unpadded
+   base64url SHA-256 of the decoded manifest bytes. `exp`, `nbf` and `iat` are
+   not checked: the token authorized a past write.
+4. The manifest bytes satisfy the `c8s.routes/v1` schema of c8s `pkg/routes`.
+5. SHA-256 of the manifest bytes equals the transcript's `route_digest`.
+6. The revision is not below the client's floor, and equal to it only with
+   the same digest.
+
+If step 5 fails, the client fetches once more, since the first fetch may
+have reached a replica that is behind. It accepts the second manifest only if
+its revision is higher than the first one's and it passes steps 1–6;
+otherwise it fails with `route_manifest_denied` (not newer, or below the
+floor) or `route_denied` (newer, other digest). A lower revision fails even
+when it matches. Once the channel is established, the accepted manifest
+raises the floor. `Session.fetch`
+then refuses with `route_unmatched` a request whose sealed `Host` and path
+the manifest routes to no backend, under the router's matching rules (reserved
+router paths are not applied).
+
 The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
 is deliberately unchanged by the endpoint move (as are the HKDF info string and
 tunnel AADs below): only the bundle's `version` field carries the endpoint
@@ -675,7 +709,12 @@ pin, or the claims carry no comparable value), `rtmr3_denied`, `invalid_cert` /
 `cert_chain` (mesh leaf does not chain to the selected CA or is expired),
 `identity_binding` (including a missing or malformed `route_digest`),
 `key_binding`, and `route_denied` (the bound route digest is not in the
-`routeDigests` pin set).
+`routeDigests` pin set, or is not the operator-signed published manifest's).
+With `routeOperatorKeys`, `route_manifest_unavailable` (the publication fetch
+failed or returned a status other than 200), `route_manifest_invalid` (the body
+is not a well-formed envelope) and `route_manifest_denied` (the envelope does
+not verify, the floor refuses it, or a re-fetch brought no newer revision)
+abort the connection, and `Session.fetch` throws `route_unmatched`.
 
 The workload policy adds `workload_not_attested` (no stamp while a
 workload/allowlist pin is set), `workload_invalid` (malformed or duplicated
@@ -705,6 +744,12 @@ the decapsulated shared secret, the identity transcript hash (committing
 schedule output (both keys, both IV prefixes, the exporter), and the sealed
 request and response records byte for byte. `test/vectors.test.ts` runs this
 check here; `TestChannelGoldenVectors` runs it in Go.
+
+[`test-vectors/route_v2_vectors.json`](test-vectors/route_v2_vectors.json) and
+[`test-vectors/route_v2_edge_vectors.json`](test-vectors/route_v2_edge_vectors.json)
+hold published envelopes, manifests, path normalizations and route selections
+with the verdict of the c8s `pkg/routes` code; `test/routes.test.ts` requires
+the same verdict for each.
 
 The identity-transcript golden value for all-repeated-byte inputs is pinned
 by `test/identity.test.ts` and Go's `TestIdentityTranscriptHashBindsEveryField`.

@@ -72,6 +72,7 @@ test("returns the route digest the transcript commits", async () => {
   const { bundle, meshCaPem } = await buildBundle(nonce);
   const r = await verifyAttestation(bundle, nonce, policy(meshCaPem));
   assert.equal(r.routeDigest, ROUTE_HEX);
+  assert.equal(r.routePolicy, "unverified");
 });
 
 test("rejects a missing or malformed route_digest", async () => {
@@ -122,6 +123,7 @@ test("accepts a route digest in the pin set", async () => {
     policy(meshCaPem, { routeDigests: [OTHER_ROUTE_HEX, ROUTE_HEX] }),
   );
   assert.equal(r.routeDigest, ROUTE_HEX);
+  assert.equal(r.routePolicy, "pinned");
 });
 
 test("pins the committed digest, whichever it is", async () => {

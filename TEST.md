@@ -214,7 +214,11 @@ verification).
 | --- | --- |
 | `attestation endpoint returned HTTP 503` | The router has no fresh route manifest (`routes_unavailable` or `routes_stale`); check its `--cds-url`. |
 | `identity_binding` with `details.field` `route_digest`, or a failed proof-of-possession signature | Go and JS on different transcript layouts: both must bind the route digest. |
-| `route_denied` | The router applied a manifest outside your `routeDigests` pin set. |
+| `route_denied` | The router applied a manifest outside your `routeDigests` pin set, or other than the one it publishes. |
+| `route_manifest_unavailable` with `details.status` 404 | Route publication is off on the router, or it has applied no manifest yet. |
+| `route_manifest_invalid` | The publication body is not a `{"manifest", "token"}` envelope, or exceeds 4 MiB. |
+| `route_unmatched` | The attested manifest routes no backend for the request's `Host` and path; connect again to attest the current manifest. |
+| `route_manifest_denied` | The published manifest is not signed under your `routeOperatorKeys` or is older than `routeFloor`, or, during a rollout, the publication and the handshake reached replicas on different revisions and the re-fetch brought no newer one; connect again. |
 
 ## Browser variant
 

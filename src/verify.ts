@@ -310,6 +310,15 @@ export interface AttestationResult {
    * route manifest the router had applied when it admitted the session.
    */
   routeDigest: string;
+  /**
+   * How the route digest was checked: `"pinned"` against `routeDigests`,
+   * `"operator-signed"` against the manifest the router publishes, verified
+   * under `routeOperatorKeys` (C8sClient only), or `"unverified"`: reported,
+   * not checked.
+   */
+  routePolicy: "pinned" | "operator-signed" | "unverified";
+  /** The revision of the operator-signed manifest; set with `"operator-signed"`. */
+  routeRevision?: number;
   cert: CertInfo;
   claims: WasmClaims;
   /**
@@ -1334,6 +1343,7 @@ export async function verifyAttestation(
     keyExchange,
     frontDoorMode: identity.frontDoorMode,
     routeDigest: identity.routeDigest,
+    routePolicy: policy.routeDigests === undefined ? "unverified" : "pinned",
     cert: certInfo(identity.chain),
     claims: result.claims,
     workload,

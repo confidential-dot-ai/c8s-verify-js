@@ -175,6 +175,9 @@ const client = new C8sClient({
   // Optional. Accepted route digests (`c8s routes digest` output); any one
   // must match. Pass the old and the new digest while a manifest rolls over.
   routeDigests: ["<64 lowercase hex route digest>"],
+  // Or, instead of routeDigests: the operator public keys (PEM) the
+  // published route manifest must be signed under.
+  // routeOperatorKeys: operatorKeysPem,
 });
 
 // Posts a fresh nonce + X-Wing encapsulation key, verifies the TEE evidence,
@@ -221,8 +224,29 @@ manifest over without failing, pin the old and the new digest together, then
 drop the old one once every router replica has applied the new one. The
 digest identifies the manifest at admission only: a manifest the router
 applies later routes the session's later requests without new evidence, so
-call `client.connect()` again when you need a fresh bound. This library does
-not verify the published manifest under the operator keys.
+call `client.connect()` again when you need a fresh bound.
+
+**Operator-signed routes.** To accept any manifest an operator signed instead
+of pinning digests, pass `routeOperatorKeys`: a PEM bundle of the operator
+public keys (ECDSA P-256, P-384 or P-521; a key WebCrypto refuses fails the
+first `connect`). It excludes `routeDigests`, and the
+router must publish its manifest (Helm `router.routePublication.enabled`).
+After each handshake, `connect` fetches `/.well-known/c8s/routes`, verifies the
+write token under the keys as c8s does, and requires the manifest's digest to
+be the one the evidence binds. If the digests differ, it fetches once more and
+accepts only a newer revision that matches. The session then reports
+`routePolicy: "operator-signed"` and `routeRevision`, and `session.fetch`
+refuses (`route_unmatched`) a request the attested manifest routes to no
+backend. The client keeps the newest accepted revision and digest as a
+rollback floor, in memory: it refuses an older revision, or the same revision
+with another digest (`route_manifest_denied`). To keep the floor across
+restarts, store `client.routeFloor` after each `connect` and pass it back as
+`routeFloor`. A publication that is off or unreachable fails with
+`route_manifest_unavailable`, a malformed one with `route_manifest_invalid`.
+`verifyPublishedRoutes(body, operatorKeysPem)` checks the signature and schema
+of a body you fetched yourself; comparing its `routeDigest` with the evidence
+and keeping a floor are then yours. Without either option, `routePolicy` is `"unverified"`:
+the digest is reported, not checked.
 
 What is verified, and in what order: nonce + `xwing_ek` echo → response version
 is exactly `c8s/attest-pq/v1` → served leaf chains to the pinned or
@@ -231,7 +255,9 @@ SEV-SNP VCEK or TDX DCAP, per the policy `platform`) → launch measurement ∈ 
 non-empty allowlist → `report_data` commits the key exchange, session id,
 nonce, leaf, CA, and route digest → leaf proof-of-possession signature →
 route digest in `routeDigests` (only when pinned) → matched-workload stamp (only when
-`workloadName`/`allowlist` is pinned, and only after everything else passed).
+`workloadName`/`allowlist` is pinned, and only after the checks before it passed) →
+route digest equal to the operator-signed published manifest's (only with
+`routeOperatorKeys`).
 The same transcript is the HKDF context. Any failure throws a typed
 `C8sVerifyError` and no channel is established.
 

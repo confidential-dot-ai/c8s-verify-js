@@ -171,7 +171,7 @@ async function run(): Promise<void> {
       `leaf CN=${result.cert.subjectCN}  issuer CN=${result.cert.issuerCN}\n` +
         `leaf sha256=${result.cert.sha256.slice(0, 32)}…\n` +
         `mesh-CA sha256=${result.cert.caSha256.slice(0, 32)}… (pinned)\n` +
-        `route digest=${result.routeDigest.slice(0, 32)}… (pinned)`,
+        `route digest=${result.routeDigest.slice(0, 32)}… (${result.routePolicy})`,
     );
 
     // 7. decapsulate the attested ciphertext and derive the channel: no second
