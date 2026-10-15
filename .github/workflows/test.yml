@@ -13,6 +13,9 @@ on:
 # is not committed. Build it once here and share it with the test jobs as an artifact.
 # NOTE: release.yml downloads the `wasm` artifact by name — keep them in sync.
 
+permissions:
+  contents: read
+
 jobs:
   build-wasm:
     name: Build WASM verifier

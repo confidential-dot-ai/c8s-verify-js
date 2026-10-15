@@ -237,7 +237,9 @@ export class C8sClient {
       );
     }
     validateRouteDigests(opts.routeDigests);
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    let baseUrl = opts.baseUrl;
+    while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+    this.baseUrl = baseUrl;
     originHost(this.baseUrl);
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
     const f = opts.fetch ?? globalThis.fetch?.bind(globalThis);
