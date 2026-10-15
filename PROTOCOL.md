@@ -164,7 +164,8 @@ Response is `application/json`:
     "leaf_sha256": "<b64url SHA-256 of leaf DER>",
     "mesh_ca_sha256": "<b64url SHA-256 of issuing CA DER>",
     "signature": "<b64url ASN.1 DER ECDSA signature>"
-  }
+  },
+  "measured_policies": ["sha256:<64 hex>"]            // optional, TDX: allowlist policies extended into RTMR[3], in order
 }
 ```
 
@@ -184,6 +185,16 @@ saved bundle stays verifiable offline; in that offline mode the result is not
 a freshness proof). The LB re-reads the TEE-held mesh leaf, private key, and
 CA for each request so certificate rotation cannot leave the bundle and proof
 on different credential generations. There is no legacy or downgrade path.
+
+`measured_policies` is the node's journal of allowlist-policy digests, each
+extended into RTMR[3] after the operator-key seed as
+`reg = SHA-384(reg || SHA-384(ascii digest))`. It is outside the transcript
+and read after the quote, so it may run ahead of the register. A client with
+an RTMR[3] pin accepts the quoted register when it equals the pin, or when the
+shortest prefix of the list folded onto the pin equals it. Each entry MUST
+match `^sha256:[0-9a-f]{64}$` and the list MUST hold at most 256 entries, or
+verification fails with `rtmr3_denied`, the same code as a list that does not
+replay. A client without an RTMR[3] pin ignores the field.
 
 #### Report-data and mesh-identity binding
 
@@ -643,7 +654,9 @@ The client MUST fail closed. Typed errors (mirroring c8s error codes) include:
 `report_data_mismatch`, `measurement_denied`, `measurement_incomplete` (TDX
 deployment-class verdict without the platform-complete mrtd+rtmr1+rtmr2 image
 tuple), `rtmr_denied` (an RTMR[1]/RTMR[2] image-tuple register differs from the
-pin, or the claims carry no comparable value), `rtmr3_denied`, `invalid_cert` /
+pin, or the claims carry no comparable value), `rtmr3_denied` (RTMR[3] equals
+neither the pin nor the pin extended by a prefix of `measured_policies`, or that
+list is malformed), `invalid_cert` /
 `cert_chain` (mesh leaf does not chain to the selected CA or is expired),
 `identity_binding`, and `key_binding`.
 

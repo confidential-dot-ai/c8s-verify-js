@@ -118,8 +118,9 @@ export interface C8sClientOptions {
    * build, not that it is *your* node — the images are reproducible, so anyone
    * can stand up an instance with the same launch digest. RTMR[3] carries the
    * operator key bound at launch, which is unique to a deployment and, unlike
-   * `meshCaPem`, survives reinstalls and image rebuilds. Requires
-   * `platform: "tdx"`.
+   * `meshCaPem`, survives reinstalls and image rebuilds. Pin the bare
+   * operator-key seed: a node that measures its allowlist policies is
+   * accepted when its reported list replays from it. Requires a TDX platform.
    */
   expectedRtmr3?: string;
   /**

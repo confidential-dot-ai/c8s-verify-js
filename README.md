@@ -87,6 +87,14 @@ same reason the mesh CA key is, but with two advantages:
 So the mesh CA has to be re-pinned every time the cluster is reinstalled,
 whereas the operator key is chosen by the operator and can be published ahead of
 time (the expected register value is `SHA-384(0x00*48 ‖ SHA-384(pubkey))`).
+A node that also measures its allowlist policies extends RTMR[3] once per
+policy after that seed and reports the digests as the bundle's
+`measured_policies`. Keep pinning the bare seed: the verifier accepts the
+quoted register when a prefix of that list replays from the pin, exposes the
+prefix as `measuredPolicies` on the result, and warns that no policy pin
+judged it. A list that does not replay, is malformed, or holds more than 256
+entries fails with `rtmr3_denied`.
+
 Pinning both is strictly stronger than either alone; `expectedRtmr3` is optional
 only for backwards compatibility, and SNP has no equivalent register, so it is
 rejected on the SNP platforms rather than silently ignored. "TDX" here is the

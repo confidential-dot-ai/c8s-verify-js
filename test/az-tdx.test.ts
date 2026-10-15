@@ -182,3 +182,30 @@ test("verifyEvidence(platform:az-tdx) rejects tampered evidence (HW verification
     (e: unknown) => e instanceof C8sVerifyError && e.code === "verification_failed",
   );
 });
+
+// az-tdx has no WASM RTMR[3] argument either way; the measured list is
+// replayed against the verified claim exactly as on bare TDX.
+test("verifyEvidence(platform:az-tdx) enforces an RTMR[3] pin with a measured list", async () => {
+  const measuredPolicies = ["sha256:" + "1".repeat(64)];
+  const res = await verifyEvidence(await tdxEvidence(), {
+    platform: "az-tdx",
+    tdxImage: AZ_TDX_IMAGE,
+    expectedRtmr3: AZ_TDX_ZERO,
+    measuredPolicies,
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.measuredPolicies, undefined);
+
+  await assert.rejects(
+    verifyEvidence(await tdxEvidence(), {
+      platform: "az-tdx",
+      tdxImage: AZ_TDX_IMAGE,
+      expectedRtmr3: "ff".repeat(48),
+      measuredPolicies,
+    }),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "rtmr3_denied" &&
+      e.message.includes("does not replay"),
+  );
+});

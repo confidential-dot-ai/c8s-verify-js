@@ -926,3 +926,78 @@ test("verifyAttestation refuses a partial or malformed tuple with invalid_reques
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// RTMR[3] measured policies on the attest-pq bundle
+// ---------------------------------------------------------------------------
+
+// RTMR[3] of the TD that produced the recorded fixture.
+const TDX_RTMR3 =
+  "21df104d732e863ffd57be4311de7ac2721b29550bc482ec1d2e85d572bfcb9c669b7f498d5910f9ba5a795209f215a6";
+const MEASURED = ["sha256:" + "1".repeat(64), "sha256:" + "2".repeat(64)];
+
+async function measuredTdxBundle(nonce: Uint8Array, measured: unknown) {
+  const built = await buildBundle(nonce, { evidence: await tdxEvidence(), platform: "tdx" });
+  const bundle = { ...built.bundle, measured_policies: measured } as AttestationBundle;
+  return { bundle, meshCaPem: built.meshCaPem };
+}
+
+function tdxPolicy(meshCaPem: string, expectedRtmr3?: string): VerifyPolicy {
+  return {
+    platform: "tdx",
+    requireFreshness: false,
+    tdxImage: TDX_IMAGE,
+    meshCaPem,
+    expectedRtmr3,
+  };
+}
+
+test("verifyAttestation accepts measured_policies when RTMR[3] equals the pin", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await measuredTdxBundle(nonce, MEASURED);
+  const r = await verifyAttestation(bundle, nonce, tdxPolicy(meshCaPem, TDX_RTMR3));
+  assert.equal(r.measuredPolicies, undefined);
+  assert.ok(r.rtmrsPinned?.includes(`3:${TDX_RTMR3}`));
+  assert.ok(!r.warnings.some((w) => w.includes("none judged")));
+});
+
+test("verifyAttestation denies measured_policies that do not replay to RTMR[3]", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await measuredTdxBundle(nonce, MEASURED);
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, tdxPolicy(meshCaPem, "ff".repeat(48))),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "rtmr3_denied" &&
+      e.message.includes("does not replay"),
+  );
+});
+
+test("verifyAttestation refuses malformed or oversized measured_policies under a pin", async () => {
+  for (const measured of [
+    "sha256:" + "1".repeat(64),
+    [MEASURED[0].toUpperCase()],
+    ["sha256:" + "1".repeat(65)],
+    [null],
+    Array.from({ length: 257 }, () => MEASURED[0]),
+  ]) {
+    const nonce = generateNonce();
+    const { bundle, meshCaPem } = await measuredTdxBundle(nonce, measured);
+    await assert.rejects(
+      () => verifyAttestation(bundle, nonce, tdxPolicy(meshCaPem, TDX_RTMR3)),
+      (e: unknown) =>
+        e instanceof C8sVerifyError &&
+        e.code === "rtmr3_denied" &&
+        e.message.includes("measured policy list is malformed"),
+      `list ${JSON.stringify(measured).slice(0, 80)} must be refused`,
+    );
+  }
+});
+
+test("verifyAttestation ignores measured_policies without an RTMR[3] pin", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await measuredTdxBundle(nonce, ["not a digest"]);
+  const r = await verifyAttestation(bundle, nonce, tdxPolicy(meshCaPem));
+  assert.equal(r.ok, true);
+  assert.equal(r.measuredPolicies, undefined);
+});
