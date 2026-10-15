@@ -588,7 +588,8 @@ function originHost(baseUrl: string): string {
     url = new URL(baseUrl);
   } catch {
     try {
-      url = new URL(baseUrl, globalThis.location?.href);
+      const page: unknown = globalThis.location?.href;
+      if (typeof page === "string") url = new URL(baseUrl, page);
     } catch {
       // Reported below with the expected form; a runtime may throw on `location`.
     }
