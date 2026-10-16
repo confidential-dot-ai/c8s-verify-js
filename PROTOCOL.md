@@ -159,6 +159,7 @@ Response is `application/json`:
   "xwing_ek": "<echoed b64url 1216-byte client encapsulation key>",
   "xwing_ct": "<b64url 1120-byte X-Wing ciphertext>",
   "session_id": "<b64url 16-byte session identifier>",
+  "route_digest": "<64 lowercase hex: SHA-256 of the route manifest the router applied>",
   "identity_proof": {
     "algorithm": "ecdsa-sha384",
     "leaf_sha256": "<b64url SHA-256 of leaf DER>",
@@ -179,7 +180,9 @@ specified in their sections below. Everything outside `evidence` (and the
 binding recomputation) is platform-independent.
 
 The `version`, `cds_cert_pem`, `front_door_mode`, `xwing_ek`, `xwing_ct`,
-`session_id`, and `identity_proof` fields are mandatory. A live client MUST check that `nonce`
+`session_id`, `route_digest`, and `identity_proof` fields are mandatory. A
+client MUST refuse a `route_digest` that is not exactly 64 lowercase hex
+characters. A live client MUST check that `nonce`
 and `xwing_ek` exactly echo the values it sent (`xwing_ek` is echoed so a
 saved bundle stays verifiable offline; in that offline mode the result is not
 a freshness proof). The LB re-reads the TEE-held mesh leaf, private key, and
@@ -212,6 +215,7 @@ transcript = LP("c8s-verify/v1")
           || LP(xwing_ct(1120))
           || LP(session_id(16))
           || LP(nonce(32))
+          || LP(route_digest(32))
 
 transcript_hash = SHA-384(transcript)
 report_data      = transcript_hash, then zero-padded from 48 to 64 bytes
@@ -223,10 +227,56 @@ changes `transcript_hash` and therefore fails the hardware `report_data`
 match, the proof-of-possession signature, and the key schedule (whose salt is
 `transcript_hash`) simultaneously.
 
+`route_digest` is the 32 bytes the bundle's hex `route_digest` decodes to: the
+SHA-256 of the route manifest the router had applied when it admitted the
+session. The client recomputes the transcript with the bundle's value, so a
+forged value fails the `report_data` match and the proof signature. The digest
+identifies the manifest at admission; a manifest applied later routes the
+session's later requests without new evidence. A client that pins
+`routeDigests` refuses any other digest with `route_denied`.
+
+**Operator-signed routes.** A client with `routeOperatorKeys` instead checks
+the digest against the manifest the router publishes. It sends
+`GET <baseUrl><prefix>/routes` (`/.well-known/c8s/routes` by default, with
+`cache: "no-store"`) before the attest-pq POST, and evaluates it once the
+transcript verifies; a failed transcript check is reported first. The
+publication needs no transport trust and may come from another replica.
+
+Each publication fetch is checked in this order, stopping at the first
+failure:
+
+| Step | Check | Error code |
+|---|---|---|
+| F1 | The request completes with status 200. A 404 means publication is off or no manifest is applied. | `route_manifest_unavailable` |
+| F2 | The body is at most 4 MiB. | `route_manifest_invalid` |
+| F3 | The body is strict JSON (one UTF-8 value, no duplicate member names, no unpaired surrogate escapes, no trailing data) holding exactly `{"manifest": "<standard padded base64 of the manifest bytes>", "token": "<write token>"}`, and `manifest` is canonical base64. | `route_manifest_invalid` |
+| F4 | The token is a compact JWS whose header and claims are base64url JSON objects. `alg` is ES256, ES384 or ES512, there is no `crit`, and the raw `r \|\| s` signature (RFC 7515; DER is refused) over the ASCII `header.payload` text verifies under one of the keys on the matching curve: P-256, P-384 or P-521. | `route_manifest_denied` |
+| F5 | The claims carry numeric `iat` and `exp` with `exp` − `iat` in (0, 300] seconds (c8s `MaxTokenValidity`, both truncated to whole seconds), `htm` `PUT`, `htu` `/routes`, and `pbh`, the unpadded base64url SHA-256 of the decoded manifest bytes. Whether `exp` or `nbf` has passed is not checked: the token authorized a past write. | `route_manifest_denied` |
+| F6 | The manifest bytes satisfy the `c8s.routes/v1` schema of c8s `pkg/routes`. | `route_manifest_denied` |
+
+Then the connection is checked in this order:
+
+| Step | Check | Error code |
+|---|---|---|
+| C1 | SHA-256 of the first manifest equals the transcript's `route_digest`. If not, the client fetches once more (F1–F6) and continues with that manifest. A first fetch that fails F1–F6 is final, as in `c8s verify`. | — |
+| C2 | The re-fetched manifest's digest equals the transcript's `route_digest`. | `route_denied` |
+| C3 | After the channel is derived, the manifest's revision is not below the client's floor. If it is, the whole connection is retried once, since a replica may lag behind; a second failure is final, with `details.reason` `below_floor`. | `route_manifest_denied` |
+| C4 | A manifest at the floor's revision has the floor's digest. Not retried; `details.reason` `revision_conflict`. | `route_manifest_denied` |
+
+An accepted manifest then raises the floor; rollback is decided by the floor
+alone. A connection refused after admission leaves its router session unused
+until the idle TTL retires it. `Session.fetch` refuses with `route_unmatched` a request whose sealed
+`Host` and path the manifest routes to no backend, under the router's
+matching rules (reserved router paths are not applied).
+
 The transcript's `"c8s-verify/v1"` domain tag is the original protocol name and
 is deliberately unchanged by the endpoint move (as are the HKDF info string and
 tunnel AADs below): only the bundle's `version` field carries the endpoint
 binding id `c8s/attest-pq/v1`.
+
+The route digest field changed this layout in place, under the same binding id
+and with no negotiation: a client and a router on different layouts fail
+verification, and the channel fails to open, with no version error.
 
 The 64-byte anchor is identical on every platform: SEV-SNP `report_data` and
 the TDX TD-quote `report_data` both carry 64 bytes natively, and the Azure vTPM
@@ -343,8 +393,9 @@ lowercase hex chars.
 firmware — the guest kernel is measured into RTMR[1] and the guest rootfs
 into RTMR[2] — so a complete image pin is the tuple **MRTD + RTMR[1] +
 RTMR[2]** from one image-build manifest (a JSON object with `mrtd`, `rtmr1`,
-`rtmr2`, each exactly 96 lowercase hex chars; all three required, unknown
-extra fields allowed). The policy layer (`tdxImage`, or `parseImageManifest`
+`rtmr2`, nested under `tdx` as a confos build manifest has them or at the top
+level, never both; each exactly 96 lowercase hex chars; all three required,
+no key repeated in any letter case, unknown extra fields allowed). The policy layer (`tdxImage`, or `parseImageManifest`
 over the manifest file) accepts the tuple's MRTD as the only launch digest
 (the tuple and a `measurements` list are mutually exclusive) and compares
 `rtmr1`/`rtmr2` exactly against the verified claims, failing closed on a
@@ -618,13 +669,25 @@ survive the tunnel:
 ```cbor
 // request
 { "method": "POST", "path": "/v1/chat",
-  "headers": [["cookie", "a=1"], ["cookie", "b=2"]],
+  "headers": [["host", "api.example"], ["cookie", "a=1"], ["cookie", "b=2"]],
   "body": h'<raw request body>' }
 
 // response
 { "status": 200, "headers": [["set-cookie", "a=1"], ["set-cookie", "b=2"]],
   "body": h'<raw response body>' }
 ```
+
+The router routes a tunnelled request by the `Host` header sealed in the
+envelope, never by the outer request's host. The envelope MUST carry exactly
+one `Host` (matched case-insensitively), or the router answers 400. `path`
+MUST be in origin form (start with `/`); any other target matches no route
+and gets 404. The tunnel carries one buffered response, so the router also
+answers 400 to a sealed `Upgrade` header. `Session.fetch` adds `Host` from the
+base URL's host (with the port when non-default) when the caller sends none,
+and throws `invalid_request` before sealing on a second `Host`, an `Upgrade`
+header, or a path not starting with `/`. It also refuses an empty `Host`; that
+check is client-side only: the router counts `Host` fields, so an empty value
+passes, matches no manifest host, and gets 404.
 
 **Session lifetime.** The session (and its key schedule) is established once —
 one attest-pq round trip — and reused for every subsequent tunnel record; no
@@ -658,7 +721,14 @@ pin, or the claims carry no comparable value), `rtmr3_denied` (RTMR[3] equals
 neither the pin nor the pin extended by a prefix of `measured_policies`, or that
 list is malformed), `invalid_cert` /
 `cert_chain` (mesh leaf does not chain to the selected CA or is expired),
-`identity_binding`, and `key_binding`.
+`identity_binding` (including a missing or malformed `route_digest`),
+`key_binding`, and `route_denied` (the bound route digest is not in the
+`routeDigests` pin set, or is not the operator-signed published manifest's).
+With `routeOperatorKeys`, `route_manifest_unavailable` (the publication fetch
+failed or returned a status other than 200), `route_manifest_invalid` (the body
+exceeds 4 MiB or is not a well-formed envelope) and `route_manifest_denied` (the envelope does
+not verify, or the floor refuses the attested manifest)
+abort the connection, and `Session.fetch` throws `route_unmatched`.
 
 The workload policy adds `workload_not_attested` (no stamp while a
 workload/allowlist pin is set), `workload_invalid` (malformed or duplicated
@@ -683,10 +753,17 @@ is the normative cross-language golden vector, shared verbatim with c8s
 after a deliberate contract change). Given the recorded X-Wing seed and
 ciphertext, everything downstream is deterministic; a conforming
 implementation MUST reproduce the encapsulation key expanded from the seed,
-the decapsulated shared secret, the identity transcript hash, every key-
+the decapsulated shared secret, the identity transcript hash (committing
+`route_digest_hex`), every key-
 schedule output (both keys, both IV prefixes, the exporter), and the sealed
 request and response records byte for byte. `test/vectors.test.ts` runs this
 check here; `TestChannelGoldenVectors` runs it in Go.
+
+[`test-vectors/route_v2_vectors.json`](test-vectors/route_v2_vectors.json) and
+[`test-vectors/route_v2_edge_vectors.json`](test-vectors/route_v2_edge_vectors.json)
+hold published envelopes, manifests, path normalizations and route selections
+with the verdict of the c8s `pkg/routes` code; `test/routes.test.ts` requires
+the same verdict for each.
 
 The identity-transcript golden value for all-repeated-byte inputs is pinned
 by `test/identity.test.ts` and Go's `TestIdentityTranscriptHashBindsEveryField`.

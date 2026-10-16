@@ -31,6 +31,7 @@ async function fixtureProof(): Promise<{
     new Uint8Array(32).fill(0x33),
     leaf.der,
     ca.der,
+    new Uint8Array(32).fill(0x99),
     leafKeyPem,
   );
   return { transcript, leaf, ca, proof };
@@ -45,10 +46,11 @@ test("v1 transcript matches the Go cross-language vector", async () => {
     new Uint8Array(32).fill(0x33),
     new TextEncoder().encode("leaf-der"),
     new TextEncoder().encode("ca-der"),
+    new Uint8Array(32).fill(0x99),
   );
   assert.equal(
     bytesToHex(transcript),
-    "003e433637125a49cb2136a5e8148f6de5fd16c43caa11bcc79e49865da4c5e32625e54f7a9a33476954eb7f745fcae3",
+    "90555fc4be6af7df26403a39bd747b42504bcca774d9f3d40a2028058631b4011c3efa8f7d615da588de1cc4a38fbf7f",
   );
 });
 
@@ -60,16 +62,38 @@ test("the front-door mode is committed: another mode changes the transcript", as
     new Uint8Array(32).fill(0x33),
     new TextEncoder().encode("leaf-der"),
     new TextEncoder().encode("ca-der"),
+    new Uint8Array(32).fill(0x99),
   ] as const;
   const acme = await identityTranscriptHash("acme", ...args);
   assert.equal(
     bytesToHex(acme),
-    "594e10d4d384724391d9fa215d90e2169029aa47f4091d9155b9970d0ebb38a4112518dce87db42cb837bbc71986c81a",
+    "48e29993e1c03a7fb735dd91d1cbc454c00f39a1fb83c77446c5cb65c0fb12b7cbec2514ea29c2fd618c76d12611e109",
   );
   await assert.rejects(
     () => identityTranscriptHash("", ...args),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
   );
+});
+
+test("the route digest is committed and must be 32 bytes", async () => {
+  const fields = [
+    new Uint8Array(1216).fill(0x11),
+    new Uint8Array(1120).fill(0x22),
+    new Uint8Array(16).fill(0x44),
+    new Uint8Array(32).fill(0x33),
+    new TextEncoder().encode("leaf-der"),
+    new TextEncoder().encode("ca-der"),
+  ] as const;
+  const base = await identityTranscriptHash("cds", ...fields, new Uint8Array(32).fill(0x99));
+  const other = await identityTranscriptHash("cds", ...fields, new Uint8Array(32).fill(0x98));
+  assert.notEqual(bytesToHex(other), bytesToHex(base));
+  for (const length of [0, 31, 33]) {
+    await assert.rejects(
+      () => identityTranscriptHash("cds", ...fields, new Uint8Array(length)),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "identity_binding",
+      `route digest of ${length} bytes`,
+    );
+  }
 });
 
 test("verifies proof of possession by the committed mesh leaf", async () => {

@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { generateXWingKeyPair, xwingEncapsulate, type XWingKeyPair } from "../src/keyagreement.js";
-import { bytesToBase64Url, base64ToBytes, bytesToBase64 } from "../src/base64.js";
+import { bytesToBase64Url, base64ToBytes, bytesToBase64, hexToBytes } from "../src/base64.js";
+import { DEMO_ROUTE_DIGEST } from "../demo/config.js";
 import type { AttestationBundle } from "../src/verify.js";
 import type { Evidence } from "../src/hcl.js";
 import { decodePEM } from "../src/pem.js";
@@ -60,6 +61,9 @@ export function loadFixtures(): Promise<Fixtures> {
   return fixturesPromise;
 }
 
+/** The route digest {@link buildBundle} commits unless told otherwise. */
+export const TEST_ROUTE_DIGEST = hexToBytes(DEMO_ROUTE_DIGEST);
+
 export interface BuiltBundle {
   bundle: AttestationBundle;
   /** The client keypair whose ek the bundle echoes. */
@@ -93,6 +97,8 @@ export async function buildBundle(
     // test can serve a bundle whose advertised and committed modes disagree.
     frontDoorMode?: string;
     transcriptFrontDoorMode?: string;
+    // routeDigest is the digest the transcript commits (default TEST_ROUTE_DIGEST).
+    routeDigest?: Uint8Array;
   } = {},
 ): Promise<BuiltBundle> {
   const fixtures = await loadFixtures();
@@ -120,6 +126,7 @@ export async function buildBundle(
     nonce,
     leafDer,
     caDer,
+    opts.routeDigest ?? TEST_ROUTE_DIGEST,
     leafKeyPem,
   );
   const bundle: AttestationBundle = {
