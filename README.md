@@ -100,8 +100,8 @@ the guest kernel lands in RTMR[1] and the guest rootfs in RTMR[2], so two
 different guest images built against the same firmware share an MRTD. A
 platform-complete image pin is therefore the tuple **mrtd + rtmr1 + rtmr2**,
 published in the image build's manifest — pass it as `tdxImage` (or feed the
-manifest file to `parseImageManifest`; each field is exactly 96 lowercase hex
-chars, all three required). The tuple replaces `measurements`, and passing
+manifest file to `parseImageManifest`, which reads the fields under `tdx` or at
+the top level; each field is exactly 96 lowercase hex chars, all three required). The tuple replaces `measurements`, and passing
 both is rejected: its MRTD is the only accepted launch digest, and
 `rtmr1`/`rtmr2` are compared exactly against the verified claims
 (`rtmr_denied` on divergence, failing closed if the claims cannot be compared).

@@ -240,7 +240,7 @@ failure:
 | F2 | The body is at most 4 MiB. | `route_manifest_invalid` |
 | F3 | The body is strict JSON (one UTF-8 value, no duplicate member names, no unpaired surrogate escapes, no trailing data) holding exactly `{"manifest": "<standard padded base64 of the manifest bytes>", "token": "<write token>"}`, and `manifest` is canonical base64. | `route_manifest_invalid` |
 | F4 | The token is a compact JWS whose header and claims are base64url JSON objects. `alg` is ES256, ES384 or ES512, there is no `crit`, and the raw `r \|\| s` signature (RFC 7515; DER is refused) over the ASCII `header.payload` text verifies under one of the keys on the matching curve: P-256, P-384 or P-521. | `route_manifest_denied` |
-| F5 | The claims carry `htm` `PUT`, `htu` `/routes`, and `pbh`, the unpadded base64url SHA-256 of the decoded manifest bytes. `exp`, `nbf` and `iat` are not checked: the token authorized a past write. | `route_manifest_denied` |
+| F5 | The claims carry numeric `iat` and `exp` with `exp` − `iat` in (0, 300] seconds (c8s `MaxTokenValidity`, both truncated to whole seconds), `htm` `PUT`, `htu` `/routes`, and `pbh`, the unpadded base64url SHA-256 of the decoded manifest bytes. Whether `exp` or `nbf` has passed is not checked: the token authorized a past write. | `route_manifest_denied` |
 | F6 | The manifest bytes satisfy the `c8s.routes/v1` schema of c8s `pkg/routes`. | `route_manifest_denied` |
 
 Then the connection is checked in this order:
@@ -382,8 +382,9 @@ lowercase hex chars.
 firmware — the guest kernel is measured into RTMR[1] and the guest rootfs
 into RTMR[2] — so a complete image pin is the tuple **MRTD + RTMR[1] +
 RTMR[2]** from one image-build manifest (a JSON object with `mrtd`, `rtmr1`,
-`rtmr2`, each exactly 96 lowercase hex chars; all three required, unknown
-extra fields allowed). The policy layer (`tdxImage`, or `parseImageManifest`
+`rtmr2`, nested under `tdx` as a confos build manifest has them or at the top
+level, never both; each exactly 96 lowercase hex chars; all three required,
+no key repeated in any letter case, unknown extra fields allowed). The policy layer (`tdxImage`, or `parseImageManifest`
 over the manifest file) accepts the tuple's MRTD as the only launch digest
 (the tuple and a `measurements` list are mutually exclusive) and compares
 `rtmr1`/`rtmr2` exactly against the verified claims, failing closed on a

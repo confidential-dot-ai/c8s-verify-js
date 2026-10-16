@@ -1,241 +1,296 @@
 {
   "description": "Edge cases for verifying a signed route manifest envelope served at /.well-known/c8s/routes, with the verdict of the c8s pkg/routes code: envelopes verify under operator_keys_pem (P-256, P-384, P-521); manifests are bare manifest bytes (standard base64) checked against the schema; normalize and select pin request-path normalization and route selection, without reserved paths.",
-  "operator_keys_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEn4wmfrmS7oKlljDvElzr5cJCds4a\nj0DG4blCHk27Eec2hrCuwpwEVjDqi+YqYCN/kVHtSm274UDWQgLQNb1joQ==\n-----END PUBLIC KEY-----\n-----BEGIN PUBLIC KEY-----\nMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEQ5TqHnIt6KySDpeWuHbpOJMs87Pz3YhS\nO1bVYYqV8w+T39fXLLIngsaVD4Luv+G2WC+XeeBi2/Q8LZwJ3maSiRpC0YfYcDzz\nCenhzUZDWXXCaUFAdHuWWNvv+Vb6fuTR\n-----END PUBLIC KEY-----\n-----BEGIN PUBLIC KEY-----\nMIGbMBAGByqGSM49AgEGBSuBBAAjA4GGAAQBakv6GOcvxOQkl//qrde/wVofMn8N\n41CcAiY73eXo2kAPmL7pfoP+j9QUpNmUY6XtkhOvT5TfwgorUxJ9KUJ6LOcAYjFb\nay9jj4V15wbYCrp0v8M3Z72K1MVda31H3LUOuA/KKxzl632WfAeTjIe6jfBhCYdh\nciGC9r9PmmVd4Z2aib4=\n-----END PUBLIC KEY-----\n",
+  "operator_keys_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+fzEuM8yuB1Cu9JD5CR7Y1Rgn19x\nItHFrUmV7TdUzar9CXCzErmgzpBT0w5wFDU+iHfzYkyx0JC5QtiNM1pLaw==\n-----END PUBLIC KEY-----\n-----BEGIN PUBLIC KEY-----\nMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEo9FlFL0FGVUUsvYfZWuTM4Anx+CYCQE0\noPCOnJutVKkQH7WjS3zhEZ3/bzUqRXoERozpecQzm1WoGfjUaewwQQRqJFUlv3xt\n9QdeTJbKFIvS8TA6HiC03zW0ZIIw2S0q\n-----END PUBLIC KEY-----\n-----BEGIN PUBLIC KEY-----\nMIGbMBAGByqGSM49AgEGBSuBBAAjA4GGAAQAmK+FtmDDqoq7QQGDm2EeJVxXHwND\nixjufplBa7KeOmKw/1ic6/eX+FEYtsNKdYUczImpDK0Bj8m1zpfP/GmhSngBXVgd\nItTKmbYV/3AwLVxDjweJnQarIvkbfMXy95D72hxbG+CyxRmttM/aUZhtaQyeYUct\nK41/yABNHSm+k0PekS4=\n-----END PUBLIC KEY-----\n",
   "envelopes": [
     {
       "name": "ES256 under P-256",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.4K22i44zcRJyk_9cx6BgjjOFBiT5gFfDL2cplwZ1KjdDZUqJ4MmCbNDm0JTMC3X_vHWkqbLvIPawBmN_kN4aOg\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.F2MUQSH3Vs5UNahYWVS4t-prlVY78qOxHbQIigQZe1tR2eJOoVZigK16TRMHSTzL_waaTF3LS1JETrosp2G5BQ\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "ES384 under P-384",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzM4NCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.Y5ul_HkJ01Kgk5sN25ZzdYLsab7XBYfQ9cKqq7PqBVuK-axHKVHOshI0J90khpPSyx1YAYWb3-zb11J53DUPKURDNIXH509Gvsom6s7yk2yU73eH9Ay1k2k9hQs0L7PU\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzM4NCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.n64tzxRiyww5g4LyqeESUd6pu5LCQvm8fsRA-fFskwbfzs4qhye6MqyhM_dPwzazGlb6JA-c-n-r4SRDEUhReQFD5TjobweGKxNRddyEaMqDp3dTBJxRWW_SJukUV8B4\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "ES512 under P-521",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzUxMiJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.AKaFiN5k3NKicFFb_Aq0hULvfva-TjS67MV8qBm6vKo7qtGEa_9b2J44R9dwBuUQS9NsKl5GOoPtbC59GHCHT9l-ALtCInv0KD2EfIAXTQpr_rsnrOfwPH-01coCiWzQLYqhRYAanpTBIPd6a6yQJXSjaTEUU7Ex6s3Phm3Zuazswsxz\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzUxMiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.AT39khifW8tac6iusmJfKQFcHQ11PnR9Exu1aF-2S_CHum8IBbkuljn2c4dSGVSv1gKMouScvkyQGDSb31wxuz-nATaUisw_CcNSXRcpvO6Wdkm4yHkaKDP9q6Zn7TM3u2cYpqZ8JPMOGe5JpICE2wlZ9LG0IHjXL2U9iv4YDngRTBy1\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "ES384 signature by the P-256 key",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzM4NCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.AAAAAAAAAAAAAAAAAAAAADcqPD2OmuDOHBC3bZieSTvCInuddKU4YyTE_24mxY9YAAAAAAAAAAAAAAAAAAAAAFm3hck5a4myUWAWL4k3cA0l47Gok-vVGouYn3dv5dba\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzM4NCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.AAAAAAAAAAAAAAAAAAAAAP-GKG8_zzuOotrrIOHEcVwCoypHgcNJ9um9fXMTgW-3AAAAAAAAAAAAAAAAAAAAAB1BFAUP7AYSGgJKqbS8NxusL66vm8oWthbr-DVAsLWt\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "crit header",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsImNyaXQiOlsiZXhwIl19.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.UIYDT7u79KWSWENDmyWvIQgtS24hNtbLi3cnxZu-iTnQ-WWaBB_3hrpyVRDPki09sf3Gl5OwcYfykMqs6wqOqQ\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsImNyaXQiOlsiZXhwIl19.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.-kXdI2hKL3evi5wuprMPgTmzaEGtjvQj_EzwidYd_gOtdjIHk7PZDCu9Nxm5tgBAD2CSs4SjOiNTrNsZ7H5GLg\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "empty crit header",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsImNyaXQiOltdfQ.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.Xg1xb64W97LxHxk3f-I0jp-asWFq_Rc-oRimpBzxNNltWeQh62w6rmxy3udGVqnLy4YxM9EGdD--T6J85iorRw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsImNyaXQiOltdfQ.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.yV-QYRpJpPbt6yl-PutuzBvrfRqkvuqXskT4c6GdIUfHcoLvigWnMECTlr1UYZedCLfkVtQoOGkWWCL6bl651Q\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "ES512 signature by the P-384 key",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzUxMiJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.AAAAAAAAAAAAAAAAAAAAAAAA1NeBaWffDfaeuzERWneFGh23Nv4loPciU_AymT-qegGnxlsS_PsMDIHt-6nb_QQ0AAAAAAAAAAAAAAAAAAAAAAAAKhAx1y5Uobk-mIAfYYuWkWE18Pm08makdirM9ZbWoCZYlevi6RqmtnFjbG-QG0jY\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzUxMiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.AAAAAAAAAAAAAAAAAAAAAAAAucy3OMYa9cOEXdhvaI7m0hXAKD1SfRYctPQdvYwaO5aUtPHs0__vJ4xU_f8yMdpVAAAAAAAAAAAAAAAAAAAAAAAA_ANQNhfrEuZjIdx_T8EtcoM0Jr-LoG-L2AEWWLY72ZE2ivx9Y5ai7Gh6lO391BS6\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "ES256 header, signed by an untrusted key",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.mpBzp7gUKWnZEBCogSbIme_ywQUnHd1NtrQoCQ9MUcDBpthoRInhqJzs9OzYcktrkReDAK16T0Sw3LGdH0WLgQ\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.-qjiIwhaZTzaApvjxR8Xp5aR364Fcwo1po8O1cNCPDy92Idl4sA4M6SqtIkk5iwtJLLx8RuuK-pfWZaEABbWOw\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token signature is invalid: crypto/ecdsa: verification error"
     },
     {
       "name": "DER signature",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.MEYCIQD8drZn1x2axo4QWqAT3Dbjfhl14xzsAk23_530LtsRHgIhAPqpDfTrEidSegeKIGOssRwMwQG-TkC0WEGdcgWNTfZS\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.MEYCIQDJTTk7si8A8vpI_X0F20_tE0Kpm8kyd4jrwvXXOtprlgIhAKDHshcJT8E9o4OvLtxTx5To2JWHNz1kf0bXxGpGxmU2\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token signature is invalid: crypto/ecdsa: verification error"
     },
     {
       "name": "padded signature segment",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.qHMYXPfH15JXmZlMM27vMpQZhQgveq0incze472kOcvx1eSXxJqGyWYLPdOafBXLZtsyacw-TDO8IwT4M2K_eQ==\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.NuGqX4IEb3mYuC9F_2YpBQ3T6vJEDAUnSP-9otm0Nf_zzkNlT1uoAXyWNdETJGPRKWF5FOQPAVohL79CIqF6mg==\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: could not base64 decode signature: illegal base64 data at input byte 86"
     },
     {
       "name": "newline inside the signature segment",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.HpnzPkSUU2XWxIjKrlYlmVh51AKVWzg0_DCm7mT0\\nEtn21aUrWJlTGyp4vHQZi2BOuMYzQC8wyfO8nod7yJXpyQ\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.kJn-6Ecrlrf24jXNnwpi-duGBv1pgcmIed9l7SBN\\nyeBemYabUKZwj3OSWity0-y1SmpKPSSUO6vM6tGOrOrlZw\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "non-zero trailing bits in the signature segment",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.uzWnZvGUcuwisM1g9sYNOltjamJVy_a4pwPfd1e8jYLsJkWXwkCLy7ZvHtzfvEYYzmGxc-I1jAF1smefgHlOLz\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.8XDmVEMAQJo02Vn4nuPu1LiNFTLbsvSU6vO1P60zQ820Jn_wZtJxcpB_cqNC6vAAMdCcAKNnjOCu8lF7gZu2PT\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "four token segments",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.YI37nO-hMQApb2YkGxjaeg1Qx13CI1RqBVn87Uyig2ZBF6aCTOlk4o3Ln2U9fHJgBeXcxxgfmPNP1YTALQl5XA.x\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.iJGQK6CL1wqN2uaMEU1FTpjGHjud3Pmluunf9rIGIT6P_AJ4V1M5BgI5HBgJajLWPQeIPgPa4KBWJUsdorGGsA.x\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: token contains an invalid number of segments"
     },
     {
       "name": "Bearer prefix",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.8tp0Li8XzRAET18lRDqBjW-CjErDRtN3tRYbtAfvn0_G_bcXyW89sBp2irMCNSQRiPmtHZ4p7kgOvvIsqrnNOA\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.t5HqYEEX2dPerQwViIPMIYHx5VHjJtGyw11zal7SoH3_5pGi-0pnZdd3r7ql99YZ6nm2YrjQb4YuhqSpA39LEA\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: could not base64 decode header: illegal base64 data at input byte 6"
     },
     {
       "name": "alg none",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJub25lIn0.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJub25lIn0.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token signature is invalid: signing method none is invalid"
     },
     {
       "name": "alg missing",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJ0eXAiOiJKV1QifQ.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.fac5qY7NAGiaLek_P9qcsyMSIhJVyKkTdlTFbKbPIKL2plhXg-bzFtmTwciNB8TbPsjY47dTC7_ER5DmNJSy5A\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJ0eXAiOiJKV1QifQ.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.6fEcqlCpgI7FQNE6si_h_gEFz1yTPLtlOsMTBtKYrjuQWR6vpCPkOwCJdKkjoGnnxYJ1ZAUmW6VOY1OFQQxfaw\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is unverifiable: signing method (alg) is unspecified"
     },
     {
       "name": "alg HS256",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.YmlHLpvVmoKr2uQU56eNQlqTPJlTA9m0wH6FOdZanVgvOOAiNWU8oQ2c-LIqGMBA87GKkaGgy5wNvuabIdEhqQ\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.fSBUlMJdgiGhRx-ZsiWfElL0grtCVGAY9Z4kAB8FvNh3Ljo6HankKumYJvlo9pSuIV-K8pK5-wsh3dzJ3sjGUA\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token signature is invalid: signing method HS256 is invalid"
     },
     {
       "name": "duplicate alg, last ES256",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJub25lIiwiYWxnIjoiRVMyNTYifQ.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.2r8FoD_wNS9MupFgh2Ibn1B6PkcW6IwDTyDEkDKICwjgfGQpRVNQI6E7kftQ-WYkpYmZ8Iq_wL1JZJ3f0tKmlg\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJub25lIiwiYWxnIjoiRVMyNTYifQ.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.-KidPfJprM6BtNa9rEudG-cVURsz6bAPz9WkkxZjcqAKykPD0RdwoRy9n6BqJ-F2mM9b_-RfQQ4k68bthafV9A\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "header not an object",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"WyJFUzI1NiJd.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.OJqFkui9zHFZdLD20RkZ-Ct_E3Y_MVCNnl2o352ezIl_xMrms02rWvpz6PGExX9xn5RnEMDFHrTG2lmRwxUmzQ\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"WyJFUzI1NiJd.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.LvhpKhZ1yy-12kdrphqpFBDqM1CZ7qtDS9pAD0rWhhUFvcY63Igegtcst2gkin1bXvLB-GZaMdd2PGgV2slUsw\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode header: json: cannot unmarshal array into Go value of type map[string]interface {}"
     },
     {
       "name": "header with trailing data",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9IHt9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9NPx0bJYC9ePHbg0OeBc0M6_nVNkX7AYvXvDGsKM2tPoTFQ5sYrbwYcdffZtRVBHqKguLpI9EVcGRH_dbwY04Q\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9IHt9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.hWjam0S2zDcCPvVPUsO8p-sg0LWX7dT2e0h8ipVVlCHIeBreB-PusHt4cLqF9zGbmU1I7PrbhtZiY5_Z-v_bSA\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode header: invalid character '{' after top-level value"
     },
     {
       "name": "duplicate htm, last PUT",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQT1NUIiwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.elL628-JqJQqKzxzj4z8T3WVlpqwF8MNOkxfzjoiO-JjPCwrXWVipHzUkIqCqGA2ijwUMRaQZO2qL5ZMLUSSmw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBPU1QiLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.7TbjqOkacd_6LJHflVj8bRv1O1bbTt7SQb9CbLPe5Zj3_zY2X3C75dPBeebNfaL0igcnD4KL-hx-vknAzqKkUg\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "no time claims",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.kBB5z5l_Y2ljXjBYybv9lv2GEbqPBTvspOwNsKGRzxHCxrM7rCPFzntN586d4H8E4pdGQ7HySVYRXdUU0r1fUA\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.uEuy2eD8_2kRyvlWrb9GnlsXoWwCZnWOn3r_U21pBaHdYtxdo76aFhYefGhBwHnGreXMVqNU773cqy8FImlGXA\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing iat claim"
+    },
+    {
+      "name": "expired, not yet valid",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYxLCJuYmYiOjk5OTk5OTk5OTk5LCJpYXQiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.fn8JuhMpbeJaGYNdE4-M8fVr8ytoj6Vz0LxuDD6lWBmK6Ae31HyhzMDWxVOQgB0PcTb68Iri6i33D3G5Ed6Wgw\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
-      "name": "expired, not yet valid",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjEsIm5iZiI6OTk5OTk5OTk5OTksImlhdCI6OTk5OTk5OTk5OTksImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.6Vl1COdvL4Ew_lAra-f-YwtOPPxpQUYTb9z7aQ1ZIALuhwBk63vhgPXCeGI9mh7NiDoR_acId2-pmYExj_bupw\"}",
+      "name": "iat missing",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.buqPQmUEwIzCZ6cXwAgHzwRYRwncD9AKBZN4cQ3BM6poH7noLNcMnXOdQewxOwxUZZDx2bMUlXvB-DQTOn5UPg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing iat claim"
+    },
+    {
+      "name": "exp missing",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.KDcbXycie4Hdsr04VUw46_CngSHx0wTix6e_3B5SWjP8B6TtgaCc9xuvMysoJzeTin8ExhMofkENGR9hN6e1yw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing exp claim"
+    },
+    {
+      "name": "exp before iat",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjEsImlhdCI6MiwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.KlNSw1l3k6N6O9E8NyEHvmDevcUa41u55HnySGFyFzJ2_ESu56dPpZikbqXHZNe28RWeMCQpSS-WRg5m0mzZ6g\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token validity -1s outside (0, 5m0s]"
+    },
+    {
+      "name": "exp equal to iat",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjIsImlhdCI6MiwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.XGFcXGFzrISRkAkq82BNeBIfVf5KPYTz-p-AWfAzQSTfy6vzBfPtxDbCRRlFI3E9T_WD1iS5vX_Y9VlWhjI7zg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token validity 0s outside (0, 5m0s]"
+    },
+    {
+      "name": "validity at the 5 minute bound",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjMwMiwiaWF0IjoyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.ACri6E4pvTHgDnpqjv1A2JgTV6Iqn-MPeqalZBsZ3XFn-RVfegvoIsxDx07g4RIxdcxJyyqQamdwp5dD2OWFDg\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "validity past the 5 minute bound",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjMwMywiaWF0IjoyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.utSuk9y22Fm2Hh0v5ueTBdQhG-nu9yFhMcg3evKEhXsQYd36ZJiTI20405Csa3qI__jvrllw_3VOYVUZyOuoZg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token validity 5m1s outside (0, 5m0s]"
+    },
+    {
+      "name": "fractional times truncate to seconds",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjMwMi45LCJpYXQiOjIuMSwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.73o83elXFiW_TIAv3BAWPTBmgiqtV9R_F90oHA9_uxoQAHNMmEHkcOcDY7JpxYxXonG02ikI2sT1S9lxkegrKQ\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "iat as a string",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOiIyIiwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.Yckn0roae8o2Z5pHPZSEvXQPcpruFDh82l0Bv_F1BigmIUUQc77R6BmMn4BriliZ-O2Ynb3fgr2dmb9mMAhZRw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing iat claim"
+    },
+    {
+      "name": "negative times",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOi0xMDAsImlhdCI6LTE2MCwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.80nisqCbo2LS0wNGGuOCC3B4Sadeery98gTaFuMyp4Fkw5S6tmGRZBP8p-PXkApLHfhkDSCJxBdW5GvWugIung\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "htm lower case",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJwdXQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.ByHE-WYoB98cu4GS6nDVMJaYCQYN-9XwusTRt6kBbxLprkvaO1xJ5NVxnnQB0V4DR6grHYdisraViNuyh9I5Iw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6InB1dCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.2DDoziOVYXE909FjCSV611k8ACqBKpRHyKXGWMUYfD5d9KuleI28KnYo3b_8wfkGfED7FPrQteJvawn35QnxIw\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token htm \"put\" does not match request method \"PUT\""
     },
     {
       "name": "htm not a string",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOlsiUFVUIl0sImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.HCxPrVCueU18Hxs3jiQ85-Mg7YUm9ZvpiN1X0AxR7ilHLiQreUuvFNt-DqlXFLibySogfyBMFrdRMuV2BStVvA\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6WyJQVVQiXSwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.qr5Tlz_OZZpUIL4iB9eqhzGWYlKvxoGTZwfZQM6XenV_18hMbHK0oz2ghKHI0uhGxHxbA8mb-xhXuFN1DjIvQg\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token htm \"\" does not match request method \"PUT\""
     },
     {
       "name": "htu with host",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiJodHRwczovL2Nkcy9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.M7-MLkhx4xYyyGJjo9AyDiswSll2-zAgfOIWQNRbNElVDoCyxr5o2sSSPesKalSQKGtOR-K3WkFV1nPKKlNOqA\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Imh0dHBzOi8vY2RzL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.j_VwK9mTIF4z2TreKoY-U9Vr0SpUBwzw7qNkDZlysMMTRJHKpPZrcNs-tlWlm4Rop6IjVKFj5zL_ZvShnxb5Uw\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token htu \"https://cds/routes\" does not match request path \"/routes\""
     },
     {
       "name": "pbh missing",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIn0.tqQnNOSQeE5xWjs4RiNodmUR9d9V3-z5bycH3yUinXFCLZQjAZze-G2poLaGBz5X0bKwTCNJqkQrATP0CLtcdw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMifQ.Q1M1s7XGaHTcnYcEbrA377KyNiZQsHxRkCKDfN6Ne0sUY-TgA250jR1fpE1UTbnKz1ZMJ_nlutgvg69gOIKXqQ\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token missing pbh claim"
     },
     {
       "name": "pbh padded",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWT0ifQ.OQguCPM3yU6n0_VrKShWCYcb0B3QGBS2iT8s9xKlJmiSM6Q3wLZuEec3GMNhBCjuZbANHqcnyQ2qMvHyORY7ig\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZPSJ9.xzUGPAdF69GkjziAQV1vmUlfJHqNbYCXCJor2ulKbsziSJ-c5hSVN4E6wgG3xX8YIq6WWALXKRsk21OT14NI7Q\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token pbh does not match request body"
     },
     {
       "name": "pbh standard alphabet",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1L2lIRit4anpaQld6Q2ZKaHMrdUhaRHBnTmZ2Qnp4ZmxiWSJ9.P4GQIiJbRSWoo1CiH-oLmE3mrE-KjY127eZR10MFIbket5YqozGhNxY2QADvAbofNqQha5agMtqgqLcw3bxuCQ\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHUvaUhGK3hqelpCV3pDZkpocyt1SFpEcGdOZnZCenhmbGJZIn0.Om3GQF_TK-BwjAI3ZJTME5LFPYyCeF-3haGHFL6xGbnzENMNHXqDcqtAIit7fSAYepTdA8ACojRsOrRrqPWb_Q\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token pbh does not match request body"
     },
     {
       "name": "pbh hex",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiZTA0NzQ3OThjZTZkYmJmODg3MTdlYzYzY2Q5MDU2Y2MyN2M5ODZjZmFlMWQ5MGU5ODBkN2VmMDczYzVmOTViNiJ9.YlJoezWvnznSUzZpDQzbwfij9V_w_292-vLxEq_Wglxq_L_fXOpe9V9cdpWn1lCqYEHY4s2u9gKerKDjV77ceg\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiJlMDQ3NDc5OGNlNmRiYmY4ODcxN2VjNjNjZDkwNTZjYzI3Yzk4NmNmYWUxZDkwZTk4MGQ3ZWYwNzNjNWY5NWI2In0.6fYgn1lIXwgtHb5RcdYXH4WJRaqzDaxRf02IAH3BRqPCI0WG5nPMrvAmyA6m4IS8TGtCFD36bkVwcknZPGgN-A\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token pbh does not match request body"
     },
     {
       "name": "claims with an overflowing number",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjFlNDAwLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.QROALWXglMUDVqiVJDnb0Xj5bZ753-ZJFL97wuuST21_j2A6gGn2XdS-iiHoYAmjwyozHF2DdTn93etY_J_6Rg\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjFlNDAwLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.eZKi_afXGF2yj90z4-ak9_L1LBFaiaYscQNsxl42VM_fAAj9MRiGAgGNqUG76V1IKsD3EixuaWHNj4kt5lYzJg\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode claim: json: cannot unmarshal number 1e400 into Go struct field MapClaims.exp of type float64"
     },
     {
       "name": "header with an overflowing number",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsIngiOi0xZTk5OX0.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.krR79b90FvEOAvI-3hB-h45g1Inz4Vtn8Y6900jqjfiroLU_27njgSh43B_VSfkKIRJZpbTjfKM1kMTN-dDB1Q\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsIngiOi0xZTk5OX0.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.KIfcf0KVSLue6Gmsoylxf7WGpsSlZwjCpyL14pAYSIqkxoLwEPF39XvRikyeDhsRatlPfZNAhkr7ku1kV9Zcew\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode header: json: cannot unmarshal number -1e999 into Go struct field .x of type float64"
     },
     {
       "name": "claims with a large finite number",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjFlMzA4LCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.ghDpjx3M0bbLwwdF6okrDGJ1his7jFHEBYthQcPvivO6C3fsd1SsL9c3hGRydhftdMNKeFP_lb_tqpwcwa9dkg\"}",
-      "valid": true,
-      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
-      "revision": 7
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjFlMzA4LCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.cIn_g2fvAeka67pAwLx-fcaaAb4fboMAItX8OanN-ZnVdI36HSPUEPq0aULTJnEmgZEOBSd9xTL3FY20_A2Mmg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token validity -2562047h47m16.854775808s outside (0, 5m0s]"
     },
     {
       "name": "claims not an object",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.WyJQVVQiXQ.iaBOs5MmBIM6JlNpW5ckIQuSwQGZMdPp3EejtZ1FvndElrm4jGNuBlmF8FiU8odZU3BkTmAta3T6vglPWmWfew\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.WyJQVVQiXQ.gcUkCfXjNWhI4zNhr2npruO-Qe21wDiiuvgPIPXuvk2ms6kHJXgtTtlutk5VA3PLFbwOhcD5DUjxmT9ZmaYwGg\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode claim: json: cannot unmarshal array into Go value of type jwt.MapClaims"
     },
     {
       "name": "claims with trailing data",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9IHt9.xs1WaO6nf8jEVmT5EeCdhFYMYvSB_PnwmQsyRqA3dNqi8_c9546ItQvTRthMqhB-Fk8hz2derD7RGxcolz0Pew\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0ge30.p2SUiB94hLoaYSnsqCs5l-FByNCIKspr8AkLsD32DVVfEWuBA7BF4X6Ffnu8wgpymCizP5WNvr44iZN3vFHPmg\"}",
       "valid": false,
       "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode claim: invalid character '{' after top-level value"
     },
     {
       "name": "envelope members reordered, spaced",
-      "envelope": " {\n \"token\" : \"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\" ,\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\" }\n",
+      "envelope": " {\n \"token\" : \"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\" ,\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\" }\n",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "envelope duplicate token",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
       "valid": false,
       "c8s_error": "route envelope: duplicate JSON object key"
     },
@@ -253,62 +308,62 @@
     },
     {
       "name": "envelope trailing document",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\"}{}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}{}",
       "valid": false,
       "c8s_error": "invalid character '{' after top-level value"
     },
     {
       "name": "envelope leading BOM",
-      "envelope": "﻿{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\"}",
+      "envelope": "﻿{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
       "valid": false,
       "c8s_error": "invalid character '\\ufeff' looking for beginning of value"
     },
     {
       "name": "envelope not an object",
-      "envelope": "[\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\"]",
+      "envelope": "[\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"]",
       "valid": false,
       "c8s_error": "route envelope: must be an object"
     },
     {
       "name": "envelope manifest URL-safe base64",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F-IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F-IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
       "valid": false,
       "c8s_error": "route envelope: manifest is not standard padded base64"
     },
     {
       "name": "envelope manifest with newline",
-      "envelope": "{\"manifest\":\"eyJzY2hl\\nbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hl\\nbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
       "valid": false,
       "c8s_error": "route envelope: manifest is not standard padded base64"
     },
     {
       "name": "envelope manifest with an escaped plus",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F\\u002bIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F\\u002bIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
       "valid": true,
       "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
       "revision": 7
     },
     {
       "name": "envelope unpaired surrogate in token",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.9KKFvdXum86tnETmTJ3gARYUcvss6LQXrhhKSdHrAg6_mggWEDCrk4f38ShWdoTk5Rf6VuQ3UfmpqyiKreUOqw\\ud800\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\\ud800\"}",
       "valid": false,
       "c8s_error": "route envelope: unpaired Unicode surrogate"
     },
     {
       "name": "signed manifest with a duplicate member",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsInJldmlzaW9uIjo4LCJub3RCZWZvcmUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwWiIsIm1heEFnZVNlY29uZHMiOjM2MDAsImhvc3RzIjp7fX0=\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6InJBQXl0TjNZZkRnWXlzVDBGRW96azVta01JS0g2VUVKcXU5cENRNVlXUncifQ.O4z1s8VG-YXDcysI9MsJEbudwrsRNs012G73NmlknBLl7bV2X6HTyrwPOjWlFLPUwwMGJ-79Seen5DyP58hIJA\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsInJldmlzaW9uIjo4LCJub3RCZWZvcmUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwWiIsIm1heEFnZVNlY29uZHMiOjM2MDAsImhvc3RzIjp7fX0=\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiJyQUF5dE4zWWZEZ1l5c1QwRkVvems1bWtNSUtINlVFSnF1OXBDUTVZV1J3In0.uyx6ZLn6sGs9jsxwV7e1tFizUvc49auWoHzPBgpnjv9zzou7iI-iTCCjtM8SIYYm2Nj74DEEOFngVP1tZj66OA\"}",
       "valid": false,
       "c8s_error": "route manifest: duplicate JSON object key"
     },
     {
       "name": "signed manifest with trailing data",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0ge30=\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IlBsLUNmQW9kWmlCT0ctUlJVZ21ROHFfUnRxTk5mNmhBLTNwenpvM3JiR2MifQ.OcwMQ628K3kAnYS_VIHNhRp1umWCjU4DLdO671q9-oNfLMTxEdYr0sohGknNjUOjn7aZbAf1G_z-R_eUPSx1zw\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0ge30=\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiJQbC1DZkFvZFppQk9HLVJSVWdtUThxX1J0cU5OZjZoQS0zcHp6bzNyYkdjIn0.rXn7R-012lKKuKZHL-nMbLnVM5FiXD0B9_j26MpbpR67Pc9UeTkfD_brSSTIrb8ahjy4exHgcuWY9CrUaYuJaw\"}",
       "valid": false,
       "c8s_error": "route manifest: expected exactly one JSON document"
     },
     {
       "name": "signed manifest with no hosts",
-      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjksIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnt9fQ==\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJpYXQiOjIsInBiaCI6IjAtUGk4Ujg5Z1pTdjVOSlp6R3lsejRncFdNU2F3T0x3MlBNMFp2dzB1RFEifQ.dMeM42xdOESW1fUAVTYtdR_BUyMLqWZJYyP2mfUouzZ-QmWdo3I1UODfYgs3o26pTQHfox-cz2GmXbCFPFs5Og\"}",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjksIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnt9fQ==\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiIwLVBpOFI4OWdaU3Y1Tkpaekd5bHo0Z3BXTVNhd09MdzJQTTBadncwdURRIn0.6qUdsKATlFNHdmk-Zd6NUNPriYC64COAYp7GnkZgXYMqut4DpghpBPaQ46yw4yZKzu4r2u2Y1rqYnso5Yyjr4w\"}",
       "valid": true,
       "route_digest": "d3e3e2f11f3d8194afe4d259cc6ca5cf882958c49ac0e2f0d8f33466fc34b834",
       "revision": 9
@@ -1169,7 +1224,7 @@
     },
     {
       "name": "address backend, PUBLIC KEY block",
-      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gUFVCTElDIEtFWS0tLS0tXG5NRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVuNHdtZnJtUzdvS2xsakR2RWx6cjVjSkNkczRhXG5qMERHNGJsQ0hrMjdFZWMyaHJDdXdwd0VWakRxaStZcVlDTi9rVkh0U20yNzRVRFdRZ0xRTmIxam9RPT1cbi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLVxuIn19XX19fQ==",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gUFVCTElDIEtFWS0tLS0tXG5NRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUUrZnpFdU04eXVCMUN1OUpENUNSN1kxUmduMTl4XG5JdEhGclVtVjdUZFV6YXI5Q1hDekVybWd6cEJUMHc1d0ZEVStpSGZ6WWt5eDBKQzVRdGlOTTFwTGF3PT1cbi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLVxuIn19XX19fQ==",
       "valid": false,
       "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: PEM block \"PUBLIC KEY\" is not a CERTIFICATE"
     },

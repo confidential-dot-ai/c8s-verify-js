@@ -68,7 +68,7 @@ async function operator() {
     async envelope(manifest: Uint8Array): Promise<string> {
       const pbh = new Uint8Array(await crypto.subtle.digest("SHA-256", manifest));
       const input = `${segment({ alg: "ES256", typ: "JWT" })}.${segment({
-        exp: 1,
+        exp: 61,
         htm: "PUT",
         htu: "/routes",
         iat: 1,

@@ -143,8 +143,9 @@ export async function importRouteOperatorKeys(keys: RouteOperatorKey[]): Promise
 /**
  * Verify a publication body under the operator keys (PEM), as c8s
  * `routes.VerifySigned` does with no mesh CAs: the write token's signature,
- * htm PUT and htu /routes, pbh over the manifest bytes, then the manifest
- * schema. No time claim and no revision is checked.
+ * exp−iat of at most five minutes, htm PUT and htu /routes, pbh over the
+ * manifest bytes, then the manifest schema. Whether the token has expired is
+ * not checked, nor is the revision.
  *
  * Throws `invalid_request` when the PEM holds no usable key,
  * `route_manifest_invalid` for a malformed envelope and
@@ -209,10 +210,14 @@ const ES_ALGORITHMS: Record<string, { hash: string; curve: string }> = {
   ES512: { hash: "SHA-512", curve: "P-521" },
 };
 
+/** c8s operatorauth.MaxTokenValidity: the widest exp−iat window, in seconds. */
+const MAX_TOKEN_VALIDITY_SECONDS = 300;
+
 /**
- * Verify a stored write token as c8s operatorauth.VerifyStoredToken does
+ * Verify a stored write token as c8s operatorauth.VerifyStored does
  * (golang-jwt v5 without claims validation): an ES256, ES384 or ES512
- * signature under one of keys on the matching curve, then htm, htu and pbh.
+ * signature under one of keys on the matching curve, exp−iat within
+ * (0, MaxTokenValidity], then htm, htu and pbh.
  */
 async function verifyToken(keys: CryptoKey[], token: string, digest: Uint8Array): Promise<void> {
   const parts = token.split(".");
@@ -242,6 +247,17 @@ async function verifyToken(keys: CryptoKey[], token: string, digest: Uint8Array)
     }
   }
   if (!verified) throw new Invalid("write token signature does not verify under any operator key");
+  // golang-jwt truncates NumericDate to whole seconds; a non-number is absent.
+  const iat = typeof claims.iat === "number" ? Math.floor(claims.iat) : undefined;
+  const exp = typeof claims.exp === "number" ? Math.floor(claims.exp) : undefined;
+  if (iat === undefined) throw new Invalid("write token has no iat claim");
+  if (exp === undefined) throw new Invalid("write token has no exp claim");
+  const validity = exp - iat;
+  if (!(validity > 0 && validity <= MAX_TOKEN_VALIDITY_SECONDS)) {
+    throw new Invalid(
+      `write token validity ${validity}s is outside (0, ${MAX_TOKEN_VALIDITY_SECONDS}s]`,
+    );
+  }
   if (claims.htm !== "PUT") throw new Invalid("write token htm is not PUT");
   if (claims.htu !== "/routes") throw new Invalid("write token htu is not /routes");
   if (typeof claims.pbh !== "string" || claims.pbh === "") {
