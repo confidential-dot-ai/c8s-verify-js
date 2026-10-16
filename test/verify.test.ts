@@ -153,7 +153,8 @@ test("rejects a route digest outside the pin set, naming both", async () => {
       e.code === "route_denied" &&
       e.message.includes(ROUTE_HEX) &&
       e.message.includes(OTHER_ROUTE_HEX) &&
-      e.details.got === ROUTE_HEX,
+      e.details.got === ROUTE_HEX &&
+      Array.isArray(e.details.expected),
   );
 });
 

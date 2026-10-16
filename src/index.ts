@@ -345,7 +345,7 @@ export class C8sClient {
       fail(
         "route_denied",
         `the evidence binds route digest ${digest}, the published manifest has ${fresh.routeDigest}`,
-        { details: { expected: fresh.routeDigest, got: digest } },
+        { details: { expected: [fresh.routeDigest], got: digest } },
       );
     }
     return fresh;

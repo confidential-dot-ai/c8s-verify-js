@@ -434,7 +434,17 @@ test("connect checks the published manifest against the evidence", async () => {
       assert.equal(session.attestation.routeDigest, c.bound, c.name);
       assert.deepEqual(client.routeFloor, { revision: c.want, digest: c.bound }, c.name);
     } else {
-      await assert.rejects(() => client.connect(), hasCode(c.want), c.name);
+      const want = c.want;
+      await assert.rejects(
+        () => client.connect(),
+        (e: unknown) =>
+          hasCode(want)(e) &&
+          // Same details shape as a routeDigests pin miss.
+          (want !== "route_denied" ||
+            (Array.isArray((e as C8sVerifyError).details.expected) &&
+              (e as C8sVerifyError).details.got === c.bound)),
+        c.name,
+      );
       assert.deepEqual(client.routeFloor, c.floor, `${c.name}: floor unchanged`);
     }
     assert.equal(server.publicationFetches(), c.publications.length, `${c.name}: fetches`);

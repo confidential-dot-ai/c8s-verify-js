@@ -70,7 +70,7 @@ export type C8sErrorCode =
   // The response binds a route digest outside the pinned routeDigests set,
   // or other than the digest of the operator-signed manifest the router
   // publishes: the router applied a manifest other than the ones the caller
-  // accepts.
+  // accepts. details: expected (hex digests accepted), got (hex digest bound).
   | "route_denied"
   // Operator-key route checks (routeOperatorKeys). "_unavailable": the route
   // publication could not be fetched (network, 404 when publication is off,
