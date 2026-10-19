@@ -90,6 +90,9 @@ export type C8sErrorCode =
   // policy the leaf was issued under, is not pinned (details.digest).
   | "policy_history_absent"
   | "policy_history_not_pinned"
+  // C8sClient.connect got a "partial" verdict without allowPartial
+  // (details.notProven).
+  | "policy_history_unproven"
   // The evidence commits an init-data digest other than initDataHash.
   | "init_data_denied"
   // sandboxId is set but the chain-verified mesh leaf names another pod

@@ -50,6 +50,16 @@ import {
   type RtmrPins,
 } from "./pins.js";
 
+/** The WASM hardware verifiers; a parameter so tests can stand in for a quote. */
+export interface Verifiers {
+  verifySnp: typeof verifySnp;
+  verifyAzSnp: typeof verifyAzSnp;
+  verifyAzTdx: typeof verifyAzTdx;
+  verifyTdx: typeof verifyTdx;
+}
+
+const WASM: Verifiers = { verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx };
+
 /**
  * Minimum SEV-SNP TCB floor: security patch levels (SPLs) the reported TCB
  * must meet or exceed, component by component. Values come from AMD security
@@ -311,6 +321,8 @@ export interface WasmVerifyResult {
   // Present for snp/az-snp; az-tdx has no SNP report version.
   report_version?: number;
   report_data_match: boolean | null;
+  /** Init-data comparison result, present only when a digest was supplied. */
+  init_data_match?: boolean | null;
   collateral_verified?: boolean;
   /**
    * RTMR[3] comparison result, present only when a pin was supplied. The
@@ -420,10 +432,11 @@ export interface AttestationResult {
    */
   measuredPolicies?: string[];
   /**
-   * `"verified"` when every check passed; `"partial"` when the evidence
-   * verified but left something unproven, listed in {@link notProven}: a
-   * measured policy history no `pinPolicies` judged, or a pinned one the
-   * evidence cannot fully vouch for. Gate on `"verified"`.
+   * The policy-history judgement: `"partial"` when the evidence verified but
+   * left the node's measured policy history unproven, listed in
+   * {@link notProven} (no `pinPolicies` judged it, or the evidence cannot
+   * fully vouch for a pinned one); `"verified"` otherwise. It covers nothing
+   * else: gaps such as unenforced freshness stay in {@link warnings}.
    */
   verdict: Verdict;
   /** What a partial verdict leaves unproven; present only when `verdict` is `"partial"`. */
@@ -433,8 +446,19 @@ export interface AttestationResult {
   warnings: string[];
 }
 
-/** Whether every check passed, or the evidence verified but left something unproven. */
+/** The policy-history judgement; see {@link AttestationResult.verdict}. */
 export type Verdict = "verified" | "partial";
+
+/** Fail with `policy_history_unproven` on a `"partial"` verdict. */
+export function requireVerified(result: { verdict: Verdict; notProven?: string[] }): void {
+  if (result.verdict === "verified") return;
+  fail(
+    "policy_history_unproven",
+    `the node's policy history is not proven: ${result.notProven?.join("; ")} ` +
+      "(pass pinPolicies, or allowPartial to accept a partial verdict)",
+    { details: { notProven: result.notProven } },
+  );
+}
 
 /** The verdict fields for what a policy-history judgement left unproven. */
 function verdictOf(notProven: string[]): { verdict: Verdict; notProven?: string[] } {
@@ -1175,6 +1199,7 @@ async function prepareIdentity(
 }
 
 async function verifyHardwareAttestation(
+  verifiers: Verifiers,
   bundle: AttestationBundle,
   expected: Uint8Array,
   wantPlatform: string,
@@ -1224,7 +1249,7 @@ async function verifyHardwareAttestation(
     let out: string;
     const tcbFloor = minTcbJson(minTcb);
     if (isAzSnp)
-      out = await verifyAzSnp(
+      out = await verifiers.verifyAzSnp(
         JSON.stringify(bundle.evidence),
         hardAnchor,
         initDataHash,
@@ -1232,9 +1257,9 @@ async function verifyHardwareAttestation(
         snpCrl,
       );
     else if (isAzTdx)
-      out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor, initDataHash);
+      out = await verifiers.verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor, initDataHash);
     else if (isTdx)
-      out = await verifyTdx(
+      out = await verifiers.verifyTdx(
         JSON.stringify(bundle.evidence),
         hardAnchor,
         initDataHash,
@@ -1242,7 +1267,7 @@ async function verifyHardwareAttestation(
         tdxCollateral,
       );
     else
-      out = await verifySnp(
+      out = await verifiers.verifySnp(
         bundle.evidence,
         pinnedGeneration ?? bundle.generation,
         expected,
@@ -1288,7 +1313,7 @@ async function verifyHardwareAttestation(
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
-  if (wantPlatform === "snp") enforceSnpInitData(result, initDataHash);
+  enforceInitData(result, wantPlatform, initDataHash);
   const measuredPolicies =
     expectedRtmr3 === undefined ? [] : enforceRtmr3Pin(result, isTdx, expectedRtmr3, measured);
   return { result, measuredPolicies };
@@ -1304,11 +1329,24 @@ function failInitDataMismatch(e: unknown, pin: Uint8Array | undefined): void {
 }
 
 /**
- * Bare SNP's verifier takes no init-data argument, so compare HOST_DATA in
- * the verified claims. An absent claim fails: it was never compared.
+ * Require the init-data comparison to have run and matched. Bare SNP's
+ * verifier takes no init-data argument, so HOST_DATA is compared in the
+ * verified claims; an absent claim fails, since it was never compared.
  */
-function enforceSnpInitData(result: WasmVerifyResult, pin: Uint8Array | undefined): void {
+function enforceInitData(
+  result: WasmVerifyResult,
+  platform: string,
+  pin: Uint8Array | undefined,
+): void {
   if (pin === undefined) return;
+  if (platform !== "snp") {
+    if (result.init_data_match !== true) {
+      fail("init_data_denied", "the verifier did not confirm initDataHash", {
+        details: { expected: bytesToHex(pin), got: result.init_data_match },
+      });
+    }
+    return;
+  }
   const got = result.claims.init_data;
   if (typeof got !== "string" || got.toLowerCase() !== bytesToHex(pin)) {
     fail("init_data_denied", "the evidence's HOST_DATA is not initDataHash", {
@@ -1450,7 +1488,18 @@ async function verifyWorkloadPolicy(
  *   echo it exactly. Omit only when re-verifying a saved bundle offline, where
  *   the result is not a freshness or key-binding proof for this caller.
  */
-export async function verifyAttestation(
+export function verifyAttestation(
+  bundle: AttestationBundle,
+  nonce: Uint8Array,
+  policy: VerifyPolicy,
+  expectedXwingEk?: Uint8Array,
+): Promise<AttestationResult> {
+  return verifyAttestationWith(WASM, bundle, nonce, policy, expectedXwingEk);
+}
+
+/** {@link verifyAttestation} over the given hardware verifiers. */
+export async function verifyAttestationWith(
+  verifiers: Verifiers,
   bundle: AttestationBundle,
   nonce: Uint8Array,
   policy: VerifyPolicy,
@@ -1471,6 +1520,7 @@ export async function verifyAttestation(
   // The list never widens anything: without the pin it is not even read.
   const measured = rtmr3 === undefined ? [] : validateMeasuredPolicies(bundle.measured_policies);
   const { result, measuredPolicies } = await verifyHardwareAttestation(
+    verifiers,
     bundle,
     identity.transcript,
     wantPlatform,
@@ -1603,21 +1653,12 @@ function imageComplete(tdxImage: TdxImage | undefined, registers: RegisterPins):
 
 /**
  * The policy the chain-verified mesh leaf was issued under. A stamp that does
- * not parse cannot show its policy is pinned, so it fails the judgement.
+ * not parse fails with `workload_invalid`.
  */
 function leafPolicy(leaf: Certificate, vouched: boolean): LeafPolicy {
   const extnValue = leaf.extensions.get(OID_MATCHED_WORKLOAD);
   if (extnValue === undefined) return { kind: "unstamped" };
-  let digest: Uint8Array;
-  try {
-    digest = parseMatchedWorkload(extnValue).allowlistDigest;
-  } catch (e) {
-    fail(
-      "policy_history_not_pinned",
-      `the leaf's issuing policy cannot be read: ${errMessage(e)}`,
-      { cause: e },
-    );
-  }
+  const digest = parseMatchedWorkload(extnValue).allowlistDigest;
   return { kind: "stamped", digest: `sha256:${bytesToHex(digest)}`, vouched };
 }
 
@@ -1758,7 +1799,16 @@ export interface EvidenceResult {
  * (mesh-CA chaining) must then be checked separately. Fails closed with a typed
  * {@link C8sVerifyError}.
  */
-export async function verifyEvidence(
+export function verifyEvidence(
+  evidence: Evidence,
+  opts: VerifyEvidenceOptions,
+): Promise<EvidenceResult> {
+  return verifyEvidenceWith(WASM, evidence, opts);
+}
+
+/** {@link verifyEvidence} over the given hardware verifiers. */
+export async function verifyEvidenceWith(
+  verifiers: Verifiers,
   evidence: Evidence,
   opts: VerifyEvidenceOptions,
 ): Promise<EvidenceResult> {
@@ -1821,16 +1871,17 @@ export async function verifyEvidence(
     let out: string;
     const tcbFloor = minTcbJson(opts.minTcb);
     if (isAzSnp)
-      out = await verifyAzSnp(
+      out = await verifiers.verifyAzSnp(
         JSON.stringify(evidence),
         expected,
         initDataHash,
         tcbFloor,
         opts.snpCrl,
       );
-    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected, initDataHash);
+    else if (isAzTdx)
+      out = await verifiers.verifyAzTdx(JSON.stringify(evidence), expected, initDataHash);
     else if (isTdx)
-      out = await verifyTdx(
+      out = await verifiers.verifyTdx(
         JSON.stringify(evidence),
         expected,
         initDataHash,
@@ -1839,7 +1890,8 @@ export async function verifyEvidence(
           ? undefined
           : tdxCollateralJson(opts.tdxCollateral, opts.at),
       );
-    else out = await verifySnp(evidence, opts.generation!, expected, tcbFloor, opts.snpCrl);
+    else
+      out = await verifiers.verifySnp(evidence, opts.generation!, expected, tcbFloor, opts.snpCrl);
     result = JSON.parse(out) as WasmVerifyResult;
   } catch (e) {
     // The vTPM/tdx verifiers fail closed (throw) on a freshness mismatch when an
@@ -1894,7 +1946,7 @@ export async function verifyEvidence(
       ? undefined
       : enforceTdxTcb(result.tcb_status, collateralVerified, acceptedTcb);
 
-  if (wantPlatform === "snp") enforceSnpInitData(result, initDataHash);
+  enforceInitData(result, wantPlatform, initDataHash);
   const measuredPolicies =
     wantRtmr3 === undefined ? [] : enforceRtmr3Pin(result, isTdx, wantRtmr3, measured);
 

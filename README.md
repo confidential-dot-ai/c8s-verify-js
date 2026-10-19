@@ -86,7 +86,8 @@ same reason the mesh CA key is, but with two advantages:
 
 So the mesh CA has to be re-pinned every time the cluster is reinstalled,
 whereas the operator key is chosen by the operator and can be published ahead of
-time (the expected register value is `SHA-384(0x00*48 ‖ SHA-384(pubkey))`).
+time (the expected register value is
+`SHA-384(0x00*48 ‖ SHA-384(operator public-key PEM bytes))`).
 A node that also measures its allowlist policies extends RTMR[3] once per
 policy after that seed and reports the digests as the bundle's
 `measured_policies`. Keep pinning the bare seed (or pass the operator key as
@@ -172,7 +173,8 @@ const client = new C8sClient({
   workloadName: "sglang-kimi-k3",                          // optional workload pin
   // Intel TDX only. Pins the deployment, not just the build: RTMR[3] carries the
   // operator key bound at launch, so a genuine-but-someone-else's cluster running
-  // the same audited image is rejected. SHA-384(0x00*48 ‖ SHA-384(operator pubkey)).
+  // the same audited image is rejected. The value is
+  // SHA-384(0x00*48 ‖ SHA-384(operator public-key PEM bytes)).
   platform: "tdx",
   expectedRtmr3: "<expected hex SHA-384 RTMR[3]>",
   // Intel TDX only. The complete image pin: MRTD covers just the TDVF firmware,
@@ -351,12 +353,14 @@ const client = new C8sClient({
   operatorPublicKeyPem, // or expectedRtmr3: the bare seed
   pinPolicies: [allowlistBytes, "sha256:<64 lowercase hex>"],
 });
-const { attestation } = await client.connect();
-if (attestation.verdict !== "verified") throw new Error(attestation.notProven?.join("; "));
+const session = await client.connect();
 ```
 
-Every result carries `verdict`: `"verified"`, or `"partial"` with the gaps in
-`notProven`. Gate on `"verified"`. What each case means:
+Every result carries `verdict`, the policy-history judgement: `"verified"`,
+or `"partial"` with the gaps in `notProven`. It covers nothing else, so
+`warnings` still apply. `connect` fails on `"partial"` with
+`policy_history_unproven` unless you pass `allowPartial: true`; then gate on
+`session.attestation.verdict` yourself. What each case means:
 
 | Node and options | Result |
 |---|---|

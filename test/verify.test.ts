@@ -5,17 +5,29 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import {
+  requireVerified,
   verifyAttestation,
+  verifyAttestationWith,
   verifyEvidence,
+  verifyEvidenceWith,
   type AttestationBundle,
+  type Verifiers,
   type VerifyEvidenceOptions,
   type VerifyPolicy,
 } from "../src/verify.js";
+import { verifyAzSnp, verifyAzTdx, verifySnp, verifyTdx } from "../src/wasm-loader.js";
+import { extendRegister } from "../src/rtmr3.js";
 import { generateNonce } from "../src/nonce.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { DEMO_MEASUREMENTS } from "../demo/config.js";
 import { buildBundle, loadFixtures, TEST_ROUTE_DIGEST } from "./helpers.js";
-import { base64ToBytes, bytesToBase64, bytesToBase64Url, bytesToHex } from "../src/base64.js";
+import {
+  base64ToBytes,
+  bytesToBase64,
+  bytesToBase64Url,
+  bytesToHex,
+  hexToBytes,
+} from "../src/base64.js";
 import { certificateHashBase64Url } from "../src/identity.js";
 import { fingerprintSHA256 } from "../src/x509.js";
 import { allowlistDigestHex } from "../src/workload.js";
@@ -1299,4 +1311,228 @@ test("verifyAttestation accepts allowlist documents as policy pins", async () =>
       }),
     isCode("policy_history_absent"),
   );
+});
+
+// ---------------------------------------------------------------------------
+// A replayed policy history, end to end. The fixture TD does not measure its
+// policies, so the TDX verifier is wrapped: it verifies the real quote, then
+// reports RTMR[3] as the seed extended by the history, and the transcript and
+// init-data comparisons as the caller sets them.
+// ---------------------------------------------------------------------------
+
+interface Quoted {
+  history?: string[];
+  initDataMatch?: boolean | null;
+}
+
+function quoting(q: Quoted): Verifiers {
+  const rtmr3 = bytesToHex(
+    (q.history ?? []).reduce((reg, d) => extendRegister(reg, d), hexToBytes(TDX_RTMR3)),
+  );
+  return {
+    verifySnp,
+    verifyAzSnp,
+    verifyAzTdx,
+    async verifyTdx(evidence, reportData, initData, wantRtmr3, collateral) {
+      const out = JSON.parse(
+        await verifyTdx(evidence, undefined, undefined, undefined, collateral),
+      );
+      out.claims.platform_data.rtmr_3 = rtmr3;
+      out.report_data_match = reportData === undefined ? null : true;
+      if (wantRtmr3 !== undefined) out.rtmr3_match = bytesToHex(wantRtmr3) === rtmr3;
+      if (initData !== undefined)
+        out.init_data_match = "initDataMatch" in q ? q.initDataMatch : true;
+      return JSON.stringify(out);
+    },
+  };
+}
+
+const allowlistPin = async () => `sha256:${await allowlistDigestHex(await readAllowlistBytes())}`;
+
+/** A live TDX check of a node whose leaf carries `extnValue` (unstamped when absent). */
+async function historyCheck(extnValue?: Uint8Array) {
+  const nonce = generateNonce();
+  const built = await buildBundle(nonce, {
+    evidence: await tdxEvidence(),
+    platform: "tdx",
+    leaf: extnValue === undefined ? undefined : await stampedLeaf(extnValue),
+  });
+  const policy: VerifyPolicy = {
+    platform: "tdx",
+    tdxImage: TDX_IMAGE,
+    meshCaPem: built.meshCaPem,
+    expectedRtmr3: TDX_RTMR3,
+  };
+  return { nonce, built, policy, ek: built.clientKeyPair.ek };
+}
+
+test("verifyAttestation judges a replayed policy history", async () => {
+  const pin = await allowlistPin();
+  const stamp = await stampFor("sglang-dev");
+  const allowlist = await readAllowlistBytes();
+  const verifiers = quoting({ history: [pin] });
+
+  const live = await historyCheck(stamp);
+  const unjudged = await verifyAttestationWith(
+    verifiers,
+    { ...live.built.bundle, measured_policies: [pin] },
+    live.nonce,
+    live.policy,
+    live.ek,
+  );
+  assert.equal(unjudged.verdict, "partial");
+  assert.deepEqual(unjudged.measuredPolicies, [pin]);
+  assert.equal(unjudged.notProven?.length, 1);
+  assert.throws(() => requireVerified(unjudged), isCode("policy_history_unproven"));
+
+  const judged = await verifyAttestationWith(
+    verifiers,
+    { ...live.built.bundle, measured_policies: [pin] },
+    live.nonce,
+    { ...live.policy, pinPolicies: [allowlist] },
+    live.ek,
+  );
+  assert.equal(judged.verdict, "verified");
+  assert.equal(judged.notProven, undefined);
+  requireVerified(judged);
+
+  const cases: {
+    name: string;
+    extnValue?: Uint8Array;
+    policy?: Partial<VerifyPolicy>;
+    ek?: false;
+  }[] = [
+    { name: "unstamped leaf" },
+    { name: "no live key exchange", extnValue: stamp, ek: false },
+    { name: "freshness not required", extnValue: stamp, policy: { requireFreshness: false } },
+  ];
+  for (const c of cases) {
+    const h = await historyCheck(c.extnValue);
+    const r = await verifyAttestationWith(
+      verifiers,
+      { ...h.built.bundle, measured_policies: [pin] },
+      h.nonce,
+      { ...h.policy, pinPolicies: [pin], ...c.policy },
+      c.ek === false ? undefined : h.ek,
+    );
+    assert.equal(r.verdict, "partial", c.name);
+    assert.equal(r.notProven?.length, 1, c.name);
+  }
+});
+
+test("verifyAttestation leaves a pinned history partial without a pinned mesh CA", async () => {
+  const pin = await allowlistPin();
+  const allowlist = await readAllowlistBytes();
+  const h = await historyCheck(await stampFor("sglang-dev"));
+  const r = await verifyAttestationWith(
+    quoting({ history: [pin] }),
+    { ...h.built.bundle, measured_policies: [pin] },
+    h.nonce,
+    { ...h.policy, meshCaPem: undefined, allowlist, pinPolicies: [pin] },
+    h.ek,
+  );
+  assert.equal(r.verdict, "partial");
+  assert.ok(r.notProven?.[0].includes("meshCaPem"), JSON.stringify(r.notProven));
+});
+
+test("verifyAttestation fails a history or leaf policy that is not pinned", async () => {
+  const pin = await allowlistPin();
+  const other = "sha256:" + "3".repeat(64);
+  const cases: {
+    name: string;
+    history: string[];
+    pins: string[];
+    extnValue: Uint8Array;
+    code: string;
+  }[] = [
+    {
+      name: "unpinned history entry",
+      history: [other, pin],
+      pins: [pin],
+      extnValue: await stampFor("sglang-dev"),
+      code: "policy_history_not_pinned",
+    },
+    {
+      name: "unpinned leaf policy",
+      history: [other],
+      pins: [other],
+      extnValue: await stampFor("sglang-dev"),
+      code: "policy_history_not_pinned",
+    },
+    {
+      name: "malformed stamp",
+      history: [pin],
+      pins: [pin],
+      extnValue: new Uint8Array([0x30, 0x00]),
+      code: "workload_invalid",
+    },
+  ];
+  for (const c of cases) {
+    const h = await historyCheck(c.extnValue);
+    await assert.rejects(
+      verifyAttestationWith(
+        quoting({ history: c.history }),
+        { ...h.built.bundle, measured_policies: c.history },
+        h.nonce,
+        { ...h.policy, pinPolicies: c.pins },
+        h.ek,
+      ),
+      isCode(c.code),
+      c.name,
+    );
+  }
+});
+
+test("verifyEvidence judges a replayed history by nonceBound", async () => {
+  const pin = await allowlistPin();
+  const verifiers = quoting({ history: [pin] });
+  const opts: VerifyEvidenceOptions = {
+    platform: "tdx",
+    tdxImage: TDX_IMAGE,
+    expectedRtmr3: TDX_RTMR3,
+    measuredPolicies: [pin],
+    expectedReportData: new Uint8Array(64),
+  };
+  const evidence = await tdxEvidence();
+  const unjudged = await verifyEvidenceWith(verifiers, evidence, opts);
+  assert.equal(unjudged.verdict, "partial");
+  const stale = await verifyEvidenceWith(verifiers, evidence, { ...opts, pinPolicies: [pin] });
+  assert.equal(stale.verdict, "partial");
+  const live = await verifyEvidenceWith(verifiers, evidence, {
+    ...opts,
+    pinPolicies: [pin],
+    nonceBound: true,
+  });
+  assert.equal(live.verdict, "verified");
+  assert.deepEqual(live.measuredPolicies, [pin]);
+});
+
+test("an init-data mismatch the verifier reports without throwing fails", async () => {
+  const want = "00".repeat(32);
+  const h = await historyCheck();
+  for (const initDataMatch of [false, null]) {
+    await assert.rejects(
+      verifyAttestationWith(
+        quoting({ initDataMatch }),
+        h.built.bundle,
+        h.nonce,
+        {
+          ...h.policy,
+          initDataHash: want,
+        },
+        h.ek,
+      ),
+      isCode("init_data_denied"),
+      String(initDataMatch),
+    );
+    await assert.rejects(
+      verifyEvidenceWith(quoting({ initDataMatch }), await tdxEvidence(), {
+        platform: "tdx",
+        tdxImage: TDX_IMAGE,
+        initDataHash: want,
+      }),
+      isCode("init_data_denied"),
+      String(initDataMatch),
+    );
+  }
 });

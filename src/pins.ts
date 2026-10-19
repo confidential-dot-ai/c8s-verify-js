@@ -63,9 +63,9 @@ function checkOperatorPublicKeyPem(pem: unknown): asserts pem is string {
       `operatorPublicKeyPem holds a ${JSON.stringify(first)} block: pass the operator PUBLIC key, the exact bytes the guest initrd hashed`,
     );
   }
-  const der = first === "PUBLIC KEY" ? decodePEM(pem, "PUBLIC KEY")[0] : undefined;
   let ok = false;
   try {
+    const der = first === "PUBLIC KEY" ? decodePEM(pem, "PUBLIC KEY")[0] : undefined;
     ok = der !== undefined && readTLV(der, 0).tag === TAG.SEQUENCE;
   } catch {
     // A body that does not parse is reported below with the block type.

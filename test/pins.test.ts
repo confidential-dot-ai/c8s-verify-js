@@ -118,6 +118,13 @@ test("resolveRegisterPins", async () => {
         imagePinned: true,
       },
     },
+    {
+      name: "non-base64 public key body",
+      in: {
+        operatorPublicKeyPem: "-----BEGIN PUBLIC KEY-----\n!!!!\n-----END PUBLIC KEY-----\n",
+        imagePinned: true,
+      },
+    },
   ];
   for (const c of bad) assert.throws(() => resolveRegisterPins(c.in), isInvalid, c.name);
 });

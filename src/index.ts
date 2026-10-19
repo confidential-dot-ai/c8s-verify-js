@@ -12,6 +12,7 @@
 
 import { generateNonce } from "./nonce.js";
 import {
+  requireVerified,
   validateRouteDigests,
   verifyAttestation,
   type AttestationBundle,
@@ -138,7 +139,8 @@ export interface C8sClientOptions {
    * operator key bound at launch, which is unique to a deployment and, unlike
    * `meshCaPem`, survives reinstalls and image rebuilds. Pin the bare
    * operator-key seed: a node that measures its allowlist policies is
-   * accepted when its reported list replays from it. Requires a TDX platform.
+   * accepted when its reported list replays from it and `pinPolicies` (or
+   * `allowPartial`) covers the history. Requires a TDX platform.
    */
   expectedRtmr3?: string;
   /**
@@ -151,11 +153,16 @@ export interface C8sClientOptions {
   rtmrs?: RtmrPins;
   /**
    * The allowlists the node may have enforced, as `sha256:<hex>` digests or
-   * the documents themselves. Requires an RTMR[3] pin. Without it, a node
-   * whose RTMR[3] replays a non-empty policy history connects with
-   * `attestation.verdict` set to `"partial"`. See `VerifyPolicy.pinPolicies`.
+   * the documents themselves. Requires an RTMR[3] pin. See
+   * `VerifyPolicy.pinPolicies`.
    */
   pinPolicies?: (string | Uint8Array)[];
+  /**
+   * Connect on a `"partial"` verdict, such as a node whose RTMR[3] replays a
+   * policy history no `pinPolicies` judged; read `attestation.notProven`.
+   * Without it, `connect` fails with `policy_history_unproven`.
+   */
+  allowPartial?: boolean;
   /** Expected init-data digest (SHA-256 hex). See `VerifyPolicy.initDataHash`. */
   initDataHash?: string;
   /** Expected pod sandbox ID on the mesh leaf; requires `meshCaPem`. See `VerifyPolicy.sandboxId`. */
@@ -275,6 +282,7 @@ export class C8sClient {
   /** Verification policy applied to every connection. */
   readonly policy: VerifyPolicy;
   private readonly routeKeys?: Promise<CryptoKey[]>;
+  private readonly allowPartial: boolean;
   private floor?: RouteFloor;
 
   constructor(opts: C8sClientOptions) {
@@ -318,6 +326,7 @@ export class C8sClient {
     this.baseUrl = baseUrl;
     originHost(this.baseUrl);
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
+    this.allowPartial = opts.allowPartial === true;
     const f = opts.fetch ?? globalThis.fetch?.bind(globalThis);
     if (!f) {
       throw new C8sVerifyError("invalid_request", "no fetch implementation available");
@@ -482,6 +491,7 @@ export class C8sClient {
     const keyPair = await generateXWingKeyPair();
     const bundle = await this.fetchAttestation(nonce, keyPair);
     let attestation = await verifyAttestation(bundle, nonce, this.policy, keyPair.ek);
+    if (!this.allowPartial) requireVerified(attestation);
     let routes: PublishedRoutes | undefined;
     if (routeKeys !== undefined && published !== undefined) {
       routes = await this.verifyRoutes(published, routeKeys, attestation.routeDigest);
