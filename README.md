@@ -89,11 +89,12 @@ whereas the operator key is chosen by the operator and can be published ahead of
 time (the expected register value is `SHA-384(0x00*48 ‖ SHA-384(pubkey))`).
 A node that also measures its allowlist policies extends RTMR[3] once per
 policy after that seed and reports the digests as the bundle's
-`measured_policies`. Keep pinning the bare seed: the verifier accepts the
-quoted register when a prefix of that list replays from the pin, exposes the
-prefix as `measuredPolicies` on the result, and warns that no policy pin
-judged it. A list that does not replay, is malformed, or holds more than 256
-entries fails with `rtmr3_denied`.
+`measured_policies`. Keep pinning the bare seed (or pass the operator key as
+`operatorPublicKeyPem` and let the verifier derive it): the verifier accepts
+the quoted register when a prefix of that list replays from the pin and
+exposes the prefix as `measuredPolicies`, the node's policy history. A list
+that does not replay, is malformed, or holds more than 256 entries fails with
+`rtmr3_denied`. See [Judging the node's policy history](#judging-the-nodes-policy-history).
 
 Pinning both is strictly stronger than either alone; `expectedRtmr3` is optional
 only for backwards compatibility, and SNP has no equivalent register, so it is
@@ -333,6 +334,55 @@ const r = await verifyEvidence(evidence /* { attestation_report, cert_chain:{ vc
 });
 console.log(r.measurement, r.reportDataMatch, r.claims);
 ```
+
+## Judging the node's policy history
+
+The replayed history says which allowlist documents the node enforced since
+boot, not that you accept them. Pass `pinPolicies` with the ones you do, as
+`sha256:<hex>` digests or as the documents themselves (the exact bytes
+`GET /allowlist` served, hashed as is):
+
+```js
+const client = new C8sClient({
+  baseUrl: "https://lb.example.com",
+  meshCaPem: pinnedMeshCaPem,
+  platform: "tdx",
+  tdxImage: parseImageManifest(imageManifestBytes),
+  operatorPublicKeyPem, // or expectedRtmr3: the bare seed
+  pinPolicies: [allowlistBytes, "sha256:<64 lowercase hex>"],
+});
+const { attestation } = await client.connect();
+if (attestation.verdict !== "verified") throw new Error(attestation.notProven?.join("; "));
+```
+
+Every result carries `verdict`: `"verified"`, or `"partial"` with the gaps in
+`notProven`. Gate on `"verified"`. What each case means:
+
+| Node and options | Result |
+|---|---|
+| Does not measure, no `pinPolicies` | `verified`, as before |
+| Replays a non-empty history, no `pinPolicies` | `partial`, with a warning |
+| History and the leaf's stamped policy all pinned, `meshCaPem` set, live check | `verified`: the node enforced only pinned documents since boot |
+| An entry, or the leaf's stamped policy, not pinned | fails, `policy_history_not_pinned` |
+| `pinPolicies` but nothing replays | fails, `policy_history_absent` |
+| Pinned, but an unstamped leaf, no `meshCaPem`, or no nonce binding the quote | `partial` |
+
+`verifyEvidence` takes the same option. Bare evidence carries no leaf, and
+only you know whether `expectedReportData` commits a fresh nonce: set
+`nonceBound: true` when it does, or a pinned history stays `partial`.
+
+Checking the documents' operator signatures (`c8s verify --trust-operator`)
+is not supported yet: pin the documents you reviewed.
+
+## Other pins from `c8s verify`
+
+| Option | `c8s verify` flag | Checks |
+|---|---|---|
+| `operatorPublicKeyPem` | `--operator-pkey` | RTMR[3] seed derived from the PEM; requires `tdxImage`, excludes `expectedRtmr3` |
+| `rtmrs: { 1, 2, 3 }` | `--rtmr` | Registers by hand; 1 and 2 exclude `tdxImage`, 3 requires it |
+| `pinPolicies` | `--pin-policy` | The node's policy history, above |
+| `initDataHash` | `--init-data` | SHA-256 of the init-data document: HOST_DATA, MRCONFIGID or vTPM PCR[8] |
+| `sandboxId` | `--sandbox-id` | The mesh leaf's pod sandbox ID; requires `meshCaPem` |
 
 ## Verifying the workload (matched-workload stamp)
 

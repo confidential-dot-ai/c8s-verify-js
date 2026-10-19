@@ -199,6 +199,27 @@ match `^sha256:[0-9a-f]{64}$` and the list MUST hold at most 256 entries, or
 verification fails with `rtmr3_denied`, the same code as a list that does not
 replay. A client without an RTMR[3] pin ignores the field.
 
+The replayed prefix is the node's policy history: the allowlist documents it
+enforced since boot, in order, up to the quote. The replay proves which
+documents the node enforced, not that they are acceptable, so a client judges
+the history as `c8s verify --pin-policy` does:
+
+- Without policy pins, a non-empty history leaves the verdict `partial`, never
+  `verified`.
+- With policy pins (`sha256:<hex>` digests, or allowlist documents hashed over
+  their exact bytes), every history entry MUST be pinned, and so MUST the
+  policy the mesh leaf's matched-workload stamp names; otherwise verification
+  fails with `policy_history_not_pinned`. An empty history fails with
+  `policy_history_absent`: a node that does not measure proves nothing about
+  the policies it enforced.
+- A pinned history stays `partial` when the leaf carries no stamp, when the
+  stamp is only vouched for by a CA the client did not pin, or when no nonce of
+  this check binds the quote (a saved bundle), since a policy pushed after the
+  quote is not shown.
+
+The RTMR[3] pin is the bare seed, given as the register value or derived from
+the operator public-key PEM as `SHA-384(0x00*48 || SHA-384(pem bytes))`.
+
 #### Report-data and mesh-identity binding
 
 Define `LP(field) = uint32_be(len(field)) || field`, and:
@@ -404,6 +425,14 @@ deployment-class verdict rejects an MRTD-only TDX measurement policy; with a
 pinned mesh CA the gap is a prominent warning instead. SEV-SNP needs no
 equivalent: its launch measurement covers the full image, and the platform
 has no runtime measurement registers by design.
+
+## Sandbox-ID extension (`1.3.6.1.4.1.66378.1.4`)
+
+The mesh leaf MAY carry a non-critical extension naming the CRI pod sandbox
+it was issued to: a DER IA5String matching `^[A-Za-z0-9._-]{1,128}$`. CDS
+places it in the signed area, so only a chain to a pinned mesh CA vouches for
+it; a client pinning the sandbox ID MUST pin the CA. A malformed extension
+fails, never reads as absent (`sandbox_denied`).
 
 ## Matched-workload extension (`1.3.6.1.4.1.66378.1.5`)
 
@@ -735,6 +764,11 @@ workload/allowlist pin is set), `workload_invalid` (malformed or duplicated
 stamp), `workload_denied` (stamped name differs from the pin),
 `workload_unresolved` (stamped name absent from the held document) and
 `allowlist_denied` (stamped digest differs from the held canonical bytes).
+Pins that mirror `c8s verify` add `policy_history_absent` and
+`policy_history_not_pinned` (see the measured policies above),
+`init_data_denied` (the evidence commits another init-data digest: HOST_DATA
+on SNP, MRCONFIGID on TDX, vTPM PCR[8] on the Azure platforms) and
+`sandbox_denied` (the leaf names another sandbox, none, or a malformed one).
 `_denied` means a check ran and failed; `_not_attested` means the leaf never
 carried the stamp, which is a lifecycle state rather than an attack.
 
