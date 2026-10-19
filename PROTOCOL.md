@@ -764,8 +764,10 @@ workload/allowlist pin is set), `workload_invalid` (malformed or duplicated
 stamp), `workload_denied` (stamped name differs from the pin),
 `workload_unresolved` (stamped name absent from the held document) and
 `allowlist_denied` (stamped digest differs from the held canonical bytes).
-Pins that mirror `c8s verify` add `policy_history_absent` and
+Pins that mirror `c8s verify` add `policy_history_absent`,
 `policy_history_not_pinned` (see the measured policies above),
+`policy_history_unproven` (the client refused a `partial` verdict because
+`allowPartial` was not set),
 `init_data_denied` (the evidence commits another init-data digest: HOST_DATA
 on SNP, MRCONFIGID on TDX, vTPM PCR[8] on the Azure platforms) and
 `sandbox_denied` (the leaf names another sandbox, none, or a malformed one).

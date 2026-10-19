@@ -356,6 +356,8 @@ const client = new C8sClient({
 const session = await client.connect();
 ```
 
+`pinPolicies` requires `tdxImage` and an RTMR[3] pin.
+
 Every result carries `verdict`, the policy-history judgement: `"verified"`,
 or `"partial"` with the gaps in `notProven`. It covers nothing else, so
 `warnings` still apply. `connect` fails on `"partial"` with
@@ -383,7 +385,7 @@ is not supported yet: pin the documents you reviewed.
 | Option | `c8s verify` flag | Checks |
 |---|---|---|
 | `operatorPublicKeyPem` | `--operator-pkey` | RTMR[3] seed derived from the PEM; requires `tdxImage`, excludes `expectedRtmr3` |
-| `rtmrs: { 1, 2, 3 }` | `--rtmr` | Registers by hand; 1 and 2 exclude `tdxImage`, 3 requires it |
+| `rtmrs: { 1, 2, 3 }` | `--rtmr` | Registers by hand; 1 and 2 exclude `tdxImage`, 3 requires it (1 and 2 do not stand in for it, as in `c8s verify`) |
 | `pinPolicies` | `--pin-policy` | The node's policy history, above; requires `tdxImage` and one of `expectedRtmr3`, `operatorPublicKeyPem` or `rtmrs[3]` |
 | `initDataHash` | `--init-data` | SHA-256 of the init-data document: HOST_DATA, MRCONFIGID or vTPM PCR[8] |
 | `sandboxId` | `--sandbox-id` | The mesh leaf's pod sandbox ID; requires `meshCaPem` |

@@ -562,6 +562,22 @@ test("verifyEvidence refuses pinPolicies and nonceBound it cannot enforce", asyn
   }
 });
 
+test("an image pinned by hand does not admit an RTMR[3] pin, as in c8s verify", async () => {
+  const { evidence } = await tdxBundle();
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "tdx",
+      measurements: [TDX_MRTD],
+      rtmrs: { 1: TDX_RTMR1, 2: TDX_RTMR2, 3: TDX_RTMR3 },
+      pinPolicies: [D1],
+    }),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "invalid_request" &&
+      e.message.includes("rtmrs[1] and rtmrs[2] do not count"),
+  );
+});
+
 test("a wrong RTMR[3] pin goes through WASM without a list and through the replay with one", async () => {
   const { evidence } = await tdxBundle();
   const base = { platform: "tdx", measurements: [TDX_MRTD], expectedRtmr3: "ff".repeat(48) };

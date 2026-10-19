@@ -13,6 +13,7 @@
 import { generateNonce } from "./nonce.js";
 import {
   requireVerified,
+  validatePins,
   validateRouteDigests,
   verifyAttestation,
   type AttestationBundle,
@@ -48,7 +49,7 @@ export { C8sVerifyError } from "./errors.js";
 export type { C8sErrorCode } from "./errors.js";
 export { BINDING_ATTEST_PQ, TRANSCRIPT_DOMAIN_TAG } from "./identity.js";
 export type { MeshIdentityProof } from "./identity.js";
-export { verifyAttestation, verifyEvidence } from "./verify.js";
+export { requireVerified, verifyAttestation, verifyEvidence } from "./verify.js";
 export type {
   VerifyPolicy,
   AttestationBundle,
@@ -355,6 +356,16 @@ export class C8sClient {
       tdxTcbStatuses: opts.tdxTcbStatuses,
       routeDigests: opts.routeDigests,
     };
+    validatePins(this.policy);
+  }
+
+  /** Verify a bundle against {@link policy}; tests override it to stand in for a quote. */
+  protected verify(
+    bundle: AttestationBundle,
+    nonce: Uint8Array,
+    ek: Uint8Array,
+  ): Promise<AttestationResult> {
+    return verifyAttestation(bundle, nonce, this.policy, ek);
   }
 
   private _url(path: string): string {
@@ -490,7 +501,7 @@ export class C8sClient {
     const nonce = generateNonce();
     const keyPair = await generateXWingKeyPair();
     const bundle = await this.fetchAttestation(nonce, keyPair);
-    let attestation = await verifyAttestation(bundle, nonce, this.policy, keyPair.ek);
+    let attestation = await this.verify(bundle, nonce, keyPair.ek);
     if (!this.allowPartial) requireVerified(attestation);
     let routes: PublishedRoutes | undefined;
     if (routeKeys !== undefined && published !== undefined) {

@@ -137,7 +137,8 @@ export function resolveRegisterPins(o: RegisterPinInputs): RegisterPins {
   if (rtmr3Inputs[0] !== undefined && rtmr3Inputs[0] !== "expectedRtmr3" && !o.imagePinned) {
     fail(
       "invalid_request",
-      `${rtmr3Inputs[0]} requires tdxImage: RTMR[3] records events extended into a guest whose ` +
+      `${rtmr3Inputs[0]} requires tdxImage, as c8s verify requires --image-manifest (by-hand ` +
+        "rtmrs[1] and rtmrs[2] do not count): RTMR[3] records events extended into a guest whose " +
         "image the untrusted host selects, so pinning it without the image proves nothing " +
         "about what is running",
     );

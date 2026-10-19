@@ -166,7 +166,8 @@ export interface VerifyPolicy {
    * TDX runtime registers pinned by index (96 hex chars each), as
    * `c8s verify --rtmr` takes them. `1` and `2` pin the guest kernel and
    * rootfs by hand and exclude `tdxImage`; `3` is `expectedRtmr3` under the
-   * `c8s verify` rule that it requires `tdxImage`.
+   * `c8s verify` rule that it requires `tdxImage` (by-hand `1` and `2` do not
+   * count, so `{ 1, 2, 3 }` is rejected).
    */
   rtmrs?: RtmrPins;
   /**
@@ -904,7 +905,7 @@ function enforceRouteDigests(digest: string, pins: string[] | undefined): void {
 }
 
 /** A validated policy's derived pins. */
-interface ResolvedPins {
+export interface ResolvedPins {
   registers: RegisterPins;
   pinDigests?: string[];
   initDataHash?: Uint8Array;
@@ -996,20 +997,7 @@ function validatePolicy(policy: VerifyPolicy): ResolvedPins {
       );
     }
   }
-  const registers = registerPins(policy.platform ?? "snp", policy);
-  const pinDigests = policyPinDigests(
-    policy.pinPolicies,
-    registers.rtmr3 !== undefined && policy.tdxImage !== undefined,
-  );
-  const initDataHash = parseInitDataHash(policy.initDataHash);
-  validateSandboxId(policy.sandboxId);
-  if (policy.sandboxId !== undefined && policy.meshCaPem === undefined) {
-    fail(
-      "invalid_request",
-      "sandboxId requires meshCaPem: CDS's signature on the leaf is what vouches for the ID, " +
-        "and only a pinned CA authenticates that signature",
-    );
-  }
+  const pins = validatePins(policy);
   if (policy.tdxImage !== undefined) {
     // Same platform rule as expectedRtmr3: a pin the verifier would silently
     // drop is worse than no pin.
@@ -1036,6 +1024,25 @@ function validatePolicy(policy: VerifyPolicy): ResolvedPins {
     policy.requireCollateral,
     policy.tdxCollateral,
   );
+  return pins;
+}
+
+/** Validate and resolve the pins that mirror `c8s verify`; shared with the client constructor. */
+export function validatePins(policy: VerifyPolicy): ResolvedPins {
+  const registers = registerPins(policy.platform ?? "snp", policy);
+  const pinDigests = policyPinDigests(
+    policy.pinPolicies,
+    registers.rtmr3 !== undefined && policy.tdxImage !== undefined,
+  );
+  const initDataHash = parseInitDataHash(policy.initDataHash);
+  validateSandboxId(policy.sandboxId);
+  if (policy.sandboxId !== undefined && policy.meshCaPem === undefined) {
+    fail(
+      "invalid_request",
+      "sandboxId requires meshCaPem: CDS's signature on the leaf is what vouches for the ID, " +
+        "and only a pinned CA authenticates that signature",
+    );
+  }
   return { registers, pinDigests, initDataHash };
 }
 
@@ -1322,9 +1329,13 @@ async function verifyHardwareAttestation(
   return { result, measuredPolicies };
 }
 
+// The second form is the Azure verifiers refusing a quote without PCR[8]:
+// the pin was never compared, which is a denial, not a broken verifier.
+const INIT_DATA_DENIED = /init_data \/ host_data mismatch|init_data check requires PCR\[/i;
+
 /** Map the verifier's init-data mismatch throw to `init_data_denied`; no-op otherwise. */
 function failInitDataMismatch(e: unknown, pin: Uint8Array | undefined): void {
-  if (pin === undefined || !/init_data \/ host_data mismatch/i.test(errMessage(e))) return;
+  if (pin === undefined || !INIT_DATA_DENIED.test(errMessage(e))) return;
   fail("init_data_denied", "the evidence commits an init-data digest other than initDataHash", {
     details: { expected: bytesToHex(pin) },
     cause: e,

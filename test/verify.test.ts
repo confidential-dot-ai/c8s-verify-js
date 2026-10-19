@@ -1333,6 +1333,8 @@ test("verifyAttestation accepts allowlist documents as policy pins", async () =>
 interface Quoted {
   history?: string[];
   initDataMatch?: boolean | null;
+  /** A message the verifier throws instead of verifying. */
+  throws?: string;
 }
 
 function quoting(q: Quoted): Verifiers {
@@ -1344,6 +1346,7 @@ function quoting(q: Quoted): Verifiers {
     verifyAzSnp,
     verifyAzTdx,
     async verifyTdx(evidence, reportData, initData, wantRtmr3, collateral) {
+      if (q.throws !== undefined) throw new Error(q.throws);
       const out = JSON.parse(
         await verifyTdx(evidence, undefined, undefined, undefined, collateral),
       );
@@ -1545,4 +1548,18 @@ test("an init-data mismatch the verifier reports without throwing fails", async 
       String(initDataMatch),
     );
   }
+});
+
+test("an init-data pin the vTPM verifier could not compare fails as init_data_denied", async () => {
+  await assert.rejects(
+    verifyEvidenceWith(
+      quoting({
+        throws:
+          "init_data check requires PCR[8], but it is not in the quote's signed PCR selection",
+      }),
+      await tdxEvidence(),
+      { platform: "tdx", tdxImage: TDX_IMAGE, initDataHash: "00".repeat(32) },
+    ),
+    isCode("init_data_denied"),
+  );
 });
