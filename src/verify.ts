@@ -60,6 +60,20 @@ export interface Verifiers {
 
 const WASM: Verifiers = { verifySnp, verifyAzSnp, verifyAzTdx, verifyTdx };
 
+// Kept out of the public API so a C8sClient cannot be made to skip the quote.
+const clientVerifiers = new WeakMap<object, Verifiers>();
+
+/** Make `client` verify with `verifiers` instead of the WASM build. Tests only. */
+export function injectVerifiers<T extends object>(client: T, verifiers: Verifiers): T {
+  clientVerifiers.set(client, verifiers);
+  return client;
+}
+
+/** The hardware verifiers `client` uses: injected ones, else the WASM build. */
+export function verifiersOf(client: object): Verifiers {
+  return clientVerifiers.get(client) ?? WASM;
+}
+
 /**
  * Minimum SEV-SNP TCB floor: security patch levels (SPLs) the reported TCB
  * must meet or exceed, component by component. Values come from AMD security

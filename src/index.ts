@@ -15,7 +15,8 @@ import {
   requireVerified,
   validatePins,
   validateRouteDigests,
-  verifyAttestation,
+  verifiersOf,
+  verifyAttestationWith,
   type AttestationBundle,
   type AttestationResult,
   type SnpMinTcb,
@@ -359,15 +360,6 @@ export class C8sClient {
     validatePins(this.policy);
   }
 
-  /** Verify a bundle against {@link policy}; tests override it to stand in for a quote. */
-  protected verify(
-    bundle: AttestationBundle,
-    nonce: Uint8Array,
-    ek: Uint8Array,
-  ): Promise<AttestationResult> {
-    return verifyAttestation(bundle, nonce, this.policy, ek);
-  }
-
   private _url(path: string): string {
     return `${this.baseUrl}${path}`;
   }
@@ -501,7 +493,13 @@ export class C8sClient {
     const nonce = generateNonce();
     const keyPair = await generateXWingKeyPair();
     const bundle = await this.fetchAttestation(nonce, keyPair);
-    let attestation = await this.verify(bundle, nonce, keyPair.ek);
+    let attestation = await verifyAttestationWith(
+      verifiersOf(this),
+      bundle,
+      nonce,
+      this.policy,
+      keyPair.ek,
+    );
     if (!this.allowPartial) requireVerified(attestation);
     let routes: PublishedRoutes | undefined;
     if (routeKeys !== undefined && published !== undefined) {

@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { verifyAzTdx } from "../src/wasm-loader.js";
-import { verifyEvidence } from "../src/verify.js";
+import { verifyAttestation, verifyEvidence } from "../src/verify.js";
+import { generateNonce } from "../src/nonce.js";
+import { buildBundle } from "./helpers.js";
 import { C8sVerifyError } from "../src/errors.js";
 import type { Evidence, AzTdxEvidence } from "../src/hcl.js";
 
@@ -208,4 +210,48 @@ test("verifyEvidence(platform:az-tdx) enforces an RTMR[3] pin with a measured li
       e.code === "rtmr3_denied" &&
       e.message.includes("does not replay"),
   );
+});
+
+// The fixture's vTPM quote signs PCR[8] as all zeros. The verifier requires
+// PCR[8] = SHA256(0^32 || initDataHash), which no digest satisfies, so the
+// fixture can only exercise the denial: a digest, and the raw PCR value itself.
+const INIT_DATA_PINS = ["11".repeat(32), "00".repeat(32)];
+const isInitDataDenied = (e: unknown) =>
+  e instanceof C8sVerifyError && e.code === "init_data_denied";
+
+test("verifyEvidence(platform:az-tdx) denies an initDataHash PCR[8] does not extend to", async () => {
+  for (const initDataHash of INIT_DATA_PINS) {
+    await assert.rejects(
+      verifyEvidence(await tdxEvidence(), {
+        platform: "az-tdx",
+        measurements: [TDX_MRTD],
+        initDataHash,
+      }),
+      isInitDataDenied,
+      initDataHash,
+    );
+  }
+});
+
+test("verifyAttestation(platform:az-tdx) denies an initDataHash PCR[8] does not extend to", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, {
+    evidence: await tdxEvidence(),
+    platform: "az-tdx",
+  });
+  const zero = "00".repeat(48);
+  const policy = {
+    platform: "az-tdx",
+    tdxImage: { mrtd: TDX_MRTD, rtmr1: zero, rtmr2: zero },
+    requireFreshness: false,
+    meshCaPem,
+  };
+  assert.equal((await verifyAttestation(bundle, nonce, policy)).verdict, "verified");
+  for (const initDataHash of INIT_DATA_PINS) {
+    await assert.rejects(
+      verifyAttestation(bundle, nonce, { ...policy, initDataHash }),
+      isInitDataDenied,
+      initDataHash,
+    );
+  }
 });

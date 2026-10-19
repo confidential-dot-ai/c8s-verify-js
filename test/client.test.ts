@@ -7,18 +7,13 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { C8sClient, Session, requireVerified } from "../src/index.js";
+import { C8sClient, Session, requireVerified, type C8sClientOptions } from "../src/index.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { generateNonce } from "../src/nonce.js";
 import { deriveChannel, generateXWingKeyPair } from "../src/keyagreement.js";
 import { cborDecode, cborEncode } from "../src/cbor.js";
 import type { WireRecord } from "../src/channel.js";
-import {
-  verifyAttestationWith,
-  type AttestationBundle,
-  type AttestationResult,
-  type Verifiers,
-} from "../src/verify.js";
+import { injectVerifiers, type AttestationResult, type Verifiers } from "../src/verify.js";
 import { verifyAzSnp, verifyAzTdx, verifySnp, verifyTdx } from "../src/wasm-loader.js";
 import { extendRegister } from "../src/rtmr3.js";
 import { base64UrlToBytes, bytesToHex, hexToBytes } from "../src/base64.js";
@@ -345,10 +340,8 @@ const measuring: Verifiers = {
   },
 };
 
-class MeasuringClient extends C8sClient {
-  protected override verify(bundle: AttestationBundle, nonce: Uint8Array, ek: Uint8Array) {
-    return verifyAttestationWith(measuring, bundle, nonce, this.policy, ek);
-  }
+function measuringClient(opts: C8sClientOptions): C8sClient {
+  return injectVerifiers(new C8sClient(opts), measuring);
 }
 
 /** A node that measures one policy, answering attest-pq for the request's nonce and key. */
@@ -374,10 +367,10 @@ test("connect refuses a partial verdict unless allowPartial is set", async () =>
     fetch: measuringNode,
   };
   await assert.rejects(
-    new MeasuringClient(options).connect(),
+    measuringClient(options).connect(),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "policy_history_unproven",
   );
-  const session = await new MeasuringClient({ ...options, allowPartial: true }).connect();
+  const session = await measuringClient({ ...options, allowPartial: true }).connect();
   assert.equal(session.attestation.verdict, "partial");
   assert.deepEqual(session.attestation.measuredPolicies, [MEASURED]);
   assert.throws(
