@@ -30,6 +30,10 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          # Pin it: the action's "latest" lookup can fall back to wasm-pack
+          # 0.9.1, whose wasm-opt cannot parse what current rustc emits.
+          version: v0.15.0
       - name: Build src/wasm/
         run: npm run build:wasm
       - uses: actions/upload-artifact@v4
