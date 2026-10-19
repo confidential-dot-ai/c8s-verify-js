@@ -90,6 +90,11 @@ export type C8sErrorCode =
   // policy the leaf was issued under, is not pinned (details.digest).
   | "policy_history_absent"
   | "policy_history_not_pinned"
+  // The evidence commits an init-data digest other than initDataHash.
+  | "init_data_denied"
+  // sandboxId is set but the chain-verified mesh leaf names another pod
+  // sandbox, names none, or carries a malformed sandbox-ID extension.
+  | "sandbox_denied"
   | "unsupported";
 
 export interface C8sErrorOptions {
