@@ -70,36 +70,6 @@ export function replayMeasuredPolicies(
 }
 
 /**
- * Check a `pinPolicies` option: a non-empty array of canonical
- * `sha256:<64 lowercase hex>` digests, set only with an RTMR[3] pin, since
- * the history it judges is only what replays from that pin.
- */
-export function validatePinPolicies(pins: unknown, rtmr3Pinned: boolean): void {
-  if (pins === undefined) return;
-  if (!rtmr3Pinned) {
-    fail(
-      "invalid_request",
-      "pinPolicies requires expectedRtmr3: the node's policy history counts only as far as " +
-        "it replays against RTMR[3] after the operator-key seed",
-    );
-  }
-  if (!Array.isArray(pins) || pins.length === 0) {
-    fail(
-      "invalid_request",
-      "pinPolicies must be a non-empty array when set: an empty pin set accepts nothing",
-    );
-  }
-  for (const pin of pins) {
-    if (typeof pin !== "string" || !CANONICAL_POLICY_DIGEST.test(pin)) {
-      fail(
-        "invalid_request",
-        `pinPolicies entry ${JSON.stringify(pin)} is not sha256:<64 lowercase hex>`,
-      );
-    }
-  }
-}
-
-/**
  * The policy the evidence's leaf was issued under: `"none"` when the evidence
  * carries no leaf, `"unstamped"` for a leaf without a matched-workload stamp,
  * else the stamped allowlist digest and whether a pinned mesh CA vouches for

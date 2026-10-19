@@ -38,9 +38,17 @@ import {
   judgePolicyHistory,
   replayMeasuredPolicies,
   validateMeasuredPolicies,
-  validatePinPolicies,
   type LeafPolicy,
 } from "./rtmr3.js";
+import {
+  parseInitDataHash,
+  policyPinDigests,
+  resolveRegisterPins,
+  sandboxIdFromLeaf,
+  validateSandboxId,
+  type RegisterPins,
+  type RtmrPins,
+} from "./pins.js";
 
 /**
  * Minimum SEV-SNP TCB floor: security patch levels (SPLs) the reported TCB
@@ -138,16 +146,45 @@ export interface VerifyPolicy {
    */
   expectedRtmr3?: string;
   /**
-   * Allowlist policy digests (`sha256:<64 lowercase hex>`) the node may have
-   * enforced, as `c8s verify --pin-policy` takes them. Requires
-   * `expectedRtmr3`. Every policy in the replayed history, and the policy the
-   * mesh leaf was issued under, must be one of these, or the verdict fails
+   * The operator public key PEM, verbatim: the bytes the guest initrd hashed.
+   * Pins RTMR[3] to the bare operator-key seed,
+   * SHA-384(0x00*48 ‖ SHA-384(pem)), as `c8s verify --operator-pkey` does.
+   * Excludes `expectedRtmr3` and `rtmrs[3]`; requires `tdxImage`.
+   */
+  operatorPublicKeyPem?: string;
+  /**
+   * TDX runtime registers pinned by index (96 hex chars each), as
+   * `c8s verify --rtmr` takes them. `1` and `2` pin the guest kernel and
+   * rootfs by hand and exclude `tdxImage`; `3` is `expectedRtmr3` under the
+   * `c8s verify` rule that it requires `tdxImage`.
+   */
+  rtmrs?: RtmrPins;
+  /**
+   * The allowlists the node may have enforced, as `c8s verify --pin-policy`
+   * takes them: `sha256:<64 lowercase hex>` digests, or the documents
+   * themselves (the exact canonical bytes `GET /allowlist` serves; a string
+   * is a JSON document hashed as UTF-8 verbatim). Requires an RTMR[3] pin. Every policy in
+   * the replayed history, and the policy the mesh leaf was issued under,
+   * must be one of these, or the verdict fails
    * (`policy_history_not_pinned`); an empty history fails too
    * (`policy_history_absent`). An unstamped leaf, a stamp without
    * `meshCaPem`, or evidence not bound to this check's nonce leave the
    * verdict partial.
    */
-  pinPolicies?: string[];
+  pinPolicies?: (string | Uint8Array)[];
+  /**
+   * Expected init-data digest: SHA-256 hex of the init-data document the
+   * guest carries, as `c8s verify --init-data` takes it. Compared against
+   * HOST_DATA on SNP, MRCONFIGID on TDX and vTPM PCR[8] on the Azure
+   * platforms (`init_data_denied` on a mismatch).
+   */
+  initDataHash?: string;
+  /**
+   * Expected CRI pod sandbox ID on the mesh leaf, as `c8s verify
+   * --sandbox-id` takes it (`sandbox_denied` otherwise). Requires
+   * `meshCaPem`: CDS's signature on the leaf is what vouches for the ID.
+   */
+  sandboxId?: string;
   /**
    * The complete TDX guest-image pin: MRTD + RTMR[1] + RTMR[2] as one tuple,
    * each exactly 96 lowercase hex chars, published with the image build (feed
@@ -391,6 +428,8 @@ export interface AttestationResult {
   verdict: Verdict;
   /** What a partial verdict leaves unproven; present only when `verdict` is `"partial"`. */
   notProven?: string[];
+  /** The mesh leaf's pod sandbox ID; present only when `sandboxId` was pinned and matched. */
+  sandboxId?: string;
   warnings: string[];
 }
 
@@ -840,7 +879,41 @@ function enforceRouteDigests(digest: string, pins: string[] | undefined): void {
   );
 }
 
-function validatePolicy(policy: VerifyPolicy): void {
+/** A validated policy's derived pins. */
+interface ResolvedPins {
+  registers: RegisterPins;
+  pinDigests?: string[];
+  initDataHash?: Uint8Array;
+}
+
+/**
+ * Resolve the register pins and refuse them off TDX: a pin the verifier would
+ * silently drop is worse than no pin, because the caller believes it holds.
+ */
+function registerPins(
+  platform: string,
+  o: {
+    expectedRtmr3?: string;
+    operatorPublicKeyPem?: string;
+    rtmrs?: RtmrPins;
+    tdxImage?: TdxImage;
+  },
+): RegisterPins {
+  const set = [
+    o.expectedRtmr3 !== undefined && "expectedRtmr3",
+    o.operatorPublicKeyPem !== undefined && "operatorPublicKeyPem",
+    o.rtmrs !== undefined && "rtmrs",
+  ].find((name) => name !== false);
+  if (set !== undefined && !isTdxPlatform(platform)) {
+    fail(
+      "invalid_request",
+      `${set} requires a TDX platform (${TDX_PLATFORM_LIST}; got ${JSON.stringify(platform)}): the runtime measurement registers are TDX-only, so the pin could not be enforced`,
+    );
+  }
+  return resolveRegisterPins({ ...o, imagePinned: o.tdxImage !== undefined });
+}
+
+function validatePolicy(policy: VerifyPolicy): ResolvedPins {
   if (!policy) {
     fail("invalid_request", "verification policy is required");
   }
@@ -899,25 +972,17 @@ function validatePolicy(policy: VerifyPolicy): void {
       );
     }
   }
-  if (policy.expectedRtmr3 !== undefined) {
-    // Reject here rather than at verification time: a pin the verifier would
-    // silently drop is worse than no pin, because the caller believes it is
-    // enforcing deployment identity.
-    const platform = policy.platform ?? "snp";
-    if (!isTdxPlatform(platform)) {
-      fail(
-        "invalid_request",
-        `expectedRtmr3 requires a TDX platform (${TDX_PLATFORM_LIST}; got ${JSON.stringify(platform)}): the runtime measurement register is TDX-only, so the pin could not be enforced`,
-      );
-    }
-    if (
-      typeof policy.expectedRtmr3 !== "string" ||
-      !/^[0-9a-fA-F]{96}$/.test(policy.expectedRtmr3)
-    ) {
-      fail("invalid_request", "expectedRtmr3 must be 96 hex characters (48 bytes, SHA-384)");
-    }
+  const registers = registerPins(policy.platform ?? "snp", policy);
+  const pinDigests = policyPinDigests(policy.pinPolicies, registers.rtmr3 !== undefined);
+  const initDataHash = parseInitDataHash(policy.initDataHash);
+  validateSandboxId(policy.sandboxId);
+  if (policy.sandboxId !== undefined && policy.meshCaPem === undefined) {
+    fail(
+      "invalid_request",
+      "sandboxId requires meshCaPem: CDS's signature on the leaf is what vouches for the ID, " +
+        "and only a pinned CA authenticates that signature",
+    );
   }
-  validatePinPolicies(policy.pinPolicies, policy.expectedRtmr3 !== undefined);
   if (policy.tdxImage !== undefined) {
     // Same platform rule as expectedRtmr3: a pin the verifier would silently
     // drop is worse than no pin.
@@ -944,6 +1009,7 @@ function validatePolicy(policy: VerifyPolicy): void {
     policy.requireCollateral,
     policy.tdxCollateral,
   );
+  return { registers, pinDigests, initDataHash };
 }
 
 /** Decode a 96-hex-char RTMR[3] pin. Callers validate the shape first. */
@@ -1119,6 +1185,7 @@ async function verifyHardwareAttestation(
   snpCrl?: Uint8Array,
   tdxCollateral?: string,
   measured: string[] = [],
+  initDataHash?: Uint8Array,
 ): Promise<{ result: WasmVerifyResult; measuredPolicies: string[] }> {
   // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
   // + vTPM quote + hardware quote), with the transcript checked against the TPM
@@ -1160,16 +1227,17 @@ async function verifyHardwareAttestation(
       out = await verifyAzSnp(
         JSON.stringify(bundle.evidence),
         hardAnchor,
-        undefined,
+        initDataHash,
         tcbFloor,
         snpCrl,
       );
-    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor);
+    else if (isAzTdx)
+      out = await verifyAzTdx(JSON.stringify(bundle.evidence), hardAnchor, initDataHash);
     else if (isTdx)
       out = await verifyTdx(
         JSON.stringify(bundle.evidence),
         hardAnchor,
-        undefined,
+        initDataHash,
         wasmRtmr3,
         tdxCollateral,
       );
@@ -1197,6 +1265,7 @@ async function verifyHardwareAttestation(
         { details: { expected: bytesToHex(wasmRtmr3) }, cause: e },
       );
     }
+    failInitDataMismatch(e, initDataHash);
     if (minTcb !== undefined && isTcbBelowFloor(e)) {
       fail(
         "tcb_denied",
@@ -1219,9 +1288,64 @@ async function verifyHardwareAttestation(
   if (result.platform !== wantPlatform) {
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
+  if (wantPlatform === "snp") enforceSnpInitData(result, initDataHash);
   const measuredPolicies =
     expectedRtmr3 === undefined ? [] : enforceRtmr3Pin(result, isTdx, expectedRtmr3, measured);
   return { result, measuredPolicies };
+}
+
+/** Map the verifier's init-data mismatch throw to `init_data_denied`; no-op otherwise. */
+function failInitDataMismatch(e: unknown, pin: Uint8Array | undefined): void {
+  if (pin === undefined || !/init_data \/ host_data mismatch/i.test(errMessage(e))) return;
+  fail("init_data_denied", "the evidence commits an init-data digest other than initDataHash", {
+    details: { expected: bytesToHex(pin) },
+    cause: e,
+  });
+}
+
+/**
+ * Bare SNP's verifier takes no init-data argument, so compare HOST_DATA in
+ * the verified claims. An absent claim fails: it was never compared.
+ */
+function enforceSnpInitData(result: WasmVerifyResult, pin: Uint8Array | undefined): void {
+  if (pin === undefined) return;
+  const got = result.claims.init_data;
+  if (typeof got !== "string" || got.toLowerCase() !== bytesToHex(pin)) {
+    fail("init_data_denied", "the evidence's HOST_DATA is not initDataHash", {
+      details: { expected: bytesToHex(pin), got },
+    });
+  }
+}
+
+/** RTMR[1]/RTMR[2] pins set by hand, as `rtmrsPinned` entries. */
+function enforceManualRegisterPins(result: WasmVerifyResult, pins: RegisterPins): string[] {
+  const out: string[] = [];
+  if (pins.rtmr1 !== undefined) {
+    out.push(enforceRegisterPin(result, 1, "guest kernel", pins.rtmr1, "rtmr_denied"));
+  }
+  if (pins.rtmr2 !== undefined) {
+    out.push(enforceRegisterPin(result, 2, "guest rootfs", pins.rtmr2, "rtmr_denied"));
+  }
+  return out;
+}
+
+/**
+ * Enforce `sandboxId` against the chain-verified mesh leaf. The ID is
+ * CA-vouched, so it runs only after the chain check.
+ */
+function enforceSandboxId(leaf: Certificate, want: string | undefined): string | undefined {
+  if (want === undefined) return undefined;
+  const got = sandboxIdFromLeaf(leaf);
+  if (got !== want) {
+    fail(
+      "sandbox_denied",
+      got === undefined
+        ? "the mesh leaf carries no sandbox ID, but sandboxId is pinned"
+        : `the mesh leaf names sandbox ${JSON.stringify(got)}, not the pinned ${JSON.stringify(want)}`,
+      { details: { expected: want, got } },
+    );
+  }
+  return got;
 }
 
 function verifyMeasurement(result: WasmVerifyResult, allowlist: string[]): string {
@@ -1332,7 +1456,8 @@ export async function verifyAttestation(
   policy: VerifyPolicy,
   expectedXwingEk?: Uint8Array,
 ): Promise<AttestationResult> {
-  validatePolicy(policy);
+  const pins = validatePolicy(policy);
+  const rtmr3 = pins.registers.rtmr3;
   const warnings: string[] = [];
   const wantPlatform = policy.platform ?? "snp";
   const acceptedTcb = validateTdxTcbPolicy(
@@ -1344,21 +1469,21 @@ export async function verifyAttestation(
   const keyExchange = decodeKeyExchange(bundle, nonce, expectedXwingEk);
   const identity = await prepareIdentity(bundle, keyExchange, nonce, policy, warnings);
   // The list never widens anything: without the pin it is not even read.
-  const measured =
-    policy.expectedRtmr3 === undefined ? [] : validateMeasuredPolicies(bundle.measured_policies);
+  const measured = rtmr3 === undefined ? [] : validateMeasuredPolicies(bundle.measured_policies);
   const { result, measuredPolicies } = await verifyHardwareAttestation(
     bundle,
     identity.transcript,
     wantPlatform,
     requireFreshness,
     policy.generation,
-    policy.expectedRtmr3 === undefined ? undefined : decodeRtmr3(policy.expectedRtmr3),
+    rtmr3 === undefined ? undefined : decodeRtmr3(rtmr3),
     policy.minTcb,
     policy.snpCrl,
     policy.tdxCollateral === undefined
       ? undefined
       : tdxCollateralJson(policy.tdxCollateral, policy.at),
     measured,
+    pins.initDataHash,
   );
   const collateralVerified = enforceCollateralPolicy(
     result,
@@ -1381,10 +1506,11 @@ export async function verifyAttestation(
   if (policy.tdxImage !== undefined) {
     rtmrsPinned.push(...enforceTdxImagePins(result, policy.tdxImage));
   }
-  if (policy.expectedRtmr3 !== undefined) {
+  rtmrsPinned.push(...enforceManualRegisterPins(result, pins.registers));
+  if (rtmr3 !== undefined) {
     // Enforced above by verifyHardwareAttestation; recorded here so the
     // result reports every register the verdict pinned.
-    rtmrsPinned.push(`3:${policy.expectedRtmr3.toLowerCase()}`);
+    rtmrsPinned.push(`3:${rtmr3}`);
   }
   verifyFreshness(result, identity.transcript, requireFreshness, warnings);
   await verifyMeshIdentityProof(
@@ -1398,16 +1524,17 @@ export async function verifyAttestation(
   // only once steps 1–5 (versions, evidence, measurement, transcript, proof,
   // chain) have all passed.
   const workload = await verifyWorkloadPolicy(identity.chain.leaf, policy);
+  const sandboxId = enforceSandboxId(identity.chain.leaf, policy.sandboxId);
   // Only a live check binds the quote to this nonce: a saved bundle may
   // predate a policy the operator pushed since.
   const fresh = requireFreshness && expectedXwingEk !== undefined;
   const notProven =
-    policy.expectedRtmr3 === undefined
+    rtmr3 === undefined
       ? []
       : judgePolicyHistory(
           measuredPolicies,
-          policy.pinPolicies,
-          policy.pinPolicies === undefined || measuredPolicies.length === 0
+          pins.pinDigests,
+          pins.pinDigests === undefined || measuredPolicies.length === 0
             ? { kind: "none" }
             : leafPolicy(identity.chain.leaf, policy.meshCaPem !== undefined),
           fresh,
@@ -1421,7 +1548,7 @@ export async function verifyAttestation(
   // there the incomplete policy is rejected outright; with a pinned mesh CA
   // cluster identity does not depend on the measurement pins, so the gap is a
   // prominent warning instead.
-  if (isTdxPlatform(wantPlatform) && policy.tdxImage === undefined) {
+  if (isTdxPlatform(wantPlatform) && !imageComplete(policy.tdxImage, pins.registers)) {
     if (policy.meshCaPem === undefined) {
       fail(
         "measurement_incomplete",
@@ -1461,8 +1588,17 @@ export async function verifyAttestation(
     ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
     ...(measuredPolicies.length > 0 ? { measuredPolicies } : {}),
     ...verdictOf(notProven),
+    ...(sandboxId !== undefined ? { sandboxId } : {}),
     warnings,
   };
+}
+
+/**
+ * Whether the TDX policy pins the whole guest image: the tuple, or both
+ * image registers by hand next to the MRTD in `measurements`.
+ */
+function imageComplete(tdxImage: TdxImage | undefined, registers: RegisterPins): boolean {
+  return tdxImage !== undefined || (registers.rtmr1 !== undefined && registers.rtmr2 !== undefined);
 }
 
 /**
@@ -1534,13 +1670,19 @@ export interface VerifyEvidenceOptions {
    * `expectedRtmr3`.
    */
   measuredPolicies?: string[];
+  /** Operator public key PEM; see {@link VerifyPolicy.operatorPublicKeyPem}. */
+  operatorPublicKeyPem?: string;
+  /** Registers pinned by index; see {@link VerifyPolicy.rtmrs}. */
+  rtmrs?: RtmrPins;
   /**
-   * Allowlist policy digests the node may have enforced; see
-   * {@link VerifyPolicy.pinPolicies}. Requires `expectedRtmr3`. Bare evidence
+   * The allowlists the node may have enforced, as digests or documents; see
+   * {@link VerifyPolicy.pinPolicies}. Requires an RTMR[3] pin. Bare evidence
    * carries no leaf, so only the history is judged, and the verdict stays
    * partial unless `nonceBound` is set.
    */
-  pinPolicies?: string[];
+  pinPolicies?: (string | Uint8Array)[];
+  /** Expected init-data digest; see {@link VerifyPolicy.initDataHash}. */
+  initDataHash?: string;
   /**
    * Set when `expectedReportData` commits a nonce generated for this check,
    * so the quote is no older than the check. A pinned policy history from
@@ -1639,20 +1781,10 @@ export async function verifyEvidence(
   if (!isVtpm && !isTdx && !opts.generation) {
     fail("invalid_request", 'generation is required ("milan" | "genoa" | "turin")');
   }
-  let wantRtmr3: Uint8Array | undefined;
-  if (opts.expectedRtmr3 !== undefined) {
-    if (!isTdxPlatform(wantPlatform)) {
-      fail(
-        "invalid_request",
-        `expectedRtmr3 requires a TDX platform (${TDX_PLATFORM_LIST}; got ${JSON.stringify(wantPlatform)}): the runtime measurement register is TDX-only, so the pin could not be enforced`,
-      );
-    }
-    if (typeof opts.expectedRtmr3 !== "string" || !/^[0-9a-fA-F]{96}$/.test(opts.expectedRtmr3)) {
-      fail("invalid_request", "expectedRtmr3 must be 96 hex characters (48 bytes, SHA-384)");
-    }
-    wantRtmr3 = decodeRtmr3(opts.expectedRtmr3);
-  }
-  validatePinPolicies(opts.pinPolicies, wantRtmr3 !== undefined);
+  const registers = registerPins(wantPlatform, opts);
+  const wantRtmr3 = registers.rtmr3 === undefined ? undefined : decodeRtmr3(registers.rtmr3);
+  const pinDigests = policyPinDigests(opts.pinPolicies, wantRtmr3 !== undefined);
+  const initDataHash = parseInitDataHash(opts.initDataHash);
   if (opts.nonceBound !== undefined && typeof opts.nonceBound !== "boolean") {
     fail("invalid_request", "nonceBound must be a boolean when set");
   }
@@ -1689,13 +1821,19 @@ export async function verifyEvidence(
     let out: string;
     const tcbFloor = minTcbJson(opts.minTcb);
     if (isAzSnp)
-      out = await verifyAzSnp(JSON.stringify(evidence), expected, undefined, tcbFloor, opts.snpCrl);
-    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected);
+      out = await verifyAzSnp(
+        JSON.stringify(evidence),
+        expected,
+        initDataHash,
+        tcbFloor,
+        opts.snpCrl,
+      );
+    else if (isAzTdx) out = await verifyAzTdx(JSON.stringify(evidence), expected, initDataHash);
     else if (isTdx)
       out = await verifyTdx(
         JSON.stringify(evidence),
         expected,
-        undefined,
+        initDataHash,
         wasmRtmr3,
         opts.tdxCollateral === undefined
           ? undefined
@@ -1714,6 +1852,7 @@ export async function verifyEvidence(
         { details: { expected: bytesToHex(wasmRtmr3) }, cause: e },
       );
     }
+    failInitDataMismatch(e, initDataHash);
     if ((isVtpm || isTdx) && expected !== undefined && isFreshnessMismatch(e)) {
       fail(
         "report_data_mismatch",
@@ -1755,6 +1894,7 @@ export async function verifyEvidence(
       ? undefined
       : enforceTdxTcb(result.tcb_status, collateralVerified, acceptedTcb);
 
+  if (wantPlatform === "snp") enforceSnpInitData(result, initDataHash);
   const measuredPolicies =
     wantRtmr3 === undefined ? [] : enforceRtmr3Pin(result, isTdx, wantRtmr3, measured);
 
@@ -1771,10 +1911,11 @@ export async function verifyEvidence(
   if (opts.tdxImage !== undefined) {
     rtmrsPinned.push(...enforceTdxImagePins(result, opts.tdxImage));
   }
-  if (opts.expectedRtmr3 !== undefined) {
-    rtmrsPinned.push(`3:${opts.expectedRtmr3.toLowerCase()}`);
+  rtmrsPinned.push(...enforceManualRegisterPins(result, registers));
+  if (registers.rtmr3 !== undefined) {
+    rtmrsPinned.push(`3:${registers.rtmr3}`);
   }
-  if (isTdxPlatform(wantPlatform) && allow.length > 0 && opts.tdxImage === undefined) {
+  if (isTdxPlatform(wantPlatform) && allow.length > 0 && !imageComplete(opts.tdxImage, registers)) {
     warnings.push(
       "TDX measurement policy is not platform-complete: only MRTD (and optionally RTMR[3]) " +
         "is pinned, not RTMR[1]/RTMR[2], so the guest kernel and rootfs are not covered by " +
@@ -1802,7 +1943,7 @@ export async function verifyEvidence(
       ? []
       : judgePolicyHistory(
           measuredPolicies,
-          opts.pinPolicies,
+          pinDigests,
           { kind: "none" },
           opts.nonceBound === true,
           warnings,

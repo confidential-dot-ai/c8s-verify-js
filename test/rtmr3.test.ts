@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { C8sVerifyError, type C8sErrorCode } from "../src/errors.js";
-import { judgePolicyHistory, validatePinPolicies, type LeafPolicy } from "../src/rtmr3.js";
+import { judgePolicyHistory, type LeafPolicy } from "../src/rtmr3.js";
 
 const D1 = "sha256:" + "1".repeat(64);
 const D2 = "sha256:" + "2".repeat(64);
@@ -103,27 +103,6 @@ test("judgePolicyHistory", () => {
       warnings.some((w) => w.includes("none judged")),
       c.wantWarning === true,
       `${c.name}: warnings ${JSON.stringify(warnings)}`,
-    );
-  }
-});
-
-test("validatePinPolicies", () => {
-  validatePinPolicies(undefined, false);
-  validatePinPolicies([D1, D2], true);
-  const bad: { name: string; pins: unknown; rtmr3Pinned: boolean }[] = [
-    { name: "without an RTMR[3] pin", pins: [D1], rtmr3Pinned: false },
-    { name: "empty", pins: [], rtmr3Pinned: true },
-    { name: "not an array", pins: D1, rtmr3Pinned: true },
-    { name: "uppercase hex", pins: [D1.toUpperCase()], rtmr3Pinned: true },
-    { name: "bare hex", pins: ["1".repeat(64)], rtmr3Pinned: true },
-    { name: "short", pins: ["sha256:" + "1".repeat(63)], rtmr3Pinned: true },
-    { name: "not a string", pins: [42], rtmr3Pinned: true },
-  ];
-  for (const c of bad) {
-    assert.throws(
-      () => validatePinPolicies(c.pins, c.rtmr3Pinned),
-      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
-      c.name,
     );
   }
 });

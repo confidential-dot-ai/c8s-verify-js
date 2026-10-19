@@ -618,3 +618,35 @@ test("verifyEvidence ignores the measured list without an RTMR[3] pin", async ()
   assert.equal(res.ok, true);
   assert.equal(res.measuredPolicies, undefined);
 });
+
+test("verifyEvidence pins init-data and RTMR[1]/RTMR[2] by hand", async () => {
+  const { evidence } = await tdxBundle();
+  const base = { platform: "tdx", measurements: [TDX_MRTD] };
+  const res = await verifyEvidence(evidence, {
+    ...base,
+    initDataHash: "00".repeat(32),
+    rtmrs: {
+      1: "e0aaa1f273b80e1e4e5032b789f34fc3f78c88719717b266cb3152aa4bc6490f13fe3a9cea8e00b48a3719074e06c05a",
+      2: "15d4452b636e411b9c85a9fdb8b9c75b8ac7abb7eafe846aed987495a8b44b3b22a9681521961b382bdfe170efc4adeb",
+    },
+  });
+  assert.equal(res.verdict, "verified");
+  assert.equal(res.rtmrsPinned?.length, 2);
+  assert.ok(!res.warnings.some((w) => w.includes("not platform-complete")));
+  await assert.rejects(
+    verifyEvidence(evidence, { ...base, initDataHash: "11".repeat(32) }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "init_data_denied",
+  );
+  await assert.rejects(
+    verifyEvidence(evidence, { ...base, rtmrs: { 1: "ff".repeat(48) } }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr_denied",
+  );
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "snp",
+      generation: "genoa",
+      rtmrs: { 1: "ff".repeat(48) },
+    }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
+});

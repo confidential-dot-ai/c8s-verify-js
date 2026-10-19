@@ -11,7 +11,6 @@
 //   const res = await session.fetch("/v1/chat", { method: "POST", body: "..." });
 
 import { generateNonce } from "./nonce.js";
-import { validatePinPolicies } from "./rtmr3.js";
 import {
   validateRouteDigests,
   verifyAttestation,
@@ -31,6 +30,7 @@ import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
 import type { TdxImage } from "./manifest.js";
+import type { RtmrPins } from "./pins.js";
 import type { TdxCollateral, TdxTcbStatus } from "./tdx-tcb.js";
 import {
   MAX_ROUTE_PUBLICATION_BYTES,
@@ -59,6 +59,8 @@ export type {
   SnpMinTcb,
   Verdict,
 } from "./verify.js";
+export { operatorSeed } from "./pins.js";
+export type { RtmrPins } from "./pins.js";
 // The matched-workload stamp: parse the mesh leaf's .1.5 extension and the
 // allowlist document it pins. verifyAttestation applies these automatically
 // when the policy pins workloadName/allowlist; they are exported for callers
@@ -140,12 +142,24 @@ export interface C8sClientOptions {
    */
   expectedRtmr3?: string;
   /**
-   * Allowlist policy digests (`sha256:<hex>`) the node may have enforced.
-   * Requires `expectedRtmr3`. Without it, a node whose RTMR[3] replays a
-   * non-empty policy history connects with `attestation.verdict` set to
-   * `"partial"`. See `VerifyPolicy.pinPolicies`.
+   * The operator public key PEM, verbatim; pins RTMR[3] to its seed as
+   * `c8s verify --operator-pkey` does. Excludes `expectedRtmr3`; requires
+   * `tdxImage`. See `VerifyPolicy.operatorPublicKeyPem`.
    */
-  pinPolicies?: string[];
+  operatorPublicKeyPem?: string;
+  /** TDX registers pinned by index (1, 2, 3). See `VerifyPolicy.rtmrs`. */
+  rtmrs?: RtmrPins;
+  /**
+   * The allowlists the node may have enforced, as `sha256:<hex>` digests or
+   * the documents themselves. Requires an RTMR[3] pin. Without it, a node
+   * whose RTMR[3] replays a non-empty policy history connects with
+   * `attestation.verdict` set to `"partial"`. See `VerifyPolicy.pinPolicies`.
+   */
+  pinPolicies?: (string | Uint8Array)[];
+  /** Expected init-data digest (SHA-256 hex). See `VerifyPolicy.initDataHash`. */
+  initDataHash?: string;
+  /** Expected pod sandbox ID on the mesh leaf; requires `meshCaPem`. See `VerifyPolicy.sandboxId`. */
+  sandboxId?: string;
   /**
    * The complete TDX guest-image pin: the mrtd+rtmr1+rtmr2 tuple published
    * with the image build (feed the manifest file to `parseImageManifest`).
@@ -283,7 +297,6 @@ export class C8sClient {
       );
     }
     validateRouteDigests(opts.routeDigests);
-    validatePinPolicies(opts.pinPolicies, opts.expectedRtmr3 !== undefined);
     if (opts.routeDigests !== undefined && opts.routeOperatorKeys !== undefined) {
       throw new C8sVerifyError(
         "invalid_request",
@@ -320,7 +333,11 @@ export class C8sClient {
       workloadName: opts.workloadName,
       at: opts.at,
       expectedRtmr3: opts.expectedRtmr3,
+      operatorPublicKeyPem: opts.operatorPublicKeyPem,
+      rtmrs: opts.rtmrs,
       pinPolicies: opts.pinPolicies,
+      initDataHash: opts.initDataHash,
+      sandboxId: opts.sandboxId,
       tdxImage: opts.tdxImage,
       minTcb: opts.minTcb,
       snpCrl: opts.snpCrl,
