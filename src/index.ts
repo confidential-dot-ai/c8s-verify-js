@@ -12,8 +12,11 @@
 
 import { generateNonce } from "./nonce.js";
 import {
+  requireVerified,
+  validatePins,
   validateRouteDigests,
-  verifyAttestation,
+  verifiersOf,
+  verifyAttestationWith,
   type AttestationBundle,
   type AttestationResult,
   type SnpMinTcb,
@@ -30,6 +33,7 @@ import { cborEncode, cborDecode } from "./cbor.js";
 import { bytesToBase64Url, bytesToUtf8, utf8ToBytes } from "./base64.js";
 import { C8sVerifyError, fail } from "./errors.js";
 import type { TdxImage } from "./manifest.js";
+import type { RtmrPins } from "./pins.js";
 import type { TdxCollateral, TdxTcbStatus } from "./tdx-tcb.js";
 import {
   MAX_ROUTE_PUBLICATION_BYTES,
@@ -46,7 +50,7 @@ export { C8sVerifyError } from "./errors.js";
 export type { C8sErrorCode } from "./errors.js";
 export { BINDING_ATTEST_PQ, TRANSCRIPT_DOMAIN_TAG } from "./identity.js";
 export type { MeshIdentityProof } from "./identity.js";
-export { verifyAttestation, verifyEvidence } from "./verify.js";
+export { requireVerified, verifyAttestation, verifyEvidence } from "./verify.js";
 export type {
   VerifyPolicy,
   AttestationBundle,
@@ -56,7 +60,10 @@ export type {
   CertInfo,
   WorkloadInfo,
   SnpMinTcb,
+  Verdict,
 } from "./verify.js";
+export { operatorSeed } from "./pins.js";
+export type { RtmrPins } from "./pins.js";
 // The matched-workload stamp: parse the mesh leaf's .1.5 extension and the
 // allowlist document it pins. verifyAttestation applies these automatically
 // when the policy pins workloadName/allowlist; they are exported for callers
@@ -134,9 +141,34 @@ export interface C8sClientOptions {
    * operator key bound at launch, which is unique to a deployment and, unlike
    * `meshCaPem`, survives reinstalls and image rebuilds. Pin the bare
    * operator-key seed: a node that measures its allowlist policies is
-   * accepted when its reported list replays from it. Requires a TDX platform.
+   * accepted when its reported list replays from it and `pinPolicies` (or
+   * `allowPartial`) covers the history. Requires a TDX platform.
    */
   expectedRtmr3?: string;
+  /**
+   * The operator public key PEM, verbatim; pins RTMR[3] to its seed as
+   * `c8s verify --operator-pkey` does. Excludes `expectedRtmr3`; requires
+   * `tdxImage`. See `VerifyPolicy.operatorPublicKeyPem`.
+   */
+  operatorPublicKeyPem?: string;
+  /** TDX registers pinned by index (1, 2, 3). See `VerifyPolicy.rtmrs`. */
+  rtmrs?: RtmrPins;
+  /**
+   * The allowlists the node may have enforced, as `sha256:<hex>` digests or
+   * the documents themselves. Requires an RTMR[3] pin. See
+   * `VerifyPolicy.pinPolicies`.
+   */
+  pinPolicies?: (string | Uint8Array)[];
+  /**
+   * Connect on a `"partial"` verdict, such as a node whose RTMR[3] replays a
+   * policy history no `pinPolicies` judged; read `attestation.notProven`.
+   * Without it, `connect` fails with `policy_history_unproven`.
+   */
+  allowPartial?: boolean;
+  /** Expected init-data digest (SHA-256 hex). See `VerifyPolicy.initDataHash`. */
+  initDataHash?: string;
+  /** Expected pod sandbox ID on the mesh leaf; requires `meshCaPem`. See `VerifyPolicy.sandboxId`. */
+  sandboxId?: string;
   /**
    * The complete TDX guest-image pin: the mrtd+rtmr1+rtmr2 tuple published
    * with the image build (feed the manifest file to `parseImageManifest`).
@@ -252,6 +284,7 @@ export class C8sClient {
   /** Verification policy applied to every connection. */
   readonly policy: VerifyPolicy;
   private readonly routeKeys?: Promise<CryptoKey[]>;
+  private readonly allowPartial: boolean;
   private floor?: RouteFloor;
 
   constructor(opts: C8sClientOptions) {
@@ -295,6 +328,7 @@ export class C8sClient {
     this.baseUrl = baseUrl;
     originHost(this.baseUrl);
     this.prefix = opts.wellKnownPrefix ?? WELL_KNOWN;
+    this.allowPartial = opts.allowPartial === true;
     const f = opts.fetch ?? globalThis.fetch?.bind(globalThis);
     if (!f) {
       throw new C8sVerifyError("invalid_request", "no fetch implementation available");
@@ -310,6 +344,11 @@ export class C8sClient {
       workloadName: opts.workloadName,
       at: opts.at,
       expectedRtmr3: opts.expectedRtmr3,
+      operatorPublicKeyPem: opts.operatorPublicKeyPem,
+      rtmrs: opts.rtmrs,
+      pinPolicies: opts.pinPolicies,
+      initDataHash: opts.initDataHash,
+      sandboxId: opts.sandboxId,
       tdxImage: opts.tdxImage,
       minTcb: opts.minTcb,
       snpCrl: opts.snpCrl,
@@ -318,6 +357,7 @@ export class C8sClient {
       tdxTcbStatuses: opts.tdxTcbStatuses,
       routeDigests: opts.routeDigests,
     };
+    validatePins(this.policy);
   }
 
   private _url(path: string): string {
@@ -453,7 +493,14 @@ export class C8sClient {
     const nonce = generateNonce();
     const keyPair = await generateXWingKeyPair();
     const bundle = await this.fetchAttestation(nonce, keyPair);
-    let attestation = await verifyAttestation(bundle, nonce, this.policy, keyPair.ek);
+    let attestation = await verifyAttestationWith(
+      verifiersOf(this),
+      bundle,
+      nonce,
+      this.policy,
+      keyPair.ek,
+    );
+    if (!this.allowPartial) requireVerified(attestation);
     let routes: PublishedRoutes | undefined;
     if (routeKeys !== undefined && published !== undefined) {
       routes = await this.verifyRoutes(published, routeKeys, attestation.routeDigest);

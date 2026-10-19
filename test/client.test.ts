@@ -7,13 +7,18 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { C8sClient, Session } from "../src/index.js";
+import { C8sClient, Session, requireVerified, type C8sClientOptions } from "../src/index.js";
 import { C8sVerifyError } from "../src/errors.js";
 import { generateNonce } from "../src/nonce.js";
 import { deriveChannel, generateXWingKeyPair } from "../src/keyagreement.js";
 import { cborDecode, cborEncode } from "../src/cbor.js";
 import type { WireRecord } from "../src/channel.js";
-import type { AttestationResult } from "../src/verify.js";
+import { injectVerifiers, type AttestationResult, type Verifiers } from "../src/verify.js";
+import { verifyAzSnp, verifyAzTdx, verifySnp, verifyTdx } from "../src/wasm-loader.js";
+import { extendRegister } from "../src/rtmr3.js";
+import { base64UrlToBytes, bytesToHex, hexToBytes } from "../src/base64.js";
+import type { XWingKeyPair } from "../src/keyagreement.js";
+import { buildBundle, loadFixtures } from "./helpers.js";
 
 /** A fetch stub that records request URLs and returns an empty JSON body. */
 function captureFetch(urls: string[]): typeof fetch {
@@ -275,4 +280,101 @@ test("routeDigests are validated at construction and reach the policy", () => {
       JSON.stringify(routeDigests),
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// The c8s verify pins: validated at construction, judged at connect
+// ---------------------------------------------------------------------------
+
+const TDX_IMAGE = {
+  mrtd: "9309eaae9c151e766de0f97b1d1aaeb76b8c8c366080803943fb566521c8f0cf00a142d8b7b0683ed1d42c5a27198ba1",
+  rtmr1:
+    "e0aaa1f273b80e1e4e5032b789f34fc3f78c88719717b266cb3152aa4bc6490f13fe3a9cea8e00b48a3719074e06c05a",
+  rtmr2:
+    "15d4452b636e411b9c85a9fdb8b9c75b8ac7abb7eafe846aed987495a8b44b3b22a9681521961b382bdfe170efc4adeb",
+};
+const TDX_RTMR3 =
+  "21df104d732e863ffd57be4311de7ac2721b29550bc482ec1d2e85d572bfcb9c669b7f498d5910f9ba5a795209f215a6";
+const MEASURED = "sha256:" + "1".repeat(64);
+
+test("the c8s verify pins are validated at construction", () => {
+  const options = {
+    baseUrl: "http://lb.test",
+    meshCaPem: "pinned CA",
+    platform: "tdx",
+    tdxImage: TDX_IMAGE,
+    fetch: captureFetch([]),
+  };
+  const cases: { name: string; opts: Partial<ConstructorParameters<typeof C8sClient>[0]> }[] = [
+    { name: "rtmrs off TDX", opts: { platform: "snp", rtmrs: { 3: TDX_RTMR3 } } },
+    { name: "two RTMR[3] pins", opts: { expectedRtmr3: TDX_RTMR3, rtmrs: { 3: TDX_RTMR3 } } },
+    { name: "pinPolicies without RTMR[3]", opts: { pinPolicies: [MEASURED] } },
+    { name: "bad initDataHash", opts: { initDataHash: "00" } },
+    { name: "bad sandboxId", opts: { sandboxId: "a/b" } },
+    {
+      name: "sandboxId without meshCaPem",
+      opts: { meshCaPem: undefined, allowlist: "{}", sandboxId: "abc" },
+    },
+  ];
+  for (const c of cases) {
+    assert.throws(
+      () => new C8sClient({ ...options, ...c.opts }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      c.name,
+    );
+  }
+});
+
+/** The fixture TD's quote, reporting RTMR[3] as the pinned seed extended by MEASURED. */
+const measuring: Verifiers = {
+  verifySnp,
+  verifyAzSnp,
+  verifyAzTdx,
+  async verifyTdx(evidence, reportData, initData, wantRtmr3, collateral) {
+    const out = JSON.parse(await verifyTdx(evidence, undefined, undefined, undefined, collateral));
+    const rtmr3 = bytesToHex(extendRegister(hexToBytes(TDX_RTMR3), MEASURED));
+    out.claims.platform_data.rtmr_3 = rtmr3;
+    out.report_data_match = reportData === undefined ? null : true;
+    if (wantRtmr3 !== undefined) out.rtmr3_match = bytesToHex(wantRtmr3) === rtmr3;
+    return JSON.stringify(out);
+  },
+};
+
+function measuringClient(opts: C8sClientOptions): C8sClient {
+  return injectVerifiers(new C8sClient(opts), measuring);
+}
+
+/** A node that measures one policy, answering attest-pq for the request's nonce and key. */
+const measuringNode: typeof fetch = async (_input, init) => {
+  const { nonce, xwing_ek } = JSON.parse(init?.body as string);
+  const { evidence } = JSON.parse(await readFile(join(FIXTURES, "tdx-bundle.json"), "utf8"));
+  const built = await buildBundle(base64UrlToBytes(nonce), {
+    evidence,
+    platform: "tdx",
+    clientKeyPair: { ek: base64UrlToBytes(xwing_ek) } as XWingKeyPair,
+  });
+  return Response.json({ ...built.bundle, measured_policies: [MEASURED] });
+};
+
+test("connect refuses a partial verdict unless allowPartial is set", async () => {
+  const { meshCaPem } = await loadFixtures();
+  const options = {
+    baseUrl: "http://lb.test",
+    meshCaPem,
+    platform: "tdx",
+    tdxImage: TDX_IMAGE,
+    expectedRtmr3: TDX_RTMR3,
+    fetch: measuringNode,
+  };
+  await assert.rejects(
+    measuringClient(options).connect(),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "policy_history_unproven",
+  );
+  const session = await measuringClient({ ...options, allowPartial: true }).connect();
+  assert.equal(session.attestation.verdict, "partial");
+  assert.deepEqual(session.attestation.measuredPolicies, [MEASURED]);
+  assert.throws(
+    () => requireVerified(session.attestation),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "policy_history_unproven",
+  );
 });

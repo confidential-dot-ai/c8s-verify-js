@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { verifySnp, verifyAzSnp } from "../src/wasm-loader.js";
-import { verifyEvidence } from "../src/verify.js";
+import { verifyAttestation, verifyEvidence } from "../src/verify.js";
+import { generateNonce } from "../src/nonce.js";
+import { buildBundle } from "./helpers.js";
 import { snpReportFromHcl } from "../src/hcl.js";
 import { base64UrlToBytes, concatBytes } from "../src/base64.js";
 import { subtle } from "../src/crypto-env.js";
@@ -228,4 +230,47 @@ test("verifyEvidence(platform:az-snp) verifies a captured LB freshness anchor", 
     }),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "report_data_mismatch",
   );
+});
+
+// The fixture's vTPM quote signs PCR[8] as all zeros. The verifier requires
+// PCR[8] = SHA256(0^32 || initDataHash), which no digest satisfies, so the
+// fixture can only exercise the denial: a digest, and the raw PCR value itself.
+const INIT_DATA_PINS = ["11".repeat(32), "00".repeat(32)];
+const isInitDataDenied = (e: unknown) =>
+  e instanceof C8sVerifyError && e.code === "init_data_denied";
+
+test("verifyEvidence(platform:az-snp) denies an initDataHash PCR[8] does not extend to", async () => {
+  for (const initDataHash of INIT_DATA_PINS) {
+    await assert.rejects(
+      verifyEvidence(await cocoEvidence(), {
+        platform: "az-snp",
+        measurements: [COCO_MEASUREMENT],
+        initDataHash,
+      }),
+      isInitDataDenied,
+      initDataHash,
+    );
+  }
+});
+
+test("verifyAttestation(platform:az-snp) denies an initDataHash PCR[8] does not extend to", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await buildBundle(nonce, {
+    evidence: await cocoEvidence(),
+    platform: "az-snp",
+  });
+  const policy = {
+    platform: "az-snp",
+    measurements: [COCO_MEASUREMENT],
+    requireFreshness: false,
+    meshCaPem,
+  };
+  assert.equal((await verifyAttestation(bundle, nonce, policy)).verdict, "verified");
+  for (const initDataHash of INIT_DATA_PINS) {
+    await assert.rejects(
+      verifyAttestation(bundle, nonce, { ...policy, initDataHash }),
+      isInitDataDenied,
+      initDataHash,
+    );
+  }
 });

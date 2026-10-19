@@ -10,6 +10,7 @@ import {
   enforceRtmr3Pin,
   enforceTdxImagePins,
   verifyEvidence,
+  type VerifyEvidenceOptions,
   type WasmVerifyResult,
 } from "../src/verify.js";
 import { C8sVerifyError } from "../src/errors.js";
@@ -453,16 +454,8 @@ test("enforceRtmr3Pin replays the measured policies from the pinned seed", async
   ];
   for (const c of cases) {
     for (const isTdx of [true, false]) {
-      const warnings: string[] = [];
-      const got = enforceRtmr3Pin(rtmr3Result(c.register), isTdx, seed, c.measured, warnings);
+      const got = enforceRtmr3Pin(rtmr3Result(c.register), isTdx, seed, c.measured);
       assert.deepEqual(got, c.want, `${c.name} (isTdx=${isTdx})`);
-      assert.equal(
-        warnings.some((w) =>
-          w.startsWith(`replayed ${c.want.length} measured policies, none judged`),
-        ),
-        c.want.length > 0,
-        `${c.name} (isTdx=${isTdx}): warnings ${JSON.stringify(warnings)}`,
-      );
     }
   }
 });
@@ -482,7 +475,7 @@ test("enforceRtmr3Pin denies a register the measured policies do not replay to",
   ];
   for (const c of cases) {
     assert.throws(
-      () => enforceRtmr3Pin(rtmr3Result(c.register), true, seed, c.measured, []),
+      () => enforceRtmr3Pin(rtmr3Result(c.register), true, seed, c.measured),
       (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
       c.name,
     );
@@ -494,9 +487,9 @@ test("enforceRtmr3Pin denies a register the measured policies do not replay to",
 test("enforceRtmr3Pin without measured policies requires the WASM comparison on bare TDX", async () => {
   const v = await measuredVector();
   const seed = hexToBytes(v.seed_hex);
-  assert.deepEqual(enforceRtmr3Pin(rtmr3Result(v.seed_hex, true), true, seed, [], []), []);
+  assert.deepEqual(enforceRtmr3Pin(rtmr3Result(v.seed_hex, true), true, seed, []), []);
   assert.throws(
-    () => enforceRtmr3Pin(rtmr3Result(v.seed_hex), true, seed, [], []),
+    () => enforceRtmr3Pin(rtmr3Result(v.seed_hex), true, seed, []),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
   );
 });
@@ -515,9 +508,74 @@ test('verifyEvidence platform:"tdx" accepts a measured list when RTMR[3] equals 
     measuredPolicies: [D1],
   });
   assert.equal(res.ok, true);
+  assert.equal(res.verdict, "verified");
   assert.equal(res.measuredPolicies, undefined);
   assert.ok(!res.warnings.some((w) => w.includes("none judged")));
   assert.ok(res.rtmrsPinned?.includes(`3:${TDX_RTMR3}`));
+});
+
+// The live TD does not measure its policies: RTMR[3] is the bare seed.
+test("verifyEvidence pinPolicies fails a node whose RTMR[3] replays no policy", async () => {
+  const { evidence } = await tdxBundle();
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "tdx",
+      tdxImage: TDX_IMAGE,
+      expectedRtmr3: TDX_RTMR3,
+      measuredPolicies: [D1],
+      pinPolicies: [D1],
+    }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "policy_history_absent",
+  );
+});
+
+test("verifyEvidence refuses pinPolicies and nonceBound it cannot enforce", async () => {
+  const { evidence } = await tdxBundle();
+  const base = { platform: "tdx", tdxImage: TDX_IMAGE };
+  const cases: { name: string; opts: VerifyEvidenceOptions }[] = [
+    { name: "pinPolicies without expectedRtmr3", opts: { ...base, pinPolicies: [D1] } },
+    {
+      name: "pinPolicies with expectedRtmr3 but no tdxImage",
+      opts: {
+        platform: "tdx",
+        measurements: [TDX_MRTD],
+        expectedRtmr3: TDX_RTMR3,
+        pinPolicies: [D1],
+      },
+    },
+    {
+      name: "empty pinPolicies",
+      opts: { ...base, expectedRtmr3: TDX_RTMR3, pinPolicies: [] },
+    },
+    {
+      name: "non-canonical pinPolicies entry",
+      opts: { ...base, expectedRtmr3: TDX_RTMR3, pinPolicies: [D1.toUpperCase()] },
+    },
+    { name: "nonceBound without expectedReportData", opts: { ...base, nonceBound: true } },
+  ];
+  for (const c of cases) {
+    await assert.rejects(
+      verifyEvidence(evidence, c.opts),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      c.name,
+    );
+  }
+});
+
+test("an image pinned by hand does not admit an RTMR[3] pin, as in c8s verify", async () => {
+  const { evidence } = await tdxBundle();
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "tdx",
+      measurements: [TDX_MRTD],
+      rtmrs: { 1: TDX_RTMR1, 2: TDX_RTMR2, 3: TDX_RTMR3 },
+      pinPolicies: [D1],
+    }),
+    (e: unknown) =>
+      e instanceof C8sVerifyError &&
+      e.code === "invalid_request" &&
+      e.message.includes("rtmrs[1] and rtmrs[2] do not count"),
+  );
 });
 
 test("a wrong RTMR[3] pin goes through WASM without a list and through the replay with one", async () => {
@@ -584,4 +642,36 @@ test("verifyEvidence ignores the measured list without an RTMR[3] pin", async ()
   });
   assert.equal(res.ok, true);
   assert.equal(res.measuredPolicies, undefined);
+});
+
+test("verifyEvidence pins init-data and RTMR[1]/RTMR[2] by hand", async () => {
+  const { evidence } = await tdxBundle();
+  const base = { platform: "tdx", measurements: [TDX_MRTD] };
+  const res = await verifyEvidence(evidence, {
+    ...base,
+    initDataHash: "00".repeat(32),
+    rtmrs: {
+      1: "e0aaa1f273b80e1e4e5032b789f34fc3f78c88719717b266cb3152aa4bc6490f13fe3a9cea8e00b48a3719074e06c05a",
+      2: "15d4452b636e411b9c85a9fdb8b9c75b8ac7abb7eafe846aed987495a8b44b3b22a9681521961b382bdfe170efc4adeb",
+    },
+  });
+  assert.equal(res.verdict, "verified");
+  assert.equal(res.rtmrsPinned?.length, 2);
+  assert.ok(!res.warnings.some((w) => w.includes("not platform-complete")));
+  await assert.rejects(
+    verifyEvidence(evidence, { ...base, initDataHash: "11".repeat(32) }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "init_data_denied",
+  );
+  await assert.rejects(
+    verifyEvidence(evidence, { ...base, rtmrs: { 1: "ff".repeat(48) } }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr_denied",
+  );
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "snp",
+      generation: "genoa",
+      rtmrs: { 1: "ff".repeat(48) },
+    }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
 });
