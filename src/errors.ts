@@ -84,6 +84,12 @@ export type C8sErrorCode =
   // Session.fetch refused a request the attested manifest routes to no
   // backend; the router would answer it 404.
   | "route_unmatched"
+  // pinPolicies judged the node's measured policy history. "_absent": no
+  // policy replayed against RTMR[3], so a node that does not measure proves
+  // nothing about what it enforced. "_not_pinned": a replayed entry, or the
+  // policy the leaf was issued under, is not pinned (details.digest).
+  | "policy_history_absent"
+  | "policy_history_not_pinned"
   | "unsupported";
 
 export interface C8sErrorOptions {
