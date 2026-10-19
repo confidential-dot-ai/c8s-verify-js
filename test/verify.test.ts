@@ -1117,13 +1117,23 @@ test("verifyAttestation pinPolicies fails a node whose RTMR[3] replays no policy
   );
 });
 
-test("verifyAttestation refuses pinPolicies without an RTMR[3] pin", async () => {
+test("verifyAttestation refuses pinPolicies without an image-backed RTMR[3] pin", async () => {
   const nonce = generateNonce();
   const { bundle, meshCaPem } = await measuredTdxBundle(nonce, MEASURED);
-  await assert.rejects(
-    () => verifyAttestation(bundle, nonce, { ...tdxPolicy(meshCaPem), pinPolicies: MEASURED }),
-    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
-  );
+  const cases: { name: string; policy: VerifyPolicy }[] = [
+    { name: "no RTMR[3] pin", policy: tdxPolicy(meshCaPem) },
+    {
+      name: "expectedRtmr3 without tdxImage",
+      policy: { ...tdxPolicy(meshCaPem, TDX_RTMR3), tdxImage: undefined, measurements: [TDX_MRTD] },
+    },
+  ];
+  for (const c of cases) {
+    await assert.rejects(
+      () => verifyAttestation(bundle, nonce, { ...c.policy, pinPolicies: MEASURED }),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      c.name,
+    );
+  }
 });
 
 test("verifyAttestation denies measured_policies that do not replay to RTMR[3]", async () => {

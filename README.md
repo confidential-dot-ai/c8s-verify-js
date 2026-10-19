@@ -384,7 +384,7 @@ is not supported yet: pin the documents you reviewed.
 |---|---|---|
 | `operatorPublicKeyPem` | `--operator-pkey` | RTMR[3] seed derived from the PEM; requires `tdxImage`, excludes `expectedRtmr3` |
 | `rtmrs: { 1, 2, 3 }` | `--rtmr` | Registers by hand; 1 and 2 exclude `tdxImage`, 3 requires it |
-| `pinPolicies` | `--pin-policy` | The node's policy history, above |
+| `pinPolicies` | `--pin-policy` | The node's policy history, above; requires `tdxImage` and one of `expectedRtmr3`, `operatorPublicKeyPem` or `rtmrs[3]` |
 | `initDataHash` | `--init-data` | SHA-256 of the init-data document: HOST_DATA, MRCONFIGID or vTPM PCR[8] |
 | `sandboxId` | `--sandbox-id` | The mesh leaf's pod sandbox ID; requires `meshCaPem` |
 

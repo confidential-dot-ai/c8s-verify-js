@@ -997,7 +997,10 @@ function validatePolicy(policy: VerifyPolicy): ResolvedPins {
     }
   }
   const registers = registerPins(policy.platform ?? "snp", policy);
-  const pinDigests = policyPinDigests(policy.pinPolicies, registers.rtmr3 !== undefined);
+  const pinDigests = policyPinDigests(
+    policy.pinPolicies,
+    registers.rtmr3 !== undefined && policy.tdxImage !== undefined,
+  );
   const initDataHash = parseInitDataHash(policy.initDataHash);
   validateSandboxId(policy.sandboxId);
   if (policy.sandboxId !== undefined && policy.meshCaPem === undefined) {
@@ -1833,7 +1836,10 @@ export async function verifyEvidenceWith(
   }
   const registers = registerPins(wantPlatform, opts);
   const wantRtmr3 = registers.rtmr3 === undefined ? undefined : decodeRtmr3(registers.rtmr3);
-  const pinDigests = policyPinDigests(opts.pinPolicies, wantRtmr3 !== undefined);
+  const pinDigests = policyPinDigests(
+    opts.pinPolicies,
+    wantRtmr3 !== undefined && opts.tdxImage !== undefined,
+  );
   const initDataHash = parseInitDataHash(opts.initDataHash);
   if (opts.nonceBound !== undefined && typeof opts.nonceBound !== "boolean") {
     fail("invalid_request", "nonceBound must be a boolean when set");

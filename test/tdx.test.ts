@@ -520,7 +520,7 @@ test("verifyEvidence pinPolicies fails a node whose RTMR[3] replays no policy", 
   await assert.rejects(
     verifyEvidence(evidence, {
       platform: "tdx",
-      measurements: [TDX_MRTD],
+      tdxImage: TDX_IMAGE,
       expectedRtmr3: TDX_RTMR3,
       measuredPolicies: [D1],
       pinPolicies: [D1],
@@ -531,9 +531,18 @@ test("verifyEvidence pinPolicies fails a node whose RTMR[3] replays no policy", 
 
 test("verifyEvidence refuses pinPolicies and nonceBound it cannot enforce", async () => {
   const { evidence } = await tdxBundle();
-  const base = { platform: "tdx", measurements: [TDX_MRTD] };
+  const base = { platform: "tdx", tdxImage: TDX_IMAGE };
   const cases: { name: string; opts: VerifyEvidenceOptions }[] = [
     { name: "pinPolicies without expectedRtmr3", opts: { ...base, pinPolicies: [D1] } },
+    {
+      name: "pinPolicies with expectedRtmr3 but no tdxImage",
+      opts: {
+        platform: "tdx",
+        measurements: [TDX_MRTD],
+        expectedRtmr3: TDX_RTMR3,
+        pinPolicies: [D1],
+      },
+    },
     {
       name: "empty pinPolicies",
       opts: { ...base, expectedRtmr3: TDX_RTMR3, pinPolicies: [] },

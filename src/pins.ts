@@ -150,15 +150,17 @@ export function resolveRegisterPins(o: RegisterPinInputs): RegisterPins {
  * `sha256:<64 lowercase hex>` digest, or an allowlist document (bytes, or a
  * JSON string encoded as UTF-8 verbatim) whose SHA-256 is taken over its exact
  * bytes, the canonical bytes `GET /allowlist` serves. Set only with an
- * RTMR[3] pin: the history it judges is what replays from that pin.
+ * RTMR[3] pin on a pinned image: the history it judges is what replays from
+ * that pin, and only the pinned image enforces what it extends.
  */
-export function policyPinDigests(pins: unknown, rtmr3Pinned: boolean): string[] | undefined {
+export function policyPinDigests(pins: unknown, imageRtmr3Pinned: boolean): string[] | undefined {
   if (pins === undefined) return undefined;
-  if (!rtmr3Pinned) {
+  if (!imageRtmr3Pinned) {
     fail(
       "invalid_request",
-      "pinPolicies requires an RTMR[3] pin (expectedRtmr3, operatorPublicKeyPem or rtmrs[3]): " +
-        "the node's policy history counts only as far as it replays against RTMR[3]",
+      "pinPolicies requires tdxImage and an RTMR[3] pin (expectedRtmr3, operatorPublicKeyPem " +
+        "or rtmrs[3]): the history counts only as far as it replays against RTMR[3], and only " +
+        "a pinned image enforces the policies it extends",
     );
   }
   if (!Array.isArray(pins) || pins.length === 0) {

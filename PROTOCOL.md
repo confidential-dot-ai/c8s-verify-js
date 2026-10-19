@@ -431,8 +431,8 @@ has no runtime measurement registers by design.
 The mesh leaf MAY carry a non-critical extension naming the CRI pod sandbox
 it was issued to: a DER IA5String matching `^[A-Za-z0-9._-]{1,128}$`. CDS
 places it in the signed area, so only a chain to a pinned mesh CA vouches for
-it; a client pinning the sandbox ID MUST pin the CA. A malformed extension
-fails, never reads as absent (`sandbox_denied`).
+it; a client pinning the sandbox ID MUST pin the CA. For such a client, a
+malformed extension fails (`sandbox_denied`), never reads as absent.
 
 ## Matched-workload extension (`1.3.6.1.4.1.66378.1.5`)
 
