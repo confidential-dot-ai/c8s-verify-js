@@ -32,6 +32,7 @@ test("verifies a well-formed bundle (recorded evidence)", async () => {
   const { bundle, meshCaPem } = await buildBundle(nonce);
   const r = await verifyAttestation(bundle, nonce, policy(meshCaPem));
   assert.equal(r.ok, true);
+  assert.equal(r.verdict, "verified");
   assert.equal(r.platform, "snp");
   assert.equal(r.measurement, DEMO_MEASUREMENTS[0]);
   assert.equal(r.cert.subjectCN, "lb.demo.c8s.local");
@@ -1085,8 +1086,32 @@ test("verifyAttestation accepts measured_policies when RTMR[3] equals the pin", 
   const { bundle, meshCaPem } = await measuredTdxBundle(nonce, MEASURED);
   const r = await verifyAttestation(bundle, nonce, tdxPolicy(meshCaPem, TDX_RTMR3));
   assert.equal(r.measuredPolicies, undefined);
+  assert.equal(r.verdict, "verified");
+  assert.equal(r.notProven, undefined);
   assert.ok(r.rtmrsPinned?.includes(`3:${TDX_RTMR3}`));
   assert.ok(!r.warnings.some((w) => w.includes("none judged")));
+});
+
+test("verifyAttestation pinPolicies fails a node whose RTMR[3] replays no policy", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await measuredTdxBundle(nonce, MEASURED);
+  await assert.rejects(
+    () =>
+      verifyAttestation(bundle, nonce, {
+        ...tdxPolicy(meshCaPem, TDX_RTMR3),
+        pinPolicies: MEASURED,
+      }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "policy_history_absent",
+  );
+});
+
+test("verifyAttestation refuses pinPolicies without an RTMR[3] pin", async () => {
+  const nonce = generateNonce();
+  const { bundle, meshCaPem } = await measuredTdxBundle(nonce, MEASURED);
+  await assert.rejects(
+    () => verifyAttestation(bundle, nonce, { ...tdxPolicy(meshCaPem), pinPolicies: MEASURED }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+  );
 });
 
 test("verifyAttestation denies measured_policies that do not replay to RTMR[3]", async () => {

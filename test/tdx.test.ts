@@ -10,6 +10,7 @@ import {
   enforceRtmr3Pin,
   enforceTdxImagePins,
   verifyEvidence,
+  type VerifyEvidenceOptions,
   type WasmVerifyResult,
 } from "../src/verify.js";
 import { C8sVerifyError } from "../src/errors.js";
@@ -453,16 +454,8 @@ test("enforceRtmr3Pin replays the measured policies from the pinned seed", async
   ];
   for (const c of cases) {
     for (const isTdx of [true, false]) {
-      const warnings: string[] = [];
-      const got = enforceRtmr3Pin(rtmr3Result(c.register), isTdx, seed, c.measured, warnings);
+      const got = enforceRtmr3Pin(rtmr3Result(c.register), isTdx, seed, c.measured);
       assert.deepEqual(got, c.want, `${c.name} (isTdx=${isTdx})`);
-      assert.equal(
-        warnings.some((w) =>
-          w.startsWith(`replayed ${c.want.length} measured policies, none judged`),
-        ),
-        c.want.length > 0,
-        `${c.name} (isTdx=${isTdx}): warnings ${JSON.stringify(warnings)}`,
-      );
     }
   }
 });
@@ -482,7 +475,7 @@ test("enforceRtmr3Pin denies a register the measured policies do not replay to",
   ];
   for (const c of cases) {
     assert.throws(
-      () => enforceRtmr3Pin(rtmr3Result(c.register), true, seed, c.measured, []),
+      () => enforceRtmr3Pin(rtmr3Result(c.register), true, seed, c.measured),
       (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
       c.name,
     );
@@ -494,9 +487,9 @@ test("enforceRtmr3Pin denies a register the measured policies do not replay to",
 test("enforceRtmr3Pin without measured policies requires the WASM comparison on bare TDX", async () => {
   const v = await measuredVector();
   const seed = hexToBytes(v.seed_hex);
-  assert.deepEqual(enforceRtmr3Pin(rtmr3Result(v.seed_hex, true), true, seed, [], []), []);
+  assert.deepEqual(enforceRtmr3Pin(rtmr3Result(v.seed_hex, true), true, seed, []), []);
   assert.throws(
-    () => enforceRtmr3Pin(rtmr3Result(v.seed_hex), true, seed, [], []),
+    () => enforceRtmr3Pin(rtmr3Result(v.seed_hex), true, seed, []),
     (e: unknown) => e instanceof C8sVerifyError && e.code === "rtmr3_denied",
   );
 });
@@ -515,9 +508,49 @@ test('verifyEvidence platform:"tdx" accepts a measured list when RTMR[3] equals 
     measuredPolicies: [D1],
   });
   assert.equal(res.ok, true);
+  assert.equal(res.verdict, "verified");
   assert.equal(res.measuredPolicies, undefined);
   assert.ok(!res.warnings.some((w) => w.includes("none judged")));
   assert.ok(res.rtmrsPinned?.includes(`3:${TDX_RTMR3}`));
+});
+
+// The live TD does not measure its policies: RTMR[3] is the bare seed.
+test("verifyEvidence pinPolicies fails a node whose RTMR[3] replays no policy", async () => {
+  const { evidence } = await tdxBundle();
+  await assert.rejects(
+    verifyEvidence(evidence, {
+      platform: "tdx",
+      measurements: [TDX_MRTD],
+      expectedRtmr3: TDX_RTMR3,
+      measuredPolicies: [D1],
+      pinPolicies: [D1],
+    }),
+    (e: unknown) => e instanceof C8sVerifyError && e.code === "policy_history_absent",
+  );
+});
+
+test("verifyEvidence refuses pinPolicies and nonceBound it cannot enforce", async () => {
+  const { evidence } = await tdxBundle();
+  const base = { platform: "tdx", measurements: [TDX_MRTD] };
+  const cases: { name: string; opts: VerifyEvidenceOptions }[] = [
+    { name: "pinPolicies without expectedRtmr3", opts: { ...base, pinPolicies: [D1] } },
+    {
+      name: "empty pinPolicies",
+      opts: { ...base, expectedRtmr3: TDX_RTMR3, pinPolicies: [] },
+    },
+    {
+      name: "non-canonical pinPolicies entry",
+      opts: { ...base, expectedRtmr3: TDX_RTMR3, pinPolicies: [D1.toUpperCase()] },
+    },
+    { name: "nonceBound without expectedReportData", opts: { ...base, nonceBound: true } },
+  ];
+  for (const c of cases) {
+    await assert.rejects(
+      verifyEvidence(evidence, c.opts),
+      (e: unknown) => e instanceof C8sVerifyError && e.code === "invalid_request",
+      c.name,
+    );
+  }
 });
 
 test("a wrong RTMR[3] pin goes through WASM without a list and through the replay with one", async () => {

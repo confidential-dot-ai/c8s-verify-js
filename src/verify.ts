@@ -34,7 +34,13 @@ import {
   type TdxTcbStatus,
   type WasmTcbStatus,
 } from "./tdx-tcb.js";
-import { replayMeasuredPolicies, validateMeasuredPolicies } from "./rtmr3.js";
+import {
+  judgePolicyHistory,
+  replayMeasuredPolicies,
+  validateMeasuredPolicies,
+  validatePinPolicies,
+  type LeafPolicy,
+} from "./rtmr3.js";
 
 /**
  * Minimum SEV-SNP TCB floor: security patch levels (SPLs) the reported TCB
@@ -122,14 +128,26 @@ export interface VerifyPolicy {
    * policies extends RTMR[3] once per policy after the seed and reports the
    * list as the bundle's `measured_policies`; it is accepted when a prefix of
    * that list replays from the pin to the quoted register (see
-   * {@link AttestationResult.measuredPolicies}). Without this pin the list is
-   * ignored.
+   * {@link AttestationResult.measuredPolicies}); a non-empty replayed history
+   * leaves the verdict partial unless `pinPolicies` judges it. Without this
+   * pin the list is ignored.
    *
    * TDX only — the register does not exist on SNP, and the verifier consults
    * it only on the TDX path. Combining it with any other platform is rejected
    * rather than silently ignored.
    */
   expectedRtmr3?: string;
+  /**
+   * Allowlist policy digests (`sha256:<64 lowercase hex>`) the node may have
+   * enforced, as `c8s verify --pin-policy` takes them. Requires
+   * `expectedRtmr3`. Every policy in the replayed history, and the policy the
+   * mesh leaf was issued under, must be one of these, or the verdict fails
+   * (`policy_history_not_pinned`); an empty history fails too
+   * (`policy_history_absent`). An unstamped leaf, a stamp without
+   * `meshCaPem`, or evidence not bound to this check's nonce leave the
+   * verdict partial.
+   */
+  pinPolicies?: string[];
   /**
    * The complete TDX guest-image pin: MRTD + RTMR[1] + RTMR[2] as one tuple,
    * each exactly 96 lowercase hex chars, published with the image build (feed
@@ -364,7 +382,24 @@ export interface AttestationResult {
    * one did; absent means RTMR[3] equals the pin (or no pin was set).
    */
   measuredPolicies?: string[];
+  /**
+   * `"verified"` when every check passed; `"partial"` when the evidence
+   * verified but left something unproven, listed in {@link notProven}: a
+   * measured policy history no `pinPolicies` judged, or a pinned one the
+   * evidence cannot fully vouch for. Gate on `"verified"`.
+   */
+  verdict: Verdict;
+  /** What a partial verdict leaves unproven; present only when `verdict` is `"partial"`. */
+  notProven?: string[];
   warnings: string[];
+}
+
+/** Whether every check passed, or the evidence verified but left something unproven. */
+export type Verdict = "verified" | "partial";
+
+/** The verdict fields for what a policy-history judgement left unproven. */
+function verdictOf(notProven: string[]): { verdict: Verdict; notProven?: string[] } {
+  return notProven.length === 0 ? { verdict: "verified" } : { verdict: "partial", notProven };
 }
 
 // The vTPM (az-snp, az-tdx) and bare-tdx verifiers bind the freshness anchor in
@@ -673,16 +708,15 @@ function isRtmr3Mismatch(e: unknown): boolean {
 /**
  * Enforce the RTMR[3] pin against the verified claims. With measured policies
  * the register may also be the pin extended by a prefix of them; that prefix
- * is returned (empty when the register equals the pin) and, since no policy
- * pin judges it here, warned about. Exported for direct testing; callers go
- * through {@link verifyAttestation} / {@link verifyEvidence}.
+ * is returned (empty when the register equals the pin) for
+ * {@link judgePolicyHistory}. Exported for direct testing; callers go through
+ * {@link verifyAttestation} / {@link verifyEvidence}.
  */
 export function enforceRtmr3Pin(
   result: WasmVerifyResult,
   isTdx: boolean,
   pin: Uint8Array,
   measured: string[],
-  warnings: string[],
 ): string[] {
   const want = bytesToHex(pin);
   if (measured.length === 0) {
@@ -712,12 +746,6 @@ export function enforceRtmr3Pin(
           { details: { expected: want, got, measuredPolicies: measured } },
         );
       }
-      // Mirrors `c8s verify`: a replayed history no policy pin judged.
-      warnings.push(
-        `replayed ${replayed.length} measured policies, none judged: RTMR[3] proves which ` +
-          "allowlist policies the node enforced since boot (see measuredPolicies), but no " +
-          "policy pin checked them",
-      );
       return replayed;
     }
   }
@@ -889,6 +917,7 @@ function validatePolicy(policy: VerifyPolicy): void {
       fail("invalid_request", "expectedRtmr3 must be 96 hex characters (48 bytes, SHA-384)");
     }
   }
+  validatePinPolicies(policy.pinPolicies, policy.expectedRtmr3 !== undefined);
   if (policy.tdxImage !== undefined) {
     // Same platform rule as expectedRtmr3: a pin the verifier would silently
     // drop is worse than no pin.
@@ -1090,7 +1119,6 @@ async function verifyHardwareAttestation(
   snpCrl?: Uint8Array,
   tdxCollateral?: string,
   measured: string[] = [],
-  warnings: string[] = [],
 ): Promise<{ result: WasmVerifyResult; measuredPolicies: string[] }> {
   // The Azure vTPM platforms (az-snp, az-tdx) get full verification (HCL report
   // + vTPM quote + hardware quote), with the transcript checked against the TPM
@@ -1192,9 +1220,7 @@ async function verifyHardwareAttestation(
     fail("verification_failed", `unexpected platform ${result.platform}, want ${wantPlatform}`);
   }
   const measuredPolicies =
-    expectedRtmr3 === undefined
-      ? []
-      : enforceRtmr3Pin(result, isTdx, expectedRtmr3, measured, warnings);
+    expectedRtmr3 === undefined ? [] : enforceRtmr3Pin(result, isTdx, expectedRtmr3, measured);
   return { result, measuredPolicies };
 }
 
@@ -1333,7 +1359,6 @@ export async function verifyAttestation(
       ? undefined
       : tdxCollateralJson(policy.tdxCollateral, policy.at),
     measured,
-    warnings,
   );
   const collateralVerified = enforceCollateralPolicy(
     result,
@@ -1373,6 +1398,21 @@ export async function verifyAttestation(
   // only once steps 1–5 (versions, evidence, measurement, transcript, proof,
   // chain) have all passed.
   const workload = await verifyWorkloadPolicy(identity.chain.leaf, policy);
+  // Only a live check binds the quote to this nonce: a saved bundle may
+  // predate a policy the operator pushed since.
+  const fresh = requireFreshness && expectedXwingEk !== undefined;
+  const notProven =
+    policy.expectedRtmr3 === undefined
+      ? []
+      : judgePolicyHistory(
+          measuredPolicies,
+          policy.pinPolicies,
+          policy.pinPolicies === undefined || measuredPolicies.length === 0
+            ? { kind: "none" }
+            : leafPolicy(identity.chain.leaf, policy.meshCaPem !== undefined),
+          fresh,
+          warnings,
+        );
 
   // On TDX, MRTD covers only the TDVF firmware — the guest kernel and rootfs
   // live in RTMR[1]/RTMR[2] — so without the tdxImage tuple the measurement
@@ -1420,8 +1460,29 @@ export async function verifyAttestation(
     trustClass: policy.meshCaPem !== undefined ? "specific-cluster" : "deployment-class",
     ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
     ...(measuredPolicies.length > 0 ? { measuredPolicies } : {}),
+    ...verdictOf(notProven),
     warnings,
   };
+}
+
+/**
+ * The policy the chain-verified mesh leaf was issued under. A stamp that does
+ * not parse cannot show its policy is pinned, so it fails the judgement.
+ */
+function leafPolicy(leaf: Certificate, vouched: boolean): LeafPolicy {
+  const extnValue = leaf.extensions.get(OID_MATCHED_WORKLOAD);
+  if (extnValue === undefined) return { kind: "unstamped" };
+  let digest: Uint8Array;
+  try {
+    digest = parseMatchedWorkload(extnValue).allowlistDigest;
+  } catch (e) {
+    fail(
+      "policy_history_not_pinned",
+      `the leaf's issuing policy cannot be read: ${errMessage(e)}`,
+      { cause: e },
+    );
+  }
+  return { kind: "stamped", digest: `sha256:${bytesToHex(digest)}`, vouched };
 }
 
 function certInfo(chain: ChainResult): CertInfo {
@@ -1474,6 +1535,21 @@ export interface VerifyEvidenceOptions {
    */
   measuredPolicies?: string[];
   /**
+   * Allowlist policy digests the node may have enforced; see
+   * {@link VerifyPolicy.pinPolicies}. Requires `expectedRtmr3`. Bare evidence
+   * carries no leaf, so only the history is judged, and the verdict stays
+   * partial unless `nonceBound` is set.
+   */
+  pinPolicies?: string[];
+  /**
+   * Set when `expectedReportData` commits a nonce generated for this check,
+   * so the quote is no older than the check. A pinned policy history from
+   * evidence without it, such as a discovery document or a saved quote, may
+   * predate a policy pushed since, and leaves the verdict partial. Requires
+   * `expectedReportData`.
+   */
+  nonceBound?: boolean;
+  /**
    * The complete TDX guest-image pin (mrtd + rtmr1 + rtmr2, each 96 lowercase
    * hex chars; see {@link VerifyPolicy.tdxImage} and `parseImageManifest`).
    * All three registers are compared exactly and the tuple replaces
@@ -1520,6 +1596,10 @@ export interface EvidenceResult {
   rtmrsPinned?: string[];
   /** Replayed measured policies; see {@link AttestationResult.measuredPolicies}. */
   measuredPolicies?: string[];
+  /** See {@link AttestationResult.verdict}. */
+  verdict: Verdict;
+  /** What a partial verdict leaves unproven; present only when `verdict` is `"partial"`. */
+  notProven?: string[];
   warnings: string[];
 }
 
@@ -1571,6 +1651,13 @@ export async function verifyEvidence(
       fail("invalid_request", "expectedRtmr3 must be 96 hex characters (48 bytes, SHA-384)");
     }
     wantRtmr3 = decodeRtmr3(opts.expectedRtmr3);
+  }
+  validatePinPolicies(opts.pinPolicies, wantRtmr3 !== undefined);
+  if (opts.nonceBound !== undefined && typeof opts.nonceBound !== "boolean") {
+    fail("invalid_request", "nonceBound must be a boolean when set");
+  }
+  if (opts.nonceBound === true && opts.expectedReportData === undefined) {
+    fail("invalid_request", "nonceBound requires expectedReportData: no binding, no nonce");
   }
   const measured = wantRtmr3 === undefined ? [] : validateMeasuredPolicies(opts.measuredPolicies);
   const wasmRtmr3 = measured.length === 0 ? wantRtmr3 : undefined;
@@ -1669,7 +1756,7 @@ export async function verifyEvidence(
       : enforceTdxTcb(result.tcb_status, collateralVerified, acceptedTcb);
 
   const measuredPolicies =
-    wantRtmr3 === undefined ? [] : enforceRtmr3Pin(result, isTdx, wantRtmr3, measured, warnings);
+    wantRtmr3 === undefined ? [] : enforceRtmr3Pin(result, isTdx, wantRtmr3, measured);
 
   // Measurement allowlist (case-insensitive hex), or the image tuple's MRTD.
   const measurement = String(result.claims.launch_digest).toLowerCase();
@@ -1710,6 +1797,16 @@ export async function verifyEvidence(
       "no expectedReportData provided — report_data freshness/key binding was not verified",
     );
   }
+  const notProven =
+    wantRtmr3 === undefined
+      ? []
+      : judgePolicyHistory(
+          measuredPolicies,
+          opts.pinPolicies,
+          { kind: "none" },
+          opts.nonceBound === true,
+          warnings,
+        );
 
   return {
     ok: true,
@@ -1722,6 +1819,7 @@ export async function verifyEvidence(
     claims: result.claims,
     ...(rtmrsPinned.length > 0 ? { rtmrsPinned } : {}),
     ...(measuredPolicies.length > 0 ? { measuredPolicies } : {}),
+    ...verdictOf(notProven),
     warnings,
   };
 }
