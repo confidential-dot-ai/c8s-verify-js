@@ -108,8 +108,8 @@ the guest kernel lands in RTMR[1] and the guest rootfs in RTMR[2], so two
 different guest images built against the same firmware share an MRTD. A
 platform-complete image pin is therefore the tuple **mrtd + rtmr1 + rtmr2**,
 published in the image build's manifest — pass it as `tdxImage` (or feed the
-manifest file to `parseImageManifest`; each field is exactly 96 lowercase hex
-chars, all three required). The tuple replaces `measurements`, and passing
+manifest file to `parseImageManifest`, which reads the fields under `tdx` or at
+the top level; each field is exactly 96 lowercase hex chars, all three required). The tuple replaces `measurements`, and passing
 both is rejected: its MRTD is the only accepted launch digest, and
 `rtmr1`/`rtmr2` are compared exactly against the verified claims
 (`rtmr_denied` on divergence, failing closed if the claims cannot be compared).
@@ -133,8 +133,8 @@ dropped.
 The protocol closes the copied-public-chain gap in two ways:
 
 - Hardware evidence commits to both key-exchange messages, the session id,
-  the client nonce, the exact mesh leaf, and the issuing CA in one
-  domain-separated transcript.
+  the client nonce, the exact mesh leaf, the issuing CA, and the route digest
+  in one domain-separated transcript.
 - The mesh leaf signs that transcript, proving possession of the corresponding
   private key. Copying the public certificate chain is no longer sufficient.
 
@@ -163,7 +163,7 @@ npm install c8s-verify
 import { C8sClient, parseImageManifest } from "c8s-verify";
 
 const client = new C8sClient({
-  baseUrl: "https://lb.example.com",
+  baseUrl: "https://lb.example.com", // a relative path needs a page to resolve against
   meshCaPem: pinnedMeshCaPem,                              // specific-cluster anchor
   //   ^ or/and pass `allowlist` (the exact canonical allowlist bytes) for a
   //     deployment-class anchor enforced against the mesh leaf's
@@ -180,6 +180,12 @@ const client = new C8sClient({
   // deployment-class verdict (no meshCaPem). On SEV-SNP, pin the launch
   // digest instead: measurements: ["<expected hex SHA-384 launch digest>"].
   tdxImage: parseImageManifest(imageManifestBytes),
+  // Optional. Accepted route digests (`c8s routes digest` output); any one
+  // must match. Pass the old and the new digest while a manifest rolls over.
+  routeDigests: ["<64 lowercase hex route digest>"],
+  // Or, instead of routeDigests: the operator public keys (PEM) the
+  // published route manifest must be signed under.
+  // routeOperatorKeys: operatorKeysPem,
 });
 
 // Posts a fresh nonce + X-Wing encapsulation key, verifies the TEE evidence,
@@ -188,9 +194,11 @@ const client = new C8sClient({
 // attestation and key exchange are one round trip.
 const session = await client.connect();
 console.log(session.attestation.measurement, session.attestation.cert.sha256);
+console.log(session.attestation.routeDigest); // the route manifest the router applied
 
 // All traffic on `session.fetch` is end-to-end encrypted to the LB's enclave,
-// underneath whatever TLS terminator sits in front of it.
+// underneath whatever TLS terminator sits in front of it. The path must start
+// with "/"; Host defaults to the base URL's host.
 const res = await session.fetch("/v1/chat", { method: "POST", body: prompt });
 console.log(res.text());
 ```
@@ -207,14 +215,64 @@ fails with a typed `channel_error` (HTTP 401), and the embedding app re-runs
 `X-C8s-Exporter` header), so an application can bind bearer tokens to this
 exact attested channel.
 
+The router routes each tunnelled request by the `Host` header sealed inside it.
+When your headers carry no `Host`, `session.fetch` adds the base URL's host
+(with the port when non-default); to reach another virtual host on the same
+router, pass `Host` yourself. More than one or an empty `Host`, an `Upgrade`
+header, or a path not starting with `/` throws `invalid_request` before
+anything is sent.
+
+**Route digest.** The evidence binds the route digest (hardware-bound only
+when `identityBound` is true): the SHA-256 of the route manifest the router
+had applied when it admitted the session.
+`session.attestation.routeDigest` reports it as 64 lowercase hex characters.
+Pin `routeDigests` to accept only the manifests you know; a different digest
+fails with `route_denied`, naming the expected and received digests. To roll a
+manifest over without failing, pin the old and the new digest together, then
+drop the old one once every router replica has applied the new one. The
+digest identifies the manifest at admission only: a manifest the router
+applies later routes the session's later requests without new evidence, so
+call `client.connect()` again when you need a fresh bound.
+
+**Operator-signed routes.** To accept any manifest an operator signed instead
+of pinning digests, pass `routeOperatorKeys`: a PEM bundle of the operator
+public keys (ECDSA P-256, P-384 or P-521; a key WebCrypto refuses fails every
+`connect`, before the handshake). It excludes `routeDigests`. The router must
+publish its manifest (Helm `router.routePublication.enabled`), and a browser
+client also needs CORS on `/.well-known/c8s/routes`: the c8s chart allows any
+origin on `/.well-known/c8s/` by default (`router.cors.protocolEndpoints`), or
+only `router.cors.allowOrigins` when `router.cors.enabled` is set. Without it
+the fetch fails as `route_manifest_unavailable`.
+
+`connect` requests `/.well-known/c8s/routes` before the handshake, verifies
+the write token under the keys as c8s does, and requires the manifest's
+digest to be the one the evidence binds. If the digests differ, it fetches
+once more and requires the second manifest to match. The session then reports
+`routePolicy: "operator-signed"` and `routeRevision`, and `session.fetch`
+refuses (`route_unmatched`) a request the attested manifest routes to no
+backend. The client keeps the newest accepted revision and digest as a
+rollback floor, in memory. A revision below it is retried once, in case a
+replica lags, then refused; the same revision with another digest is refused
+at once (`route_manifest_denied`). To keep the floor across restarts, store
+`client.routeFloor` after each `connect` and pass it back as `routeFloor`. A
+publication that is off or unreachable fails with
+`route_manifest_unavailable`, a malformed one with `route_manifest_invalid`.
+PROTOCOL.md lists every check and its error code.
+`verifyPublishedRoutes(body, operatorKeysPem)` checks the signature and schema
+of a body you fetched yourself; comparing its `routeDigest` with the evidence
+and keeping a floor are then yours. Without either option, `routePolicy` is
+`"unverified"`: the digest is reported, not checked.
+
 What is verified, and in what order: nonce + `xwing_ek` echo → response version
 is exactly `c8s/attest-pq/v1` → served leaf chains to the pinned or
 transcript-derived mesh CA → hardware signature + certificate chain (WASM;
 SEV-SNP VCEK or TDX DCAP, per the policy `platform`) → launch measurement ∈ a
 non-empty allowlist → `report_data` commits the key exchange, session id,
-nonce, leaf, and CA → leaf
-proof-of-possession signature → matched-workload stamp (only when
-`workloadName`/`allowlist` is pinned, and only after everything else passed).
+nonce, leaf, CA, and route digest → leaf proof-of-possession signature →
+route digest in `routeDigests` (only when pinned) → matched-workload stamp (only when
+`workloadName`/`allowlist` is pinned, and only after the checks before it passed) →
+route digest equal to the operator-signed published manifest's (only with
+`routeOperatorKeys`).
 The same transcript is the HKDF context. Any failure throws a typed
 `C8sVerifyError` and no channel is established.
 

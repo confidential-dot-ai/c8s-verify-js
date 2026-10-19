@@ -6,11 +6,17 @@
 // three registers are only meaningful as one tuple from one build, which is
 // why they load atomically from a single provenanced build-artifact manifest.
 //
-// Parser parity: c8s pkg/runtimemeasure LoadImageManifest. Same field names,
-// same all-three-required atomic rule, same lowercase-hex strictness; unknown
+// Parser parity: attestation-go runtimemeasure LoadImageManifest, which
+// `c8s verify --image-manifest` uses. Same field names, matched
+// case-insensitively as encoding/json does; registers nested under "tdx" (a
+// confos build manifest) or flat; a key repeated in any letter case refused;
+// same all-three-required atomic rule and lowercase-hex strictness. Unknown
 // extra fields are allowed (build manifests carry other data).
 
 import { fail } from "./errors.js";
+import { parseStrictJson, type JsonValue } from "./strict-json.js";
+
+const REGISTERS = ["mrtd", "rtmr1", "rtmr2"] as const;
 
 /**
  * A TDX guest-image pin: MRTD + RTMR[1] + RTMR[2] as one tuple, each exactly
@@ -77,23 +83,79 @@ export function requireTdxImage(context: string, tuple: TdxImage): TdxImage {
 }
 
 /**
- * Parse a published TDX image manifest — a JSON object carrying "mrtd",
- * "rtmr1", and "rtmr2", each exactly 96 lowercase hex chars — into the tuple
- * {@link VerifyPolicy.tdxImage} pins. A missing or malformed field fails the
- * whole parse, so a policy can never end up pinning part of an image; unknown
- * extra fields are allowed (build manifests carry other data). Feed it the
- * manifest file bytes verbatim.
+ * Parse a published TDX image manifest into the tuple
+ * {@link VerifyPolicy.tdxImage} pins. The registers "mrtd", "rtmr1" and
+ * "rtmr2", each exactly 96 lowercase hex chars, sit either under a "tdx"
+ * object (a confos build manifest) or at the top level, never both. A
+ * missing or malformed field fails the whole parse, so a policy can never end
+ * up pinning part of an image; unknown extra fields are allowed (build
+ * manifests carry other data). Feed it the manifest file bytes verbatim.
  */
 export function parseImageManifest(jsonBytes: Uint8Array | string): TdxImage {
-  const text = typeof jsonBytes === "string" ? jsonBytes : new TextDecoder().decode(jsonBytes);
-  let doc: unknown;
+  const bytes = typeof jsonBytes === "string" ? new TextEncoder().encode(jsonBytes) : jsonBytes;
+  let doc: JsonValue;
   try {
-    doc = JSON.parse(text) as unknown;
+    doc = parseStrictJson(bytes);
   } catch (cause) {
-    fail("invalid_request", "image manifest is not a JSON object", { cause });
+    fail("invalid_request", `image manifest is not a JSON object: ${(cause as Error).message}`, {
+      cause,
+    });
   }
-  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
-    fail("invalid_request", "image manifest is not a JSON object");
+  if (doc.kind !== "object") fail("invalid_request", "image manifest is not a JSON object");
+  rejectFoldedDuplicates(doc);
+  let source = doc.members;
+  const tdx = member(doc.members, "tdx");
+  if (tdx !== undefined && !(tdx.kind === "literal" && tdx.value === null)) {
+    if (tdx.kind !== "object")
+      fail("invalid_request", 'image manifest: "tdx" is not a JSON object');
+    // The nested tuple wins, so a flat register beside it would be a second,
+    // unread spelling of the pin.
+    for (const key of doc.members.keys()) {
+      if ((REGISTERS as readonly string[]).includes(key.toLowerCase())) {
+        fail(
+          "invalid_request",
+          `image manifest: ${JSON.stringify(key)} is named both at the top level and under "tdx"; use one form`,
+        );
+      }
+    }
+    source = tdx.members;
   }
-  return requireTdxImage("image manifest", doc as TdxImage);
+  const field = (name: string): unknown => {
+    const v = member(source, name);
+    if (v === undefined || (v.kind === "literal" && v.value === null)) return undefined;
+    return v.kind === "string" ? v.value : v;
+  };
+  return requireTdxImage("image manifest", {
+    mrtd: field("mrtd"),
+    rtmr1: field("rtmr1"),
+    rtmr2: field("rtmr2"),
+  } as TdxImage);
+}
+
+/** The member whose key equals `name` in any letter case, as encoding/json matches fields. */
+function member(members: Map<string, JsonValue>, name: string): JsonValue | undefined {
+  for (const [key, value] of members) if (key.toLowerCase() === name) return value;
+  return undefined;
+}
+
+/**
+ * Refuse a key named twice in one object in any letter case, anywhere in the
+ * document: encoding/json would load the last spelling, not the one a reviewer
+ * read.
+ */
+function rejectFoldedDuplicates(value: JsonValue): void {
+  if (value.kind === "array") {
+    value.items.forEach(rejectFoldedDuplicates);
+    return;
+  }
+  if (value.kind !== "object") return;
+  const seen = new Set<string>();
+  for (const [key, child] of value.members) {
+    const folded = key.toLowerCase();
+    if (seen.has(folded)) {
+      fail("invalid_request", `image manifest: duplicate ${JSON.stringify(key)} key`);
+    }
+    seen.add(folded);
+    rejectFoldedDuplicates(child);
+  }
 }

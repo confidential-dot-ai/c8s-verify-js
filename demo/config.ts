@@ -9,3 +9,6 @@ export const DEMO_PLATFORM = "snp";
 // live identity transcript. A real TEE LB binds the transcript hash; the demo
 // therefore runs with freshness enforcement downgraded to a warning.
 export const DEMO_REQUIRE_FRESHNESS = false;
+// The route digest the mock LB commits. A real router commits SHA-256 of the
+// route manifest it applied (`c8s routes digest`); the mock has none.
+export const DEMO_ROUTE_DIGEST = "5a".repeat(32);

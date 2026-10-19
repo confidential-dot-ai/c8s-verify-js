@@ -22,14 +22,15 @@ import { SESSION_ID_BYTES } from "./channel.js";
 export const BINDING_ATTEST_PQ = "c8s/attest-pq/v1";
 /**
  * Identity-transcript domain tag, shared with c8s pkg/overenc. Deliberately
- * NOT the bundle binding id above: the transcript construction (and the HKDF
- * info derived from it) is unchanged from the original protocol, only the
- * endpoint and its bundle version moved.
+ * NOT the bundle binding id above: the domain tag (and the HKDF info labels
+ * sharing it) predates the endpoint and its bundle version.
  */
 export const TRANSCRIPT_DOMAIN_TAG = "c8s-verify/v1";
 export const IDENTITY_PROOF_ALGORITHM = "ecdsa-sha384";
 /** SHA-384 transcript hash length; also the v1 HKDF context length. */
 export const IDENTITY_TRANSCRIPT_BYTES = 48;
+/** Route digest length: SHA-256 of the route manifest the router applied. */
+export const ROUTE_DIGEST_BYTES = 32;
 
 const TRANSCRIPT_DOMAIN = utf8ToBytes(TRANSCRIPT_DOMAIN_TAG);
 
@@ -55,7 +56,7 @@ async function sha256(input: Uint8Array): Promise<Uint8Array> {
  * Compute the v1 report_data transcript shared with c8s/pkg/overenc. It
  * commits the front-door mode and the complete key exchange — the client's
  * X-Wing encapsulation key, the server's ciphertext, the session id, and the
- * nonce — plus the exact mesh leaf and issuing mesh CA.
+ * nonce — plus the exact mesh leaf, the issuing mesh CA, and the route digest.
  */
 export async function identityTranscriptHash(
   frontDoorMode: string,
@@ -65,6 +66,7 @@ export async function identityTranscriptHash(
   nonce: Uint8Array,
   leafDer: Uint8Array,
   caDer: Uint8Array,
+  routeDigest: Uint8Array,
 ): Promise<Uint8Array> {
   if (frontDoorMode === "") {
     fail("identity_binding", "identity transcript requires a front-door mode");
@@ -96,6 +98,12 @@ export async function identityTranscriptHash(
   if (leafDer.length === 0 || caDer.length === 0) {
     fail("identity_binding", "identity transcript requires leaf and CA certificates");
   }
+  if (routeDigest.length !== ROUTE_DIGEST_BYTES) {
+    fail(
+      "identity_binding",
+      `identity transcript route digest must be ${ROUTE_DIGEST_BYTES} bytes, got ${routeDigest.length}`,
+    );
+  }
 
   // Most-stable fields first so a signer can reuse the hash state across sessions.
   const encoded = concatBytes(
@@ -107,6 +115,7 @@ export async function identityTranscriptHash(
     lengthPrefixed(xwingCt),
     lengthPrefixed(sessionId),
     lengthPrefixed(nonce),
+    lengthPrefixed(routeDigest),
   );
   return new Uint8Array(await subtle().digest("SHA-384", encoded));
 }

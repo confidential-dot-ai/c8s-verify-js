@@ -1,0 +1,1524 @@
+{
+  "description": "Edge cases for verifying a signed route manifest envelope served at /.well-known/c8s/routes, with the verdict of the c8s pkg/routes code: envelopes verify under operator_keys_pem (P-256, P-384, P-521); manifests are bare manifest bytes (standard base64) checked against the schema; normalize and select pin request-path normalization and route selection, without reserved paths.",
+  "operator_keys_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+fzEuM8yuB1Cu9JD5CR7Y1Rgn19x\nItHFrUmV7TdUzar9CXCzErmgzpBT0w5wFDU+iHfzYkyx0JC5QtiNM1pLaw==\n-----END PUBLIC KEY-----\n-----BEGIN PUBLIC KEY-----\nMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEo9FlFL0FGVUUsvYfZWuTM4Anx+CYCQE0\noPCOnJutVKkQH7WjS3zhEZ3/bzUqRXoERozpecQzm1WoGfjUaewwQQRqJFUlv3xt\n9QdeTJbKFIvS8TA6HiC03zW0ZIIw2S0q\n-----END PUBLIC KEY-----\n-----BEGIN PUBLIC KEY-----\nMIGbMBAGByqGSM49AgEGBSuBBAAjA4GGAAQAmK+FtmDDqoq7QQGDm2EeJVxXHwND\nixjufplBa7KeOmKw/1ic6/eX+FEYtsNKdYUczImpDK0Bj8m1zpfP/GmhSngBXVgd\nItTKmbYV/3AwLVxDjweJnQarIvkbfMXy95D72hxbG+CyxRmttM/aUZhtaQyeYUct\nK41/yABNHSm+k0PekS4=\n-----END PUBLIC KEY-----\n",
+  "envelopes": [
+    {
+      "name": "ES256 under P-256",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.F2MUQSH3Vs5UNahYWVS4t-prlVY78qOxHbQIigQZe1tR2eJOoVZigK16TRMHSTzL_waaTF3LS1JETrosp2G5BQ\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "ES384 under P-384",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzM4NCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.n64tzxRiyww5g4LyqeESUd6pu5LCQvm8fsRA-fFskwbfzs4qhye6MqyhM_dPwzazGlb6JA-c-n-r4SRDEUhReQFD5TjobweGKxNRddyEaMqDp3dTBJxRWW_SJukUV8B4\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "ES512 under P-521",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzUxMiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.AT39khifW8tac6iusmJfKQFcHQ11PnR9Exu1aF-2S_CHum8IBbkuljn2c4dSGVSv1gKMouScvkyQGDSb31wxuz-nATaUisw_CcNSXRcpvO6Wdkm4yHkaKDP9q6Zn7TM3u2cYpqZ8JPMOGe5JpICE2wlZ9LG0IHjXL2U9iv4YDngRTBy1\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "ES384 signature by the P-256 key",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzM4NCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.AAAAAAAAAAAAAAAAAAAAAP-GKG8_zzuOotrrIOHEcVwCoypHgcNJ9um9fXMTgW-3AAAAAAAAAAAAAAAAAAAAAB1BFAUP7AYSGgJKqbS8NxusL66vm8oWthbr-DVAsLWt\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "crit header",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsImNyaXQiOlsiZXhwIl19.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.-kXdI2hKL3evi5wuprMPgTmzaEGtjvQj_EzwidYd_gOtdjIHk7PZDCu9Nxm5tgBAD2CSs4SjOiNTrNsZ7H5GLg\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "empty crit header",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsImNyaXQiOltdfQ.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.yV-QYRpJpPbt6yl-PutuzBvrfRqkvuqXskT4c6GdIUfHcoLvigWnMECTlr1UYZedCLfkVtQoOGkWWCL6bl651Q\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "ES512 signature by the P-384 key",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzUxMiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.AAAAAAAAAAAAAAAAAAAAAAAAucy3OMYa9cOEXdhvaI7m0hXAKD1SfRYctPQdvYwaO5aUtPHs0__vJ4xU_f8yMdpVAAAAAAAAAAAAAAAAAAAAAAAA_ANQNhfrEuZjIdx_T8EtcoM0Jr-LoG-L2AEWWLY72ZE2ivx9Y5ai7Gh6lO391BS6\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "ES256 header, signed by an untrusted key",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.-qjiIwhaZTzaApvjxR8Xp5aR364Fcwo1po8O1cNCPDy92Idl4sA4M6SqtIkk5iwtJLLx8RuuK-pfWZaEABbWOw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token signature is invalid: crypto/ecdsa: verification error"
+    },
+    {
+      "name": "DER signature",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.MEYCIQDJTTk7si8A8vpI_X0F20_tE0Kpm8kyd4jrwvXXOtprlgIhAKDHshcJT8E9o4OvLtxTx5To2JWHNz1kf0bXxGpGxmU2\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token signature is invalid: crypto/ecdsa: verification error"
+    },
+    {
+      "name": "padded signature segment",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.NuGqX4IEb3mYuC9F_2YpBQ3T6vJEDAUnSP-9otm0Nf_zzkNlT1uoAXyWNdETJGPRKWF5FOQPAVohL79CIqF6mg==\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: could not base64 decode signature: illegal base64 data at input byte 86"
+    },
+    {
+      "name": "newline inside the signature segment",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.kJn-6Ecrlrf24jXNnwpi-duGBv1pgcmIed9l7SBN\\nyeBemYabUKZwj3OSWity0-y1SmpKPSSUO6vM6tGOrOrlZw\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "non-zero trailing bits in the signature segment",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.8XDmVEMAQJo02Vn4nuPu1LiNFTLbsvSU6vO1P60zQ820Jn_wZtJxcpB_cqNC6vAAMdCcAKNnjOCu8lF7gZu2PT\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "four token segments",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.iJGQK6CL1wqN2uaMEU1FTpjGHjud3Pmluunf9rIGIT6P_AJ4V1M5BgI5HBgJajLWPQeIPgPa4KBWJUsdorGGsA.x\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: token contains an invalid number of segments"
+    },
+    {
+      "name": "Bearer prefix",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.t5HqYEEX2dPerQwViIPMIYHx5VHjJtGyw11zal7SoH3_5pGi-0pnZdd3r7ql99YZ6nm2YrjQb4YuhqSpA39LEA\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: could not base64 decode header: illegal base64 data at input byte 6"
+    },
+    {
+      "name": "alg none",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJub25lIn0.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token signature is invalid: signing method none is invalid"
+    },
+    {
+      "name": "alg missing",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJ0eXAiOiJKV1QifQ.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.6fEcqlCpgI7FQNE6si_h_gEFz1yTPLtlOsMTBtKYrjuQWR6vpCPkOwCJdKkjoGnnxYJ1ZAUmW6VOY1OFQQxfaw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is unverifiable: signing method (alg) is unspecified"
+    },
+    {
+      "name": "alg HS256",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.fSBUlMJdgiGhRx-ZsiWfElL0grtCVGAY9Z4kAB8FvNh3Ljo6HankKumYJvlo9pSuIV-K8pK5-wsh3dzJ3sjGUA\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token signature is invalid: signing method HS256 is invalid"
+    },
+    {
+      "name": "duplicate alg, last ES256",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJub25lIiwiYWxnIjoiRVMyNTYifQ.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.-KidPfJprM6BtNa9rEudG-cVURsz6bAPz9WkkxZjcqAKykPD0RdwoRy9n6BqJ-F2mM9b_-RfQQ4k68bthafV9A\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "header not an object",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"WyJFUzI1NiJd.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.LvhpKhZ1yy-12kdrphqpFBDqM1CZ7qtDS9pAD0rWhhUFvcY63Igegtcst2gkin1bXvLB-GZaMdd2PGgV2slUsw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode header: json: cannot unmarshal array into Go value of type map[string]interface {}"
+    },
+    {
+      "name": "header with trailing data",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9IHt9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.hWjam0S2zDcCPvVPUsO8p-sg0LWX7dT2e0h8ipVVlCHIeBreB-PusHt4cLqF9zGbmU1I7PrbhtZiY5_Z-v_bSA\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode header: invalid character '{' after top-level value"
+    },
+    {
+      "name": "duplicate htm, last PUT",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBPU1QiLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.7TbjqOkacd_6LJHflVj8bRv1O1bbTt7SQb9CbLPe5Zj3_zY2X3C75dPBeebNfaL0igcnD4KL-hx-vknAzqKkUg\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "no time claims",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.uEuy2eD8_2kRyvlWrb9GnlsXoWwCZnWOn3r_U21pBaHdYtxdo76aFhYefGhBwHnGreXMVqNU773cqy8FImlGXA\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing iat claim"
+    },
+    {
+      "name": "expired, not yet valid",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYxLCJuYmYiOjk5OTk5OTk5OTk5LCJpYXQiOjEsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.fn8JuhMpbeJaGYNdE4-M8fVr8ytoj6Vz0LxuDD6lWBmK6Ae31HyhzMDWxVOQgB0PcTb68Iri6i33D3G5Ed6Wgw\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "iat missing",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.buqPQmUEwIzCZ6cXwAgHzwRYRwncD9AKBZN4cQ3BM6poH7noLNcMnXOdQewxOwxUZZDx2bMUlXvB-DQTOn5UPg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing iat claim"
+    },
+    {
+      "name": "exp missing",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.KDcbXycie4Hdsr04VUw46_CngSHx0wTix6e_3B5SWjP8B6TtgaCc9xuvMysoJzeTin8ExhMofkENGR9hN6e1yw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing exp claim"
+    },
+    {
+      "name": "exp before iat",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjEsImlhdCI6MiwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.KlNSw1l3k6N6O9E8NyEHvmDevcUa41u55HnySGFyFzJ2_ESu56dPpZikbqXHZNe28RWeMCQpSS-WRg5m0mzZ6g\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token validity -1s outside (0, 5m0s]"
+    },
+    {
+      "name": "exp equal to iat",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjIsImlhdCI6MiwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.XGFcXGFzrISRkAkq82BNeBIfVf5KPYTz-p-AWfAzQSTfy6vzBfPtxDbCRRlFI3E9T_WD1iS5vX_Y9VlWhjI7zg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token validity 0s outside (0, 5m0s]"
+    },
+    {
+      "name": "validity at the 5 minute bound",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjMwMiwiaWF0IjoyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.ACri6E4pvTHgDnpqjv1A2JgTV6Iqn-MPeqalZBsZ3XFn-RVfegvoIsxDx07g4RIxdcxJyyqQamdwp5dD2OWFDg\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "validity past the 5 minute bound",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjMwMywiaWF0IjoyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwicGJoIjoiNEVkSG1NNXR1X2lIRi14anpaQld6Q2ZKaHMtdUhaRHBnTmZ2Qnp4ZmxiWSJ9.utSuk9y22Fm2Hh0v5ueTBdQhG-nu9yFhMcg3evKEhXsQYd36ZJiTI20405Csa3qI__jvrllw_3VOYVUZyOuoZg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token validity 5m1s outside (0, 5m0s]"
+    },
+    {
+      "name": "fractional times truncate to seconds",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjMwMi45LCJpYXQiOjIuMSwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.73o83elXFiW_TIAv3BAWPTBmgiqtV9R_F90oHA9_uxoQAHNMmEHkcOcDY7JpxYxXonG02ikI2sT1S9lxkegrKQ\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "iat as a string",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOiIyIiwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.Yckn0roae8o2Z5pHPZSEvXQPcpruFDh82l0Bv_F1BigmIUUQc77R6BmMn4BriliZ-O2Ynb3fgr2dmb9mMAhZRw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing iat claim"
+    },
+    {
+      "name": "negative times",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOi0xMDAsImlhdCI6LTE2MCwiaHRtIjoiUFVUIiwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.80nisqCbo2LS0wNGGuOCC3B4Sadeery98gTaFuMyp4Fkw5S6tmGRZBP8p-PXkApLHfhkDSCJxBdW5GvWugIung\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "htm lower case",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6InB1dCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.2DDoziOVYXE909FjCSV611k8ACqBKpRHyKXGWMUYfD5d9KuleI28KnYo3b_8wfkGfED7FPrQteJvawn35QnxIw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token htm \"put\" does not match request method \"PUT\""
+    },
+    {
+      "name": "htm not a string",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6WyJQVVQiXSwiaHR1IjoiL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.qr5Tlz_OZZpUIL4iB9eqhzGWYlKvxoGTZwfZQM6XenV_18hMbHK0oz2ghKHI0uhGxHxbA8mb-xhXuFN1DjIvQg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token htm \"\" does not match request method \"PUT\""
+    },
+    {
+      "name": "htu with host",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Imh0dHBzOi8vY2RzL3JvdXRlcyIsInBiaCI6IjRFZEhtTTV0dV9pSEYteGp6WkJXekNmSmhzLXVIWkRwZ05mdkJ6eGZsYlkifQ.j_VwK9mTIF4z2TreKoY-U9Vr0SpUBwzw7qNkDZlysMMTRJHKpPZrcNs-tlWlm4Rop6IjVKFj5zL_ZvShnxb5Uw\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token htu \"https://cds/routes\" does not match request path \"/routes\""
+    },
+    {
+      "name": "pbh missing",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMifQ.Q1M1s7XGaHTcnYcEbrA377KyNiZQsHxRkCKDfN6Ne0sUY-TgA250jR1fpE1UTbnKz1ZMJ_nlutgvg69gOIKXqQ\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token missing pbh claim"
+    },
+    {
+      "name": "pbh padded",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZPSJ9.xzUGPAdF69GkjziAQV1vmUlfJHqNbYCXCJor2ulKbsziSJ-c5hSVN4E6wgG3xX8YIq6WWALXKRsk21OT14NI7Q\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token pbh does not match request body"
+    },
+    {
+      "name": "pbh standard alphabet",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHUvaUhGK3hqelpCV3pDZkpocyt1SFpEcGdOZnZCenhmbGJZIn0.Om3GQF_TK-BwjAI3ZJTME5LFPYyCeF-3haGHFL6xGbnzENMNHXqDcqtAIit7fSAYepTdA8ACojRsOrRrqPWb_Q\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token pbh does not match request body"
+    },
+    {
+      "name": "pbh hex",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiJlMDQ3NDc5OGNlNmRiYmY4ODcxN2VjNjNjZDkwNTZjYzI3Yzk4NmNmYWUxZDkwZTk4MGQ3ZWYwNzNjNWY5NWI2In0.6fYgn1lIXwgtHb5RcdYXH4WJRaqzDaxRf02IAH3BRqPCI0WG5nPMrvAmyA6m4IS8TGtCFD36bkVwcknZPGgN-A\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token pbh does not match request body"
+    },
+    {
+      "name": "claims with an overflowing number",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjFlNDAwLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.eZKi_afXGF2yj90z4-ak9_L1LBFaiaYscQNsxl42VM_fAAj9MRiGAgGNqUG76V1IKsD3EixuaWHNj4kt5lYzJg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode claim: json: cannot unmarshal number 1e400 into Go struct field MapClaims.exp of type float64"
+    },
+    {
+      "name": "header with an overflowing number",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsIngiOi0xZTk5OX0.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.KIfcf0KVSLue6Gmsoylxf7WGpsSlZwjCpyL14pAYSIqkxoLwEPF39XvRikyeDhsRatlPfZNAhkr7ku1kV9Zcew\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode header: json: cannot unmarshal number -1e999 into Go struct field .x of type float64"
+    },
+    {
+      "name": "claims with a large finite number",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjFlMzA4LCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.cIn_g2fvAeka67pAwLx-fcaaAb4fboMAItX8OanN-ZnVdI36HSPUEPq0aULTJnEmgZEOBSd9xTL3FY20_A2Mmg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token validity -2562047h47m16.854775808s outside (0, 5m0s]"
+    },
+    {
+      "name": "claims not an object",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.WyJQVVQiXQ.gcUkCfXjNWhI4zNhr2npruO-Qe21wDiiuvgPIPXuvk2ms6kHJXgtTtlutk5VA3PLFbwOhcD5DUjxmT9ZmaYwGg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode claim: json: cannot unmarshal array into Go value of type jwt.MapClaims"
+    },
+    {
+      "name": "claims with trailing data",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjYyLCJpYXQiOjIsImh0bSI6IlBVVCIsImh0dSI6Ii9yb3V0ZXMiLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0ge30.p2SUiB94hLoaYSnsqCs5l-FByNCIKspr8AkLsD32DVVfEWuBA7BF4X6Ffnu8wgpymCizP5WNvr44iZN3vFHPmg\"}",
+      "valid": false,
+      "c8s_error": "verify route write token: operator token invalid: token is malformed: could not JSON decode claim: invalid character '{' after top-level value"
+    },
+    {
+      "name": "envelope members reordered, spaced",
+      "envelope": " {\n \"token\" : \"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\" ,\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\" }\n",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "envelope duplicate token",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
+      "valid": false,
+      "c8s_error": "route envelope: duplicate JSON object key"
+    },
+    {
+      "name": "envelope missing token",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\"}",
+      "valid": false,
+      "c8s_error": "route envelope: missing member \"token\""
+    },
+    {
+      "name": "envelope token null",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":null}",
+      "valid": false,
+      "c8s_error": "route envelope: token: must be a string"
+    },
+    {
+      "name": "envelope trailing document",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}{}",
+      "valid": false,
+      "c8s_error": "invalid character '{' after top-level value"
+    },
+    {
+      "name": "envelope leading BOM",
+      "envelope": "﻿{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
+      "valid": false,
+      "c8s_error": "invalid character '\\ufeff' looking for beginning of value"
+    },
+    {
+      "name": "envelope not an object",
+      "envelope": "[\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"]",
+      "valid": false,
+      "c8s_error": "route envelope: must be an object"
+    },
+    {
+      "name": "envelope manifest URL-safe base64",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F-IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
+      "valid": false,
+      "c8s_error": "route envelope: manifest is not standard padded base64"
+    },
+    {
+      "name": "envelope manifest with newline",
+      "envelope": "{\"manifest\":\"eyJzY2hl\\nbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
+      "valid": false,
+      "c8s_error": "route envelope: manifest is not standard padded base64"
+    },
+    {
+      "name": "envelope manifest with an escaped plus",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F\\u002bIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\"}",
+      "valid": true,
+      "route_digest": "e0474798ce6dbbf88717ec63cd9056cc27c986cfae1d90e980d7ef073c5f95b6",
+      "revision": 7
+    },
+    {
+      "name": "envelope unpaired surrogate in token",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiI0RWRIbU01dHVfaUhGLXhqelpCV3pDZkpocy11SFpEcGdOZnZCenhmbGJZIn0.w-FFwiWTzlLz92pI8Fpev77Xucs6FcHS5yqhu5RpOb1M4wp2CxsNYK1vZrluoR318BpGPstm_8xJ3LFsGZvfnQ\\ud800\"}",
+      "valid": false,
+      "c8s_error": "route envelope: unpaired Unicode surrogate"
+    },
+    {
+      "name": "signed manifest with a duplicate member",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsInJldmlzaW9uIjo4LCJub3RCZWZvcmUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwWiIsIm1heEFnZVNlY29uZHMiOjM2MDAsImhvc3RzIjp7fX0=\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiJyQUF5dE4zWWZEZ1l5c1QwRkVvems1bWtNSUtINlVFSnF1OXBDUTVZV1J3In0.uyx6ZLn6sGs9jsxwV7e1tFizUvc49auWoHzPBgpnjv9zzou7iI-iTCCjtM8SIYYm2Nj74DEEOFngVP1tZj66OA\"}",
+      "valid": false,
+      "c8s_error": "route manifest: duplicate JSON object key"
+    },
+    {
+      "name": "signed manifest with trailing data",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0ge30=\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiJQbC1DZkFvZFppQk9HLVJSVWdtUThxX1J0cU5OZjZoQS0zcHp6bzNyYkdjIn0.rXn7R-012lKKuKZHL-nMbLnVM5FiXD0B9_j26MpbpR67Pc9UeTkfD_brSSTIrb8ahjy4exHgcuWY9CrUaYuJaw\"}",
+      "valid": false,
+      "c8s_error": "route manifest: expected exactly one JSON document"
+    },
+    {
+      "name": "signed manifest with no hosts",
+      "envelope": "{\"manifest\":\"eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjksIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnt9fQ==\",\"token\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjYyLCJodG0iOiJQVVQiLCJodHUiOiIvcm91dGVzIiwiaWF0IjoyLCJwYmgiOiIwLVBpOFI4OWdaU3Y1Tkpaekd5bHo0Z3BXTVNhd09MdzJQTTBadncwdURRIn0.6qUdsKATlFNHdmk-Zd6NUNPriYC64COAYp7GnkZgXYMqut4DpghpBPaQ46yw4yZKzu4r2u2Y1rqYnso5Yyjr4w\"}",
+      "valid": true,
+      "route_digest": "d3e3e2f11f3d8194afe4d259cc6ca5cf882958c49ac0e2f0d8f33466fc34b834",
+      "revision": 9
+    }
+  ],
+  "manifests": [
+    {
+      "name": "default",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "trailing whitespace",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0KCSAN",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "leading BOM",
+      "manifest_b64": "77u/eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: invalid character in JSON at offset 3"
+    },
+    {
+      "name": "invalid UTF-8",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBa/yIsIm1heEFnZVNlY29uZHMiOjM2MDAsImhvc3RzIjp7ImFwcC5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6InZsbG0uYWkuc3ZjOjg0NDMiLCJ3b3JrbG9hZCI6InZsbG0ifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: JSON must be UTF-8"
+    },
+    {
+      "name": "unpaired high surrogate",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoid1x1ZDgwMCJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: unpaired Unicode surrogate"
+    },
+    {
+      "name": "unpaired low surrogate",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoid1x1ZGMwMCJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: unpaired Unicode surrogate"
+    },
+    {
+      "name": "paired surrogates in a workload",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoid/CfmIAifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.workload: \"w😀\" is not a valid allowlist workload name"
+    },
+    {
+      "name": "escaped workload",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "schema v2",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YyIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: schema: got \"c8s.routes/v2\", want \"c8s.routes/v1\""
+    },
+    {
+      "name": "Schema member case",
+      "manifest_b64": "eyJTY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: manifest: missing member \"schema\""
+    },
+    {
+      "name": "not an object",
+      "manifest_b64": "W10=",
+      "valid": false,
+      "c8s_error": "route manifest: manifest: must be an object"
+    },
+    {
+      "name": "null",
+      "manifest_b64": "bnVsbA==",
+      "valid": false,
+      "c8s_error": "route manifest: manifest: must be an object"
+    },
+    {
+      "name": "empty",
+      "manifest_b64": "",
+      "valid": false,
+      "c8s_error": "route manifest: JSON document is empty or truncated"
+    },
+    {
+      "name": "revision 1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjEsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 1
+    },
+    {
+      "name": "revision 9007199254740991",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjkwMDcxOTkyNTQ3NDA5OTEsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 9007199254740991
+    },
+    {
+      "name": "revision 0",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjAsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: revision: must be an integer from 1 to 9007199254740991"
+    },
+    {
+      "name": "revision 9007199254740992",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjkwMDcxOTkyNTQ3NDA5OTIsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: revision: must be an integer from 1 to 9007199254740991"
+    },
+    {
+      "name": "revision -1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOi0xLCJub3RCZWZvcmUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwWiIsIm1heEFnZVNlY29uZHMiOjM2MDAsImhvc3RzIjp7ImFwcC5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6InZsbG0uYWkuc3ZjOjg0NDMiLCJ3b3JrbG9hZCI6InZsbG0ifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: revision: must be an integer from 1 to 9007199254740991"
+    },
+    {
+      "name": "revision 01",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjAxLCJub3RCZWZvcmUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwWiIsIm1heEFnZVNlY29uZHMiOjM2MDAsImhvc3RzIjp7ImFwcC5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6InZsbG0uYWkuc3ZjOjg0NDMiLCJ3b3JrbG9hZCI6InZsbG0ifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: invalid character in JSON at offset 39"
+    },
+    {
+      "name": "revision 1.0",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjEuMCwibm90QmVmb3JlIjoiMjAyNi0wOS0wMVQwMDowMDowMFoiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: revision: must be an integer from 1 to 9007199254740991"
+    },
+    {
+      "name": "revision 1e3",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjFlMywibm90QmVmb3JlIjoiMjAyNi0wOS0wMVQwMDowMDowMFoiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: revision: must be an integer from 1 to 9007199254740991"
+    },
+    {
+      "name": "revision \"7\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOiI3Iiwibm90QmVmb3JlIjoiMjAyNi0wOS0wMVQwMDowMDowMFoiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: revision: must be an integer from 1 to 9007199254740991"
+    },
+    {
+      "name": "revision 18446744073709551616",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjE4NDQ2NzQ0MDczNzA5NTUxNjE2LCJub3RCZWZvcmUiOiIyMDI2LTA5LTAxVDAwOjAwOjAwWiIsIm1heEFnZVNlY29uZHMiOjM2MDAsImhvc3RzIjp7ImFwcC5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6InZsbG0uYWkuc3ZjOjg0NDMiLCJ3b3JrbG9hZCI6InZsbG0ifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: revision: must be an integer from 1 to 9007199254740991"
+    },
+    {
+      "name": "notBefore \"2026-09-01T00:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2026-09-01t00:00:00z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDF0MDA6MDA6MDB6IiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2026-09-01T00:00:00.123456789+05:30\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDAuMTIzNDU2Nzg5KzA1OjMwIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2026-09-01 00:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDEgMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: not an RFC 3339 date-time"
+    },
+    {
+      "name": "notBefore \"2026-9-01T00:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtOS0wMVQwMDowMDowMFoiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: not an RFC 3339 date-time"
+    },
+    {
+      "name": "notBefore \"2026-09-01T00:00:00\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDAiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: not an RFC 3339 date-time"
+    },
+    {
+      "name": "notBefore \"2026-09-01T00:00:00+24:00\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDArMjQ6MDAiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: not an RFC 3339 date-time"
+    },
+    {
+      "name": "notBefore \"2026-02-29T00:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDItMjlUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: parsing time \"2026-02-29T00:00:00Z\": day out of range"
+    },
+    {
+      "name": "notBefore \"2024-02-29T00:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjQtMDItMjlUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2026-13-01T00:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMTMtMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: parsing time \"2026-13-01T00:00:00Z\": month out of range"
+    },
+    {
+      "name": "notBefore \"2026-04-31T00:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDQtMzFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: parsing time \"2026-04-31T00:00:00Z\": day out of range"
+    },
+    {
+      "name": "notBefore \"2026-09-01T24:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMjQ6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: parsing time \"2026-09-01T24:00:00Z\": hour out of range"
+    },
+    {
+      "name": "notBefore \"2026-09-01T23:60:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMjM6NjA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: parsing time \"2026-09-01T23:60:00Z\": minute out of range"
+    },
+    {
+      "name": "notBefore \"0000-01-01T00:00:00Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjAwMDAtMDEtMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2016-12-31T23:59:60Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMTYtMTItMzFUMjM6NTk6NjBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2016-06-30T23:59:60Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMTYtMDYtMzBUMjM6NTk6NjBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2016-12-30T23:59:60Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMTYtMTItMzBUMjM6NTk6NjBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: second 60 is only valid at 23:59 UTC on 30 June or 31 December"
+    },
+    {
+      "name": "notBefore \"2016-12-31T22:59:60Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMTYtMTItMzFUMjI6NTk6NjBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: second 60 is only valid at 23:59 UTC on 30 June or 31 December"
+    },
+    {
+      "name": "notBefore \"2016-12-31T18:59:60-05:00\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMTYtMTItMzFUMTg6NTk6NjAtMDU6MDAiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2017-01-01T00:59:60+01:00\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMTctMDEtMDFUMDA6NTk6NjArMDE6MDAiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "notBefore \"2016-12-31T23:59:61Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMTYtMTItMzFUMjM6NTk6NjFaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: parsing time \"2016-12-31T23:59:61Z\": second out of range"
+    },
+    {
+      "name": "notBefore \"2026-09-01T00:00:00,5Z\"",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDAsNVoiLCJtYXhBZ2VTZWNvbmRzIjozNjAwLCJob3N0cyI6eyJhcHAuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ2bGxtLmFpLnN2Yzo4NDQzIiwid29ya2xvYWQiOiJ2bGxtIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: not an RFC 3339 date-time"
+    },
+    {
+      "name": "notBefore 1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6MSwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoidmxsbS5haS5zdmM6ODQ0MyIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: notBefore: must be a string"
+    },
+    {
+      "name": "maxAgeSeconds 2147483648",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MjE0NzQ4MzY0OCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: maxAgeSeconds: must be an integer from 1 to 2147483647"
+    },
+    {
+      "name": "maxAgeSeconds 2147483647",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MjE0NzQ4MzY0NywiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiL2F+IiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "hosts empty",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnt9fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "hosts array",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOltdfQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts: must be an object"
+    },
+    {
+      "name": "host app.example",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "host App.example",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiQXBwLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"App.example\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host app.example.",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGUuIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"app.example.\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host app.example:443",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLmV4YW1wbGU6NDQzIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"app.example:443\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host 1.2.3.4",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiMS4yLjMuNCI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"1.2.3.4\"]: must not be an IP literal"
+    },
+    {
+      "name": "host app.123",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLjEyMyI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"app.123\"]: final label must not be numeric (it would parse as an IPv4 address)"
+    },
+    {
+      "name": "host app.0x1f",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLjB4MWYiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"app.0x1f\"]: final label must not be numeric (it would parse as an IPv4 address)"
+    },
+    {
+      "name": "host app.0x",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLjB4Ijp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"app.0x\"]: final label must not be numeric (it would parse as an IPv4 address)"
+    },
+    {
+      "name": "host app.1a",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLjFhIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "host -app.example",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiLWFwcC5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"-app.example\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host app-.example",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYXBwLS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"app-.example\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host a_b.example",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYV9iLmV4YW1wbGUiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a_b.example\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host xn--bcher-kva.example",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsieG4tLWJjaGVyLWt2YS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "host localhost",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsibG9jYWxob3N0Ijp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "host ::1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiOjoxIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"::1\"]: must not be an IP literal"
+    },
+    {
+      "name": "host aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.x",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhLngiOnsicm91dGVzIjpbeyJwYXRoIjoiLyIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "host aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.x",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYS54Ijp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.x\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host é.example",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiw6kuZXhhbXBsZSI6eyJyb3V0ZXMiOlt7InBhdGgiOiIvIiwibWF0Y2giOiJwcmVmaXgiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"é.example\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host ",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"\"]: not a lower-case DNS host name without port or trailing dot"
+    },
+    {
+      "name": "host with no routes",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W119fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes: must not be empty"
+    },
+    {
+      "name": "host with extra member",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV0sIngiOjF9fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"]: unknown member \"x\""
+    },
+    {
+      "name": "path /",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6ImV4YWN0IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "path /a/b/",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hL2IvIiwibWF0Y2giOiJleGFjdCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "path /a:b@c!$&'()*+,;=-._~",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hOmJAYyEkJicoKSorLDs9LS5ffiIsIm1hdGNoIjoiZXhhY3QiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "path a",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6ImEiLCJtYXRjaCI6ImV4YWN0IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: must begin with \"/\""
+    },
+    {
+      "name": "path /a//b",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hLy9iIiwibWF0Y2giOiJleGFjdCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: must not contain \"//\""
+    },
+    {
+      "name": "path /a/./b",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hLy4vYiIsIm1hdGNoIjoiZXhhY3QiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: must not contain a \".\" or \"..\" segment"
+    },
+    {
+      "name": "path /a/..",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hLy4uIiwibWF0Y2giOiJleGFjdCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: must not contain a \".\" or \"..\" segment"
+    },
+    {
+      "name": "path /a/%41",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hLyU0MSIsIm1hdGNoIjoiZXhhY3QiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: must not contain \"?\", \"#\" or percent-encoding"
+    },
+    {
+      "name": "path /a?b",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hP2IiLCJtYXRjaCI6ImV4YWN0IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: must not contain \"?\", \"#\" or percent-encoding"
+    },
+    {
+      "name": "path /a#b",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hI2IiLCJtYXRjaCI6ImV4YWN0IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: must not contain \"?\", \"#\" or percent-encoding"
+    },
+    {
+      "name": "path /a b",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hIGIiLCJtYXRjaCI6ImV4YWN0IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: byte ' ' at offset 2 is not allowed in a URI path"
+    },
+    {
+      "name": "path /é",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii/DqSIsIm1hdGNoIjoiZXhhY3QiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].path: byte 'Ã' at offset 1 is not allowed in a URI path"
+    },
+    {
+      "name": "path /a/.b",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hLy5iIiwibWF0Y2giOiJleGFjdCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "path /..a",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8uLmEiLCJtYXRjaCI6ImV4YWN0IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "match Prefix",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6IlByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].match: got \"Prefix\", want \"exact\" or \"prefix\""
+    },
+    {
+      "name": "same path, both matches",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hIiwibWF0Y2giOiJleGFjdCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fSx7InBhdGgiOiIvYSIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "same path and match twice",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hIiwibWF0Y2giOiJleGFjdCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fSx7InBhdGgiOiIvYSIsIm1hdGNoIjoiZXhhY3QiLCJiYWNrZW5kIjp7ImFkZHJlc3MiOiJ4OjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[1]: another route has path \"/a\" and match \"exact\""
+    },
+    {
+      "name": "route with extra member",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6ImV4YWN0IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In0sIndlaWdodCI6MX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0]: unknown member \"weight\""
+    },
+    {
+      "name": "address x:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address x:65535",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6NjU1MzUiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address x:65536",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6NjU1MzYiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: port \"65536\" is not a decimal integer from 1 to 65535"
+    },
+    {
+      "name": "address x:0",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: port \"0\" is not a decimal integer from 1 to 65535"
+    },
+    {
+      "name": "address x:01",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MDEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: port \"01\" is not a decimal integer from 1 to 65535"
+    },
+    {
+      "name": "address x:",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6Iiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: port \"\" is not a decimal integer from 1 to 65535"
+    },
+    {
+      "name": "address :80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ijo4MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address x",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IngiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: must be host:port"
+    },
+    {
+      "name": "address X.Example:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlguRXhhbXBsZTo4MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address 1.2.3.4:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IjEuMi4zLjQ6ODAiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address 01.2.3.4:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IjAxLjIuMy40OjgwIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address 256.1.1.1:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IjI1Ni4xLjEuMTo4MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [::1]:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ils6OjFdOjgwIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [1.2.3.4]:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxLjIuMy40XTo4MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [::ffff:1.2.3.4]:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ils6OmZmZmY6MS4yLjMuNF06ODAiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [fe80::1%eth0]:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IltmZTgwOjoxJWV0aDBdOjgwIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"fe80::1%eth0\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address [x]:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ilt4XTo4MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address ::1:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ijo6MTo4MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: must be host:port"
+    },
+    {
+      "name": "address [::1]80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ils6OjFdODAiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: must be host:port"
+    },
+    {
+      "name": "address [::1]",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ils6OjFdIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: must be host:port"
+    },
+    {
+      "name": "address a:b:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6ImE6Yjo4MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: must be host:port"
+    },
+    {
+      "name": "address x:+1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6KzEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: port \"+1\" is not a decimal integer from 1 to 65535"
+    },
+    {
+      "name": "address x_y:80",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6InhfeTo4MCIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"x_y\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address [1:2:3:4:5:6:7:8]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxOjI6Mzo0OjU6Njo3OjhdOjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [1:2:3:4:5:6:7::]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxOjI6Mzo0OjU6Njo3OjpdOjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [1::2::3]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxOjoyOjozXToxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"1::2::3\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address [12345::]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxMjM0NTo6XToxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"12345::\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address [::1.2.3]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ils6OjEuMi4zXToxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"::1.2.3\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address [1:2:3:4:5:6:1.2.3.4]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxOjI6Mzo0OjU6NjoxLjIuMy40XToxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [1:2:3:4:5:6:7:1.2.3.4]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxOjI6Mzo0OjU6Njo3OjEuMi4zLjRdOjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"1:2:3:4:5:6:7:1.2.3.4\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address []:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IltdOjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address [1:2:3]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxOjI6M106MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"1:2:3\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address [1:2::3:4:5:6:7:8]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxOjI6OjM6NDo1OjY6Nzo4XToxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"1:2::3:4:5:6:7:8\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "address [::]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ils6Ol06MSIsIndvcmtsb2FkIjoidyJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [1::]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxOjpdOjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [::1.2.3.4]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ils6OjEuMi4zLjRdOjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address [1.2.3.4::]:1",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6IlsxLjIuMy40OjpdOjEiLCJ3b3JrbG9hZCI6IncifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.address: host \"1.2.3.4::\" is neither an IP address nor a DNS name"
+    },
+    {
+      "name": "workload vllm",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidmxsbSJ9fV19fX0=",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "workload A0._-",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoiQTAuXy0ifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "workload a.",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoiYS4ifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "workload aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIn19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "workload aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoiYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.workload: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" is not a valid allowlist workload name"
+    },
+    {
+      "name": "workload .a",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoiLmEifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.workload: \".a\" is not a valid allowlist workload name"
+    },
+    {
+      "name": "workload -a",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoiLWEifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.workload: \"-a\" is not a valid allowlist workload name"
+    },
+    {
+      "name": "workload a/b",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoiYS9iIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.workload: \"a/b\" is not a valid allowlist workload name"
+    },
+    {
+      "name": "workload ",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoiIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.workload: \"\" is not a valid allowlist workload name"
+    },
+    {
+      "name": "address backend",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJBZG1pbi5vcHMuc3ZjIiwiY2EiOiItLS0tLUJFR0lOIENFUlRJRklDQVRFLS0tLS1cbk1JSUJqVENDQVRPZ0F3SUJBZ0lVR2xrMVpmQWEwTzE1aGdUcVRsTHYzQ3dSVzFVd0NnWUlLb1pJemowRUF3SXdcbkd6RVpNQmNHQTFVRUF3d1FZV1J0YVc0dFkyRXVaWGhoYlhCc1pUQWdGdzB5TmpFd01Ea3lNak01TVRWYUdBOHlcbk1USTJNRGt4TlRJeU16a3hOVm93R3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRCWk1CTUdcbkJ5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEEwSUFCRENmUnFsNXd6QU9Yc3hERVBhOXlhTGlsOUVVd3NMUG8yZk1cbkl0MzdNTjh1R3c4UzJFRDhYMWQ1TVZrMmwzSVllV3ZuZGxndllQY3FESEhOaVU2RTJiQ2pVekJSTUIwR0ExVWRcbkRnUVdCQlF1anE3QkM1Nmx6OE5LSEthS1U3UWtYU2pIUFRBZkJnTlZIU01FR0RBV2dCUXVqcTdCQzU2bHo4TktcbkhLYUtVN1FrWFNqSFBUQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01Bb0dDQ3FHU000OUJBTUNBMGdBTUVVQ0lCbk1cbkQveDNYR2JhVTZCRmp6ZWs2UEZ6R2JUNUo1ZTU2Um5tOVFzeXFWUjVBaUVBaVlhUlZtSE5YaG0ycXVTTDJ4K1lcbnNybW0yR1FxcXhwWXZwbzlzbEs0QldZPVxuLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLVxuIn19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address backend, IP serverName",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiIxLjIuMy40IiwiY2EiOiItLS0tLUJFR0lOIENFUlRJRklDQVRFLS0tLS1cbk1JSUJqVENDQVRPZ0F3SUJBZ0lVR2xrMVpmQWEwTzE1aGdUcVRsTHYzQ3dSVzFVd0NnWUlLb1pJemowRUF3SXdcbkd6RVpNQmNHQTFVRUF3d1FZV1J0YVc0dFkyRXVaWGhoYlhCc1pUQWdGdzB5TmpFd01Ea3lNak01TVRWYUdBOHlcbk1USTJNRGt4TlRJeU16a3hOVm93R3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRCWk1CTUdcbkJ5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEEwSUFCRENmUnFsNXd6QU9Yc3hERVBhOXlhTGlsOUVVd3NMUG8yZk1cbkl0MzdNTjh1R3c4UzJFRDhYMWQ1TVZrMmwzSVllV3ZuZGxndllQY3FESEhOaVU2RTJiQ2pVekJSTUIwR0ExVWRcbkRnUVdCQlF1anE3QkM1Nmx6OE5LSEthS1U3UWtYU2pIUFRBZkJnTlZIU01FR0RBV2dCUXVqcTdCQzU2bHo4TktcbkhLYUtVN1FrWFNqSFBUQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01Bb0dDQ3FHU000OUJBTUNBMGdBTUVVQ0lCbk1cbkQveDNYR2JhVTZCRmp6ZWs2UEZ6R2JUNUo1ZTU2Um5tOVFzeXFWUjVBaUVBaVlhUlZtSE5YaG0ycXVTTDJ4K1lcbnNybW0yR1FxcXhwWXZwbzlzbEs0QldZPVxuLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLVxuIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.serverName: final label must not be numeric (it would parse as an IPv4 address)"
+    },
+    {
+      "name": "address backend, two certificates",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6IlxuICAtLS0tLUJFR0lOIENFUlRJRklDQVRFLS0tLS1cbk1JSUJqVENDQVRPZ0F3SUJBZ0lVR2xrMVpmQWEwTzE1aGdUcVRsTHYzQ3dSVzFVd0NnWUlLb1pJemowRUF3SXdcbkd6RVpNQmNHQTFVRUF3d1FZV1J0YVc0dFkyRXVaWGhoYlhCc1pUQWdGdzB5TmpFd01Ea3lNak01TVRWYUdBOHlcbk1USTJNRGt4TlRJeU16a3hOVm93R3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRCWk1CTUdcbkJ5cUdTTTQ5QWdFR0NDcUdTTTQ5QXdFSEEwSUFCRENmUnFsNXd6QU9Yc3hERVBhOXlhTGlsOUVVd3NMUG8yZk1cbkl0MzdNTjh1R3c4UzJFRDhYMWQ1TVZrMmwzSVllV3ZuZGxndllQY3FESEhOaVU2RTJiQ2pVekJSTUIwR0ExVWRcbkRnUVdCQlF1anE3QkM1Nmx6OE5LSEthS1U3UWtYU2pIUFRBZkJnTlZIU01FR0RBV2dCUXVqcTdCQzU2bHo4TktcbkhLYUtVN1FrWFNqSFBUQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01Bb0dDQ3FHU000OUJBTUNBMGdBTUVVQ0lCbk1cbkQveDNYR2JhVTZCRmp6ZWs2UEZ6R2JUNUo1ZTU2Um5tOVFzeXFWUjVBaUVBaVlhUlZtSE5YaG0ycXVTTDJ4K1lcbnNybW0yR1FxcXhwWXZwbzlzbEs0QldZPVxuLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLVxuXHJcbi0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuTUlJQmpUQ0NBVE9nQXdJQkFnSVVHbGsxWmZBYTBPMTVoZ1RxVGxMdjNDd1JXMVV3Q2dZSUtvWkl6ajBFQXdJd1xuR3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRBZ0Z3MHlOakV3TURreU1qTTVNVFZhR0E4eVxuTVRJMk1Ea3hOVEl5TXpreE5Wb3dHekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEJaTUJNR1xuQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VIQTBJQUJEQ2ZScWw1d3pBT1hzeERFUGE5eWFMaWw5RVV3c0xQbzJmTVxuSXQzN01OOHVHdzhTMkVEOFgxZDVNVmsybDNJWWVXdm5kbGd2WVBjcURISE5pVTZFMmJDalV6QlJNQjBHQTFVZFxuRGdRV0JCUXVqcTdCQzU2bHo4TktIS2FLVTdRa1hTakhQVEFmQmdOVkhTTUVHREFXZ0JRdWpxN0JDNTZsejhOS1xuSEthS1U3UWtYU2pIUFRBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUJuTVxuRC94M1hHYmFVNkJGanplazZQRnpHYlQ1SjVlNTZSbm05UXN5cVZSNUFpRUFpWWFSVm1ITlhobTJxdVNMMngrWVxuc3JtbTJHUXFxeHBZdnBvOXNsSzRCV1k9XG4tLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tXG4ifX1dfX19",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address backend, CRLF certificate",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxyXG5NSUlCalRDQ0FUT2dBd0lCQWdJVUdsazFaZkFhME8xNWhnVHFUbEx2M0N3UlcxVXdDZ1lJS29aSXpqMEVBd0l3XHJcbkd6RVpNQmNHQTFVRUF3d1FZV1J0YVc0dFkyRXVaWGhoYlhCc1pUQWdGdzB5TmpFd01Ea3lNak01TVRWYUdBOHlcclxuTVRJMk1Ea3hOVEl5TXpreE5Wb3dHekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEJaTUJNR1xyXG5CeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkRDZlJxbDV3ekFPWHN4REVQYTl5YUxpbDlFVXdzTFBvMmZNXHJcbkl0MzdNTjh1R3c4UzJFRDhYMWQ1TVZrMmwzSVllV3ZuZGxndllQY3FESEhOaVU2RTJiQ2pVekJSTUIwR0ExVWRcclxuRGdRV0JCUXVqcTdCQzU2bHo4TktIS2FLVTdRa1hTakhQVEFmQmdOVkhTTUVHREFXZ0JRdWpxN0JDNTZsejhOS1xyXG5IS2FLVTdRa1hTakhQVEFQQmdOVkhSTUJBZjhFQlRBREFRSC9NQW9HQ0NxR1NNNDlCQU1DQTBnQU1FVUNJQm5NXHJcbkQveDNYR2JhVTZCRmp6ZWs2UEZ6R2JUNUo1ZTU2Um5tOVFzeXFWUjVBaUVBaVlhUlZtSE5YaG0ycXVTTDJ4K1lcclxuc3JtbTJHUXFxeHBZdnBvOXNsSzRCV1k9XHJcbi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS1cclxuIn19XX19fQ==",
+      "valid": true,
+      "revision": 7
+    },
+    {
+      "name": "address backend, text after",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuTUlJQmpUQ0NBVE9nQXdJQkFnSVVHbGsxWmZBYTBPMTVoZ1RxVGxMdjNDd1JXMVV3Q2dZSUtvWkl6ajBFQXdJd1xuR3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRBZ0Z3MHlOakV3TURreU1qTTVNVFZhR0E4eVxuTVRJMk1Ea3hOVEl5TXpreE5Wb3dHekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEJaTUJNR1xuQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VIQTBJQUJEQ2ZScWw1d3pBT1hzeERFUGE5eWFMaWw5RVV3c0xQbzJmTVxuSXQzN01OOHVHdzhTMkVEOFgxZDVNVmsybDNJWWVXdm5kbGd2WVBjcURISE5pVTZFMmJDalV6QlJNQjBHQTFVZFxuRGdRV0JCUXVqcTdCQzU2bHo4TktIS2FLVTdRa1hTakhQVEFmQmdOVkhTTUVHREFXZ0JRdWpxN0JDNTZsejhOS1xuSEthS1U3UWtYU2pIUFRBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUJuTVxuRC94M1hHYmFVNkJGanplazZQRnpHYlQ1SjVlNTZSbm05UXN5cVZSNUFpRUFpWWFSVm1ITlhobTJxdVNMMngrWVxuc3JtbTJHUXFxeHBZdnBvOXNsSzRCV1k9XG4tLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tXG54In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: data outside PEM blocks"
+    },
+    {
+      "name": "address backend, text before",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Inhcbi0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuTUlJQmpUQ0NBVE9nQXdJQkFnSVVHbGsxWmZBYTBPMTVoZ1RxVGxMdjNDd1JXMVV3Q2dZSUtvWkl6ajBFQXdJd1xuR3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRBZ0Z3MHlOakV3TURreU1qTTVNVFZhR0E4eVxuTVRJMk1Ea3hOVEl5TXpreE5Wb3dHekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEJaTUJNR1xuQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VIQTBJQUJEQ2ZScWw1d3pBT1hzeERFUGE5eWFMaWw5RVV3c0xQbzJmTVxuSXQzN01OOHVHdzhTMkVEOFgxZDVNVmsybDNJWWVXdm5kbGd2WVBjcURISE5pVTZFMmJDalV6QlJNQjBHQTFVZFxuRGdRV0JCUXVqcTdCQzU2bHo4TktIS2FLVTdRa1hTakhQVEFmQmdOVkhTTUVHREFXZ0JRdWpxN0JDNTZsejhOS1xuSEthS1U3UWtYU2pIUFRBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUJuTVxuRC94M1hHYmFVNkJGanplazZQRnpHYlQ1SjVlNTZSbm05UXN5cVZSNUFpRUFpWWFSVm1ITlhobTJxdVNMMngrWVxuc3JtbTJHUXFxeHBZdnBvOXNsSzRCV1k9XG4tLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tXG4ifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: data outside PEM blocks"
+    },
+    {
+      "name": "address backend, PEM headers",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuUHJvYy1UeXBlOiA0LEVOQ1JZUFRFRFxuXG5NSUlCalRDQ0FUT2dBd0lCQWdJVUdsazFaZkFhME8xNWhnVHFUbEx2M0N3UlcxVXdDZ1lJS29aSXpqMEVBd0l3XG5HekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEFnRncweU5qRXdNRGt5TWpNNU1UVmFHQTh5XG5NVEkyTURreE5USXlNemt4TlZvd0d6RVpNQmNHQTFVRUF3d1FZV1J0YVc0dFkyRXVaWGhoYlhCc1pUQlpNQk1HXG5CeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkRDZlJxbDV3ekFPWHN4REVQYTl5YUxpbDlFVXdzTFBvMmZNXG5JdDM3TU44dUd3OFMyRUQ4WDFkNU1WazJsM0lZZVd2bmRsZ3ZZUGNxREhITmlVNkUyYkNqVXpCUk1CMEdBMVVkXG5EZ1FXQkJRdWpxN0JDNTZsejhOS0hLYUtVN1FrWFNqSFBUQWZCZ05WSFNNRUdEQVdnQlF1anE3QkM1Nmx6OE5LXG5IS2FLVTdRa1hTakhQVEFQQmdOVkhSTUJBZjhFQlRBREFRSC9NQW9HQ0NxR1NNNDlCQU1DQTBnQU1FVUNJQm5NXG5EL3gzWEdiYVU2QkZqemVrNlBGekdiVDVKNWU1NlJubTlRc3lxVlI1QWlFQWlZYVJWbUhOWGhtMnF1U0wyeCtZXG5zcm1tMkdRcXF4cFl2cG85c2xLNEJXWT1cbi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS1cbiJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: PEM block has headers"
+    },
+    {
+      "name": "address backend, PUBLIC KEY block",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gUFVCTElDIEtFWS0tLS0tXG5NRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUUrZnpFdU04eXVCMUN1OUpENUNSN1kxUmduMTl4XG5JdEhGclVtVjdUZFV6YXI5Q1hDekVybWd6cEJUMHc1d0ZEVStpSGZ6WWt5eDBKQzVRdGlOTTFwTGF3PT1cbi0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLVxuIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: PEM block \"PUBLIC KEY\" is not a CERTIFICATE"
+    },
+    {
+      "name": "address backend, empty ca",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6IiJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: must hold at least one CERTIFICATE block"
+    },
+    {
+      "name": "address backend, broken base64",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuTSFJQmpUQ0NBVE9nQXdJQkFnSVVHbGsxWmZBYTBPMTVoZ1RxVGxMdjNDd1JXMVV3Q2dZSUtvWkl6ajBFQXdJd1xuR3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRBZ0Z3MHlOakV3TURreU1qTTVNVFZhR0E4eVxuTVRJMk1Ea3hOVEl5TXpreE5Wb3dHekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEJaTUJNR1xuQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VIQTBJQUJEQ2ZScWw1d3pBT1hzeERFUGE5eWFMaWw5RVV3c0xQbzJmTVxuSXQzN01OOHVHdzhTMkVEOFgxZDVNVmsybDNJWWVXdm5kbGd2WVBjcURISE5pVTZFMmJDalV6QlJNQjBHQTFVZFxuRGdRV0JCUXVqcTdCQzU2bHo4TktIS2FLVTdRa1hTakhQVEFmQmdOVkhTTUVHREFXZ0JRdWpxN0JDNTZsejhOS1xuSEthS1U3UWtYU2pIUFRBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUJuTVxuRC94M1hHYmFVNkJGanplazZQRnpHYlQ1SjVlNTZSbm05UXN5cVZSNUFpRUFpWWFSVm1ITlhobTJxdVNMMngrWVxuc3JtbTJHUXFxeHBZdnBvOXNsSzRCV1k9XG4tLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tXG4ifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: malformed PEM block"
+    },
+    {
+      "name": "address backend, not DER",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuQUFBQVxuLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLVxuIn19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: certificate 0: x509: malformed certificate"
+    },
+    {
+      "name": "address backend, mismatched END",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuTUlJQmpUQ0NBVE9nQXdJQkFnSVVHbGsxWmZBYTBPMTVoZ1RxVGxMdjNDd1JXMVV3Q2dZSUtvWkl6ajBFQXdJd1xuR3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRBZ0Z3MHlOakV3TURreU1qTTVNVFZhR0E4eVxuTVRJMk1Ea3hOVEl5TXpreE5Wb3dHekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEJaTUJNR1xuQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VIQTBJQUJEQ2ZScWw1d3pBT1hzeERFUGE5eWFMaWw5RVV3c0xQbzJmTVxuSXQzN01OOHVHdzhTMkVEOFgxZDVNVmsybDNJWWVXdm5kbGd2WVBjcURISE5pVTZFMmJDalV6QlJNQjBHQTFVZFxuRGdRV0JCUXVqcTdCQzU2bHo4TktIS2FLVTdRa1hTakhQVEFmQmdOVkhTTUVHREFXZ0JRdWpxN0JDNTZsejhOS1xuSEthS1U3UWtYU2pIUFRBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUJuTVxuRC94M1hHYmFVNkJGanplazZQRnpHYlQ1SjVlNTZSbm05UXN5cVZSNUFpRUFpWWFSVm1ITlhobTJxdVNMMngrWVxuc3JtbTJHUXFxeHBZdnBvOXNsSzRCV1k9XG4tLS0tLUVORCBDRVJULS0tLS1cbiJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: malformed PEM block"
+    },
+    {
+      "name": "address backend, malformed then good",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuISFcbi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS1cbi0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuTUlJQmpUQ0NBVE9nQXdJQkFnSVVHbGsxWmZBYTBPMTVoZ1RxVGxMdjNDd1JXMVV3Q2dZSUtvWkl6ajBFQXdJd1xuR3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRBZ0Z3MHlOakV3TURreU1qTTVNVFZhR0E4eVxuTVRJMk1Ea3hOVEl5TXpreE5Wb3dHekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEJaTUJNR1xuQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VIQTBJQUJEQ2ZScWw1d3pBT1hzeERFUGE5eWFMaWw5RVV3c0xQbzJmTVxuSXQzN01OOHVHdzhTMkVEOFgxZDVNVmsybDNJWWVXdm5kbGd2WVBjcURISE5pVTZFMmJDalV6QlJNQjBHQTFVZFxuRGdRV0JCUXVqcTdCQzU2bHo4TktIS2FLVTdRa1hTakhQVEFmQmdOVkhTTUVHREFXZ0JRdWpxN0JDNTZsejhOS1xuSEthS1U3UWtYU2pIUFRBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUJuTVxuRC94M1hHYmFVNkJGanplazZQRnpHYlQ1SjVlNTZSbm05UXN5cVZSNUFpRUFpWWFSVm1ITlhobTJxdVNMMngrWVxuc3JtbTJHUXFxeHBZdnBvOXNsSzRCV1k9XG4tLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tXG4ifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend.ca: malformed PEM block"
+    },
+    {
+      "name": "address backend without ca",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsInNlcnZlck5hbWUiOiJhLmIifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend: must have exactly one of workload, or serverName with ca"
+    },
+    {
+      "name": "both backend forms",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyIsInNlcnZlck5hbWUiOiJhLmIiLCJjYSI6Ii0tLS0tQkVHSU4gQ0VSVElGSUNBVEUtLS0tLVxuTUlJQmpUQ0NBVE9nQXdJQkFnSVVHbGsxWmZBYTBPMTVoZ1RxVGxMdjNDd1JXMVV3Q2dZSUtvWkl6ajBFQXdJd1xuR3pFWk1CY0dBMVVFQXd3UVlXUnRhVzR0WTJFdVpYaGhiWEJzWlRBZ0Z3MHlOakV3TURreU1qTTVNVFZhR0E4eVxuTVRJMk1Ea3hOVEl5TXpreE5Wb3dHekVaTUJjR0ExVUVBd3dRWVdSdGFXNHRZMkV1WlhoaGJYQnNaVEJaTUJNR1xuQnlxR1NNNDlBZ0VHQ0NxR1NNNDlBd0VIQTBJQUJEQ2ZScWw1d3pBT1hzeERFUGE5eWFMaWw5RVV3c0xQbzJmTVxuSXQzN01OOHVHdzhTMkVEOFgxZDVNVmsybDNJWWVXdm5kbGd2WVBjcURISE5pVTZFMmJDalV6QlJNQjBHQTFVZFxuRGdRV0JCUXVqcTdCQzU2bHo4TktIS2FLVTdRa1hTakhQVEFmQmdOVkhTTUVHREFXZ0JRdWpxN0JDNTZsejhOS1xuSEthS1U3UWtYU2pIUFRBUEJnTlZIUk1CQWY4RUJUQURBUUgvTUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUJuTVxuRC94M1hHYmFVNkJGanplazZQRnpHYlQ1SjVlNTZSbm05UXN5cVZSNUFpRUFpWWFSVm1ITlhobTJxdVNMMngrWVxuc3JtbTJHUXFxeHBZdnBvOXNsSzRCV1k9XG4tLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tXG4ifX1dfX19",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend: must have exactly one of workload, or serverName with ca"
+    },
+    {
+      "name": "backend without address",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend: missing member \"address\""
+    },
+    {
+      "name": "backend with protocol",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwiaG9zdHMiOnsiYS5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii8iLCJtYXRjaCI6InByZWZpeCIsImJhY2tlbmQiOnsiYWRkcmVzcyI6Ing6MSIsIndvcmtsb2FkIjoidyIsInByb3RvY29sIjoiaHR0cCJ9fV19fX0=",
+      "valid": false,
+      "c8s_error": "route manifest: hosts[\"a.example\"].routes[0].backend: unknown member \"protocol\""
+    },
+    {
+      "name": "deeply nested unknown member",
+      "manifest_b64": "eyJzY2hlbWEiOiJjOHMucm91dGVzL3YxIiwicmV2aXNpb24iOjcsIm5vdEJlZm9yZSI6IjIwMjYtMDktMDFUMDA6MDA6MDBaIiwibWF4QWdlU2Vjb25kcyI6MzYwMCwieCI6W1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW11dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV0sImhvc3RzIjp7ImFwcC5leGFtcGxlIjp7InJvdXRlcyI6W3sicGF0aCI6Ii9hfiIsIm1hdGNoIjoicHJlZml4IiwiYmFja2VuZCI6eyJhZGRyZXNzIjoieDoxIiwid29ya2xvYWQiOiJ3In19XX19fQ==",
+      "valid": false,
+      "c8s_error": "route manifest: manifest: unknown member \"x\""
+    }
+  ],
+  "normalize": [
+    {
+      "raw": "/",
+      "ok": true,
+      "path": "/"
+    },
+    {
+      "raw": "/a/b",
+      "ok": true,
+      "path": "/a/b"
+    },
+    {
+      "raw": "/a/./b",
+      "ok": true,
+      "path": "/a/b"
+    },
+    {
+      "raw": "/a/../b",
+      "ok": true,
+      "path": "/b"
+    },
+    {
+      "raw": "/a/b/..",
+      "ok": true,
+      "path": "/a/"
+    },
+    {
+      "raw": "/a/.",
+      "ok": true,
+      "path": "/a/"
+    },
+    {
+      "raw": "/..",
+      "ok": false
+    },
+    {
+      "raw": "/a/../..",
+      "ok": false
+    },
+    {
+      "raw": "/a//b",
+      "ok": false
+    },
+    {
+      "raw": "/a/",
+      "ok": true,
+      "path": "/a/"
+    },
+    {
+      "raw": "//",
+      "ok": false
+    },
+    {
+      "raw": "/%41%7e",
+      "ok": true,
+      "path": "/A~"
+    },
+    {
+      "raw": "/%2f",
+      "ok": false
+    },
+    {
+      "raw": "/%2F",
+      "ok": false
+    },
+    {
+      "raw": "/%3f",
+      "ok": true,
+      "path": "/%3F"
+    },
+    {
+      "raw": "/%e9",
+      "ok": true,
+      "path": "/%E9"
+    },
+    {
+      "raw": "/%zz",
+      "ok": false
+    },
+    {
+      "raw": "/%4",
+      "ok": false
+    },
+    {
+      "raw": "a",
+      "ok": false
+    },
+    {
+      "raw": "",
+      "ok": false
+    },
+    {
+      "raw": "/a b",
+      "ok": false
+    },
+    {
+      "raw": "/a?b",
+      "ok": false
+    },
+    {
+      "raw": "/é",
+      "ok": false
+    },
+    {
+      "raw": "/%2e%2e/a",
+      "ok": false
+    },
+    {
+      "raw": "/a/%2e%2E",
+      "ok": true,
+      "path": "/"
+    },
+    {
+      "raw": "/.%2e",
+      "ok": false
+    },
+    {
+      "raw": "/a;b=c",
+      "ok": true,
+      "path": "/a;b=c"
+    }
+  ],
+  "select": {
+    "manifest": "{\"schema\":\"c8s.routes/v1\",\"revision\":7,\"notBefore\":\"2026-09-01T00:00:00Z\",\"maxAgeSeconds\":3600,\"hosts\":{\"app.example\":{\"routes\":[{\"path\":\"/\",\"match\":\"prefix\",\"backend\":{\"address\":\"x:1\",\"workload\":\"w\"}},{\"path\":\"/admin\",\"match\":\"prefix\",\"backend\":{\"address\":\"x:1\",\"workload\":\"w\"}},{\"path\":\"/admin\",\"match\":\"exact\",\"backend\":{\"address\":\"x:1\",\"workload\":\"w\"}},{\"path\":\"/api/\",\"match\":\"prefix\",\"backend\":{\"address\":\"x:1\",\"workload\":\"w\"}},{\"path\":\"/x/y\",\"match\":\"exact\",\"backend\":{\"address\":\"x:1\",\"workload\":\"w\"}}]},\"other.example\":{\"routes\":[{\"path\":\"/z\",\"match\":\"prefix\",\"backend\":{\"address\":\"x:1\",\"workload\":\"w\"}}]}}}",
+    "cases": [
+      {
+        "host": "app.example",
+        "target": "/",
+        "route": "/|prefix"
+      },
+      {
+        "host": "APP.Example",
+        "target": "/admin",
+        "route": "/admin|exact"
+      },
+      {
+        "host": "app.example:8443",
+        "target": "/admin/users",
+        "route": "/admin|prefix"
+      },
+      {
+        "host": "app.example",
+        "target": "/administrator",
+        "route": "/|prefix"
+      },
+      {
+        "host": "app.example",
+        "target": "/api",
+        "route": "/|prefix"
+      },
+      {
+        "host": "app.example",
+        "target": "/api/",
+        "route": "/api/|prefix"
+      },
+      {
+        "host": "app.example",
+        "target": "/api/v1",
+        "route": "/api/|prefix"
+      },
+      {
+        "host": "app.example",
+        "target": "/x/y",
+        "route": "/x/y|exact"
+      },
+      {
+        "host": "app.example",
+        "target": "/x/y/",
+        "route": "/|prefix"
+      },
+      {
+        "host": "app.example",
+        "target": "/x/y?q=1",
+        "route": "/x/y|exact"
+      },
+      {
+        "host": "app.example",
+        "target": "/x/./y",
+        "route": "/x/y|exact"
+      },
+      {
+        "host": "app.example",
+        "target": "/admin/../x/y",
+        "route": "/x/y|exact"
+      },
+      {
+        "host": "app.example",
+        "target": "/%61dmin",
+        "route": "/admin|exact"
+      },
+      {
+        "host": "app.example.",
+        "target": "/",
+        "route": null
+      },
+      {
+        "host": "other.example",
+        "target": "/",
+        "route": null
+      },
+      {
+        "host": "other.example",
+        "target": "/z/a",
+        "route": "/z|prefix"
+      },
+      {
+        "host": "other.example",
+        "target": "/za",
+        "route": null
+      },
+      {
+        "host": "missing.example",
+        "target": "/",
+        "route": null
+      },
+      {
+        "host": "app.example",
+        "target": "/a//b",
+        "route": null
+      },
+      {
+        "host": "[::1]:80",
+        "target": "/",
+        "route": null
+      },
+      {
+        "host": "app.example",
+        "target": "*",
+        "route": null
+      }
+    ]
+  }
+}

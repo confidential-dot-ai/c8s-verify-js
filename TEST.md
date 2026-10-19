@@ -42,8 +42,21 @@ by the client; only their *origin* is faked.
 The expected launch measurement and these settings are centralised in
 [`demo/config.ts`](demo/config.ts) (`DEMO_MEASUREMENTS`, `DEMO_GENERATION`,
 `DEMO_PLATFORM`, `DEMO_REQUIRE_FRESHNESS`) and reused below so the two repos agree.
+`DEMO_ROUTE_DIGEST` is the JS mock LB's only: a real router commits the digest of the
+manifest it applied, so pin the output of `c8s routes digest` against it instead.
 
-## 1. Build the Go sidecar
+## Pending: run against the Go sidecar
+
+> **Pending until `c8s` ships a route fixture. Do not run these steps.** A `c8s` build
+> whose evidence binds the route digest refuses to start `cds-attest` without `--cds-url`
+> (a live CDS holding a route manifest), and answers attest-pq with HTTP 503
+> `routes_unavailable` until it has applied one. The fixture-only commands below run
+> only against an earlier `c8s` build, which this client no longer verifies. Until then,
+> use the JS mock LB (`npm test`, `npm run demo`) offline, and a real cluster for the
+> cross-repo path. The steps, expected output and troubleshooting are kept for when the
+> fixture lands.
+
+### 1. Build the Go sidecar
 
 From the `c8s` repo:
 
@@ -52,7 +65,7 @@ cd ../c8s
 go build -o build/c8s ./cmd/c8s      # or: make build
 ```
 
-## 2. The CDS certificate chain (demo stand-in)
+### 2. The CDS certificate chain (demo stand-in)
 
 > In a real cluster you never touch these files: the CDS issues the LB leaf and get-cert
 > provisions the leaf, key, and CA the sidecar reads per request. Offline there is no CDS,
@@ -63,7 +76,7 @@ The served `cds_cert_pem` is the LB leaf followed by the mesh CA; the sidecar as
 from `--mesh-identity-cert-file` and `--mesh-identity-ca-file`, and signs each session
 transcript with `--mesh-identity-key-file` to prove possession of the leaf key.
 
-## 3. Run the real Go server
+### 3. Run the real Go server
 
 Still in `c8s`, point it at this repo's recorded fixture and the fixture chain. With no
 `--upstream` it uses the built-in echo backend, which is all the demo needs.
@@ -101,7 +114,7 @@ Leave it running. The endpoints it now serves:
 The retired `GET /attestation` and `POST /handshake` paths stay registered only to return
 an explicit `400` — no alias, no downgrade.
 
-## 4. Drive it with the JS client
+### 4. Drive it with the JS client
 
 From this repo, run a small Node client against the Go server. (Node ≥ 20; no install
 needed beyond `npm install`, which fetches `mlkem-wasm`.)
@@ -132,6 +145,7 @@ const session = await client.connect();   // one attest-pq round trip: attest + 
 console.log("platform   :", session.attestation.platform);
 console.log("measurement:", session.attestation.measurement);
 console.log("cert CN    :", session.attestation.cert.subjectCN);
+console.log("route      :", session.attestation.routeDigest);
 
 const res = await session.fetch("/v1/echo", {
   method: "POST",
@@ -148,6 +162,7 @@ Expected output:
 platform   : snp
 measurement: d9912ba396ce409c2947841d93a5076b6839b898c22b4aae05edb3b2b058a99927f8cf9a4f8617ee695deb14795496c8
 cert CN    : lb.demo.c8s.local
+route      : <64 hex: SHA-256 of the route manifest the router applied>
 status     : 200
 body       : LB enclave received 31 bytes over the over-encrypted channel for POST /v1/echo: "hi from the JS client over CBOR"
 ```
@@ -156,7 +171,7 @@ The echo coming back through `session.fetch` means: the JS client's CBOR record 
 were decrypted and parsed by the Go enclave, and the Go response was re-sealed and decoded
 by JS — i.e. the two implementations are wire-compatible over the CBOR tunnel.
 
-## 5. (Optional) Forward to a real backend instead of echo
+### 5. (Optional) Forward to a real backend instead of echo
 
 To prove the tunnel actually proxies HTTP, start any plain HTTP server and point the
 sidecar at it with `--upstream`:
@@ -182,7 +197,7 @@ its raTLS mesh). For an `https://` upstream, add `--upstream-ca`, `--upstream-ce
 `--upstream-key`, and `--upstream-server-name` (CDS-issued client cert + mesh-CA
 verification).
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |
@@ -193,10 +208,22 @@ verification).
 | one of `--attestation-api-url` or `--evidence-fixture` is required | The sidecar refuses to start without an evidence source; pass `--evidence-fixture` for the demo. |
 | `channel_error` on `session.fetch` | Go and JS on **different** tunnel wire formats. Both must be on the CBOR tunnel (this client + a `c8s` build that uses CBOR records — see `PROTOCOL.md` §"Over-encrypted application tunnel"). |
 
+## Troubleshoot route evidence on a real cluster
+
+| Symptom | Cause / fix |
+| --- | --- |
+| `attestation endpoint returned HTTP 503` | The router has no fresh route manifest (`routes_unavailable` or `routes_stale`); check its `--cds-url`. |
+| `identity_binding` with `details.field` `route_digest`, or a failed proof-of-possession signature | Go and JS on different transcript layouts: both must bind the route digest. |
+| `route_denied` | The router applied a manifest outside your `routeDigests` pin set, or other than the one it publishes even after a re-fetch; during a rollout, connect again. |
+| `route_manifest_unavailable` with `details.status` 404 | Route publication is off on the router, or it has applied no manifest yet. |
+| `route_manifest_invalid` | The publication body is not a `{"manifest", "token"}` envelope, or exceeds 4 MiB. |
+| `route_unmatched` | The attested manifest routes no backend for the request's `Host` and path; connect again to attest the current manifest. |
+| `route_manifest_denied` | With `details.reason` `below_floor`: a router replica still serves a revision below `routeFloor` (the client already retried once), or the manifest was rolled back. With `revision_conflict`: the accepted revision now has another digest. A message naming the alg means the token was signed with an algorithm that does not match your key's curve, which c8s accepts; re-sign it with the matching one. Otherwise the token does not verify under your `routeOperatorKeys` on the matching curve, its claims do not cover this manifest, or the manifest fails the `c8s.routes/v1` schema. |
+
 ## Browser variant
 
 To run the verifier visually in a browser instead of Node, the self-contained path is the
 bundled JS mock LB (`npm run demo`, served on `http://localhost:8799`) — see the README.
 Pointing the in-browser demo at the Go server additionally requires serving this repo's
-static assets and enabling CORS on the sidecar, so the Node client above is the simplest
-way to exercise the *cross-repo* path.
+static assets and enabling CORS on the sidecar, so the Node client above is the intended
+way to exercise the *cross-repo* path once it is no longer pending.

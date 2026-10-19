@@ -5,7 +5,7 @@
 
 import { sign } from "node:crypto";
 
-import { bytesToBase64Url } from "../src/base64.js";
+import { bytesToBase64Url, bytesToHex } from "../src/base64.js";
 import {
   certificateHashBase64Url,
   IDENTITY_PROOF_ALGORITHM,
@@ -17,6 +17,7 @@ import {
 export interface IdentityBundleFields {
   version: string;
   front_door_mode: string;
+  route_digest: string;
   identity_proof: MeshIdentityProof;
 }
 
@@ -39,6 +40,7 @@ export async function mintIdentityProof(
   nonce: Uint8Array,
   leafDer: Uint8Array,
   caDer: Uint8Array,
+  routeDigest: Uint8Array,
   leafKeyPem: string,
 ): Promise<MintedIdentityProof> {
   const transcript = await identityTranscriptHash(
@@ -49,6 +51,7 @@ export async function mintIdentityProof(
     nonce,
     leafDer,
     caDer,
+    routeDigest,
   );
   const proof: MeshIdentityProof = {
     algorithm: IDENTITY_PROOF_ALGORITHM,
@@ -67,6 +70,7 @@ export async function mintIdentityProof(
     bundleFields: {
       version: BINDING_ATTEST_PQ,
       front_door_mode: frontDoorMode,
+      route_digest: bytesToHex(routeDigest),
       identity_proof: proof,
     },
   };

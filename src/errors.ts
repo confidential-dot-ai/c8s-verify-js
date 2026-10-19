@@ -67,6 +67,23 @@ export type C8sErrorCode =
   // bytes: CDS decided the match under a different policy document than the
   // one the caller holds.
   | "allowlist_denied"
+  // The response binds a route digest outside the pinned routeDigests set,
+  // or other than the digest of the operator-signed manifest the router
+  // publishes: the router applied a manifest other than the ones the caller
+  // accepts. details: expected (hex digests accepted), got (hex digest bound).
+  | "route_denied"
+  // Operator-key route checks (routeOperatorKeys). "_unavailable": the route
+  // publication could not be fetched (network, 404 when publication is off,
+  // any other status). "_invalid": the body exceeds 4 MiB or is not a
+  // well-formed envelope. "_denied": the envelope does not verify under the
+  // operator keys, or the rollback floor refuses the attested manifest
+  // (details.reason "below_floor" or "revision_conflict").
+  | "route_manifest_unavailable"
+  | "route_manifest_invalid"
+  | "route_manifest_denied"
+  // Session.fetch refused a request the attested manifest routes to no
+  // backend; the router would answer it 404.
+  | "route_unmatched"
   | "unsupported";
 
 export interface C8sErrorOptions {
