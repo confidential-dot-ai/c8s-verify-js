@@ -101,10 +101,6 @@ up at the next session (specific-cluster clients reject until re-pinned, by desi
 
 All under the `/.well-known/c8s/` namespace.
 
-### `GET /.well-known/c8s/jwks.json`  *(optional)*
-Returns the CDS EAR-signing JWKS (ES256, `kid` = RFC 7638 thumbprint), republished from
-the CDS, for the optional EAR-verification path.
-
 ### `POST /.well-known/c8s/attest-pq`
 
 The client-first attestation + key-exchange request, `application/json`:
@@ -155,7 +151,6 @@ Response is `application/json`:
   },
   "cds_cert_pem": "-----BEGIN CERTIFICATE-----\n...", // exact mesh leaf + issuing CA
   "front_door_mode": "cds" | "webpki" | "acme",      // credential model terminating public TLS, committed by the transcript
-  "ear": "<optional CDS-issued EAR JWT>",             // defined but not yet populated by the LB
   "xwing_ek": "<echoed b64url 1216-byte client encapsulation key>",
   "xwing_ct": "<b64url 1120-byte X-Wing ciphertext>",
   "session_id": "<b64url 16-byte session identifier>",
