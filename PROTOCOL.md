@@ -101,10 +101,6 @@ up at the next session (specific-cluster clients reject until re-pinned, by desi
 
 All under the `/.well-known/c8s/` namespace.
 
-### `GET /.well-known/c8s/jwks.json`  *(optional)*
-Returns the CDS EAR-signing JWKS (ES256, `kid` = RFC 7638 thumbprint), republished from
-the CDS, for the optional EAR-verification path.
-
 ### `POST /.well-known/c8s/attest-pq`
 
 The client-first attestation + key-exchange request, `application/json`:
