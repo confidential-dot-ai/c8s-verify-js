@@ -300,7 +300,6 @@ export interface AttestationBundle {
   cds_cert_pem: string;
   /** Credential model terminating the front door ("cds" | "webpki" | "acme"), committed by the transcript. */
   front_door_mode: string;
-  ear?: string;
   /** Echo of the client's X-Wing encapsulation key (base64url, 1216 bytes). */
   xwing_ek: string;
   /** The server's X-Wing ciphertext (base64url, 1120 bytes). */

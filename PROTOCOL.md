@@ -151,7 +151,6 @@ Response is `application/json`:
   },
   "cds_cert_pem": "-----BEGIN CERTIFICATE-----\n...", // exact mesh leaf + issuing CA
   "front_door_mode": "cds" | "webpki" | "acme",      // credential model terminating public TLS, committed by the transcript
-  "ear": "<optional CDS-issued EAR JWT>",             // defined but not yet populated by the LB
   "xwing_ek": "<echoed b64url 1216-byte client encapsulation key>",
   "xwing_ct": "<b64url 1120-byte X-Wing ciphertext>",
   "session_id": "<b64url 16-byte session identifier>",
