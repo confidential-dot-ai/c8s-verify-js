@@ -251,9 +251,9 @@ match, the proof-of-possession signature, and the key schedule (whose salt is
 `route_digest` is the 32 bytes the bundle's hex `route_digest` decodes to: the
 SHA-256 of the route manifest the router had applied when it admitted the
 session. The client recomputes the transcript with the bundle's value, so a
-forged value fails the `report_data` match and the proof signature. The digest
-identifies the manifest at admission; a manifest applied later routes the
-session's later requests without new evidence. A client that pins
+forged value fails the `report_data` match and the proof signature. The session
+routes by this manifest alone; a manifest applied later ends it (see **Session
+binding**). A client that pins
 `routeDigests` refuses any other digest with `route_denied`.
 
 **Operator-signed routes.** A client with `routeOperatorKeys` instead checks
@@ -730,6 +730,16 @@ per-request re-attestation. Two independent limits retire it:
 
 A tunnel request on an unknown or expired session returns HTTP 401
 `channel_error`, upon which the client establishes a fresh session.
+
+**Session binding.** A session routes only by the route digest its transcript
+bound and by the allowlist digest stamped on the router's mesh leaf when it was
+established. Once the router applies another manifest, or its leaf renews under
+another allowlist digest, it refuses the session's next tunnel request with HTTP
+503 and the JSON error envelope's `error` `route_digest_changed` or
+`router_digest_changed`, forwards nothing, and ends the session: later requests
+get HTTP 401 `channel_error`. The client establishes a fresh session. The
+envelope is outside the sealed channel, so a client treats its code only as a
+reason to establish a new session.
 
 **Termination + forwarding.** The LB (the `c8s cds-attest` sidecar) opens the record,
 reconstructs the HTTP request, and forwards it **as plaintext** to the backend — over
