@@ -578,6 +578,9 @@ export class Session {
    * form (start with `/`) and the headers may carry at most one `Host`. With
    * `routeOperatorKeys`, a request the attested manifest routes to no backend
    * is refused (`route_unmatched`); connect again to attest a newer manifest.
+   *
+   * A refused tunnel request fails `channel_error` with `details.status` and,
+   * when the router's error envelope names one, `details.code`.
    */
   async fetch(path: string, init: RequestInit = {}): Promise<TunnelResponse> {
     if (typeof path !== "string" || !path.startsWith("/")) {
@@ -619,7 +622,9 @@ export class Session {
       body: cborEncode({ seq: reqRecord.seq, ct: reqRecord.ct }),
     });
     if (!res.ok) {
-      fail("channel_error", `over-encrypted request returned HTTP ${res.status}`);
+      fail("channel_error", `over-encrypted request returned HTTP ${res.status}`, {
+        details: await refusalDetails(res),
+      });
     }
     const respRecord = cborDecode(new Uint8Array(await res.arrayBuffer())) as unknown as WireRecord;
     const respEnvelope = cborDecode(
@@ -684,6 +689,57 @@ function withHost(pairs: [string, string][], host: string): [string, string][] {
   }
   if (hosts === 1) return pairs;
   return [...pairs, ["Host", host]];
+}
+
+const MAX_ERROR_BODY_BYTES = 4096;
+const ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** The status of a refused tunnel request, and the router's code when it names one. */
+async function refusalDetails(res: Response): Promise<{ status: number; code?: string }> {
+  const code = await routerErrorCode(res);
+  if (code === undefined) {
+    return { status: res.status };
+  }
+  return { status: res.status, code };
+}
+
+/**
+ * The `error` code of the router's JSON error envelope, or undefined when the
+ * body is not one. The envelope is outside the sealed channel, so the code is
+ * advice: it can make the caller connect again, never trust anything.
+ */
+async function routerErrorCode(res: Response): Promise<string | undefined> {
+  const envelope = await readJsonCapped(res, MAX_ERROR_BODY_BYTES);
+  if (!isErrorEnvelope(envelope)) {
+    return undefined;
+  }
+  if (!isRouterErrorCode(envelope.error)) {
+    return undefined;
+  }
+  return envelope.error;
+}
+
+/** The JSON value of a body of at most max bytes; undefined when larger, unreadable or not JSON. */
+async function readJsonCapped(res: Response, max: number): Promise<unknown> {
+  try {
+    const body = await readCapped(res, max);
+    if (body === undefined) {
+      return undefined;
+    }
+    return JSON.parse(bytesToUtf8(body));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether value has the router's error envelope shape: an object with an `error` member. */
+function isErrorEnvelope(value: unknown): value is { error: unknown } {
+  return typeof value === "object" && value !== null && "error" in value;
+}
+
+/** Whether value is a code in the router's grammar: a short snake_case token. */
+function isRouterErrorCode(value: unknown): value is string {
+  return typeof value === "string" && ERROR_CODE.test(value);
 }
 
 /** Read a response body, or undefined once it exceeds max bytes. */
