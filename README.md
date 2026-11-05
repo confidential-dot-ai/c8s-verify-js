@@ -212,8 +212,9 @@ AES-256-GCM channel and its LB session id, and every `session.fetch` reuses
 them. The LB keeps the session for its `--session-ttl` idle window (default 5
 minutes, refreshed on use) and retires it unconditionally at
 `--session-max-age` (default 5 hours); past either limit a tunnel request
-fails with a typed `channel_error` (HTTP 401), and the embedding app re-runs
-`client.connect()` to attest a fresh session. `session.exporter` exposes the
+fails with a typed `channel_error` (`details.status` 401), and the embedding app
+re-runs `client.connect()` to attest a fresh session. The router also ends a
+session when its routes change (see **Route digest**). `session.exporter` exposes the
 32-byte channel-binding exporter (also forwarded to the backend as the
 `X-C8s-Exporter` header), so an application can bind bearer tokens to this
 exact attested channel.
@@ -232,10 +233,13 @@ had applied when it admitted the session.
 Pin `routeDigests` to accept only the manifests you know; a different digest
 fails with `route_denied`, naming the expected and received digests. To roll a
 manifest over without failing, pin the old and the new digest together, then
-drop the old one once every router replica has applied the new one. The
-digest identifies the manifest at admission only: a manifest the router
-applies later routes the session's later requests without new evidence, so
-call `client.connect()` again when you need a fresh bound.
+drop the old one once every router replica has applied the new one. A session
+routes only by the manifest it attested and by the router leaf's allowlist
+digest at that moment. Once the router applies another manifest, or renews its
+leaf under another allowlist, it refuses the session's next request without
+forwarding it and ends the session: `session.fetch` fails with `channel_error`,
+`details.status` 503 and `details.code` `route_digest_changed` or
+`router_digest_changed`. Call `client.connect()` again.
 
 **Operator-signed routes.** To accept any manifest an operator signed instead
 of pinning digests, pass `routeOperatorKeys`: a PEM bundle of the operator

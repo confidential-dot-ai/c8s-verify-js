@@ -248,6 +248,101 @@ test("fetch refuses a path that is not in origin form before sealing", async () 
   assert.equal(sent.length, 0);
 });
 
+/** A Session whose tunnel answers every request with `refusal`. */
+async function refusedSession(refusal: () => Response): Promise<Session> {
+  const secret = new Uint8Array(32).fill(0x07);
+  const channel = await deriveChannel("client", secret, new Uint8Array(48), new Uint8Array(16));
+  return new Session({
+    baseUrl: "https://lb.test",
+    prefix: "/.well-known/c8s",
+    fetch: () => {
+      return Promise.resolve(refusal());
+    },
+    channel,
+    sessionId: "session",
+    attestation: {} as AttestationResult,
+  });
+}
+
+/** A refusal carrying the router's JSON error envelope with `error`. */
+function envelopeRefusal(status: number, error: unknown): () => Response {
+  return () => {
+    return new Response(JSON.stringify({ error, message: "attest again" }), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  };
+}
+
+/** The error `session.fetch(path)` fails with, or undefined when it succeeds. */
+async function fetchError(session: Session, path: string): Promise<unknown> {
+  try {
+    await session.fetch(path);
+  } catch (e) {
+    return e;
+  }
+  return undefined;
+}
+
+test("a refused tunnel request reports the status and the router's error code", async () => {
+  const cases = [
+    {
+      name: "route change ends the session",
+      refusal: envelopeRefusal(503, "route_digest_changed"),
+      details: { status: 503, code: "route_digest_changed" },
+    },
+    {
+      name: "router leaf renewed under another allowlist",
+      refusal: envelopeRefusal(503, "router_digest_changed"),
+      details: { status: 503, code: "router_digest_changed" },
+    },
+    {
+      name: "a body that is not the envelope",
+      refusal: () => {
+        return new Response("<html>502 Bad Gateway</html>", { status: 502 });
+      },
+      details: { status: 502 },
+    },
+    {
+      name: "a code outside the router's grammar",
+      refusal: envelopeRefusal(503, "Route Digest Changed!"),
+      details: { status: 503 },
+    },
+    {
+      name: "a code that is not a string",
+      refusal: envelopeRefusal(503, 7),
+      details: { status: 503 },
+    },
+    {
+      name: "a body over the 4 KiB cap",
+      refusal: () => {
+        const oversized = JSON.stringify({ error: "route_digest_changed", pad: "x".repeat(5000) });
+        return new Response(oversized, { status: 503 });
+      },
+      details: { status: 503 },
+    },
+    {
+      name: "a body that fails mid-read",
+      refusal: () => {
+        const failing = new ReadableStream({
+          start(controller) {
+            controller.error(new Error("connection reset"));
+          },
+        });
+        return new Response(failing, { status: 503 });
+      },
+      details: { status: 503 },
+    },
+  ];
+  for (const { name, refusal, details } of cases) {
+    const session = await refusedSession(refusal);
+    const error = await fetchError(session, "/v1/chat");
+    assert.ok(error instanceof C8sVerifyError, name);
+    assert.equal(error.code, "channel_error", name);
+    assert.deepEqual(error.details, details, name);
+  }
+});
+
 test("a base URL with no host to resolve against is refused at construction", () => {
   for (const baseUrl of ["/lb", "/", "localhost:8080", "lb.test:8443", "file:///x"]) {
     assert.throws(
